@@ -156,6 +156,12 @@ wetRead() {
 		return
 	}
 
+	; Choose paste strategy before any window focus changes
+	pasteMode := PromptWetReadMode()
+	if (pasteMode = "cancel") {
+		return
+	}
+
 	; Read current report for attending selection
 	try {
 		NuanceEl := UIA.ElementFromHandle("PowerScribe 360 | Reporting ahk_exe Nuance.PowerScribe360.exe")
@@ -183,6 +189,7 @@ wetRead() {
 	}
 
 	sticky := UIA.ElementFromHandle("Sticky Notes")
+	try sticky.SetFocus()
 
 	; Helper to ensure the text field is focused
 	focusNoteField(field) {
@@ -195,9 +202,14 @@ wetRead() {
 	}
 
 	; Get note input field
-	try {
-		noteField := sticky.ElementFromPath("YY0/")
-	} catch {
+	noteField := ""
+	try noteField := sticky.ElementFromPath("YY0/")
+	if (!IsSet(noteField) || noteField = "" || !noteField) {
+		; Try another attempt after slight delay
+		Sleep(200)
+		try noteField := sticky.ElementFromPath("YY0/")
+	}
+	if (!noteField) {
 		MsgBox("Could not locate Sticky Notes text field.")
 		return
 	}
@@ -235,6 +247,7 @@ wetRead() {
 				try {
 					hwnd := noteField.NativeWindowHandle
 					if hwnd {
+						ControlFocus("ahk_id " hwnd)
 						ControlSetText("ahk_id " hwnd, clipText)
 					} else {
 						ControlSetText("", clipText, "Sticky Notes")
