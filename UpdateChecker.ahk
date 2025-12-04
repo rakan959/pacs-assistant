@@ -28,7 +28,7 @@ class UpdateChecker {
         ; Clear any existing timer
         if this.updateTimer {
             SetTimer(this.updateTimer, 0)
-            this.refreshTimer := 0
+            this.updateTimer := 0
         }
         
         ; Set up new timer if auto-update is enabled

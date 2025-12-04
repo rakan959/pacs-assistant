@@ -6,6 +6,8 @@ class ProfileManager {
     static currentProfile := ""
     static defaultProfile := ""
     static availableFunctions := Map()  ; Now only stores built-in functions
+    static configPath := "config.ini"
+    static profilesPath := "profiles"
 
     static __New() {
         ; Initialize available functions from PACSCommands
@@ -13,13 +15,15 @@ class ProfileManager {
 
         ; Load default profile setting from config file
         try {
-            this.defaultProfile := IniRead("config.ini", "Settings", "DefaultProfile", "")
+            this.defaultProfile := IniRead(this.configPath, "Settings", "DefaultProfile", "")
         }
     }
 
     static LoadProfiles() {
+        ; Always refresh the in-memory profiles from disk
+        this.profiles := Map()
         try {
-            Loop Files "profiles/*.ini" {
+            Loop Files this.profilesPath "\*.ini" {
                 profileName := StrReplace(A_LoopFileName, ".ini")
                 this.profiles[profileName] := this.LoadProfile(A_LoopFilePath)
             }
@@ -55,10 +59,10 @@ class ProfileManager {
     }
 
     static SaveProfile(name, binds, customFuncs := 0) {
-        if !DirExist("profiles")
-            DirCreate("profiles")
+        if !DirExist(this.profilesPath)
+            DirCreate(this.profilesPath)
         
-        path := "profiles/" name ".ini"
+        path := this.profilesPath "/" name ".ini"
         
         ; Save the ordered list of functions
         functionList := ""
@@ -86,12 +90,12 @@ class ProfileManager {
     }
 
     static SetDefaultProfile(name) {
-        if !DirExist("profiles")
-            DirCreate("profiles")
+        if !DirExist(this.profilesPath)
+            DirCreate(this.profilesPath)
         
         this.defaultProfile := name
         try {
-            IniWrite(name, "config.ini", "Settings", "DefaultProfile")
+            IniWrite(name, this.configPath, "Settings", "DefaultProfile")
             return true
         } catch {
             return false
@@ -104,13 +108,13 @@ class ProfileManager {
         }
         
         try {
-            FileDelete("profiles/" name ".ini")
+            FileDelete(this.profilesPath "/" name ".ini")
             this.profiles.Delete(name)
             
             ; If we deleted the default profile, clear it
             if (this.defaultProfile = name) {
                 this.defaultProfile := ""
-                IniDelete("config.ini", "Settings", "DefaultProfile")
+                IniDelete(this.configPath, "Settings", "DefaultProfile")
             }
             return true
         } catch {
@@ -131,7 +135,7 @@ class ProfileManager {
             customFuncs := this.profiles[oldName].customFuncs
             
             ; Delete old profile
-            FileDelete("profiles/" oldName ".ini")
+            FileDelete(this.profilesPath "/" oldName ".ini")
             this.profiles.Delete(oldName)
             
             ; Create new profile
