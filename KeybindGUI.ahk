@@ -316,7 +316,7 @@ class KeybindGUI {
     ApplyBinds() {
         HotkeyManager.DisableAllHotkeys()
         currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
-        if (!IsSet(currentProfile.scopes))
+        if (!currentProfile.HasProp("scopes"))
             currentProfile.scopes := Map()
         failed := []
 

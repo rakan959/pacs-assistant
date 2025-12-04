@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include ../HotkeyManager.ahk
+#Include ../Settings.ahk
 #Include TestRunner.ahk
 
 class HotkeyManagerTest {
@@ -8,7 +9,9 @@ class HotkeyManagerTest {
         "TestReassignUpdatesBinding",
         "TestUnassignClearsBinding",
         "TestRejectsMissingFunction",
-        "TestDisableAllHotkeys"
+        "TestDisableAllHotkeys",
+        "TestScopeRespectsSettings",
+        "TestScopeOverrideGlobal"
     ]
     
     Setup() {
@@ -24,6 +27,12 @@ class HotkeyManagerTest {
             "ActionOne", this.func1,
             "ActionTwo", this.func2
         )
+
+        ; Isolate settings
+        this.originalSettings := Settings.settingsFile
+        this.tempSettings := A_Temp "\hk_scope_test_" A_TickCount ".ini"
+        Settings.settingsFile := this.tempSettings
+        Settings.SaveAllSettings()
     }
     
     TestRegistersAndStoresHotkeys() {
@@ -55,10 +64,24 @@ class HotkeyManagerTest {
         HotkeyManager.DisableAllHotkeys()
         Assert.Equal(0, HotkeyManager.activeHotkeys.Count)
     }
+
+    TestScopeRespectsSettings() {
+        Settings.Set("RestrictHotkeysByActiveWindow", true)
+        Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^a"))
+        Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
+    }
+
+    TestScopeOverrideGlobal() {
+        Settings.Set("RestrictHotkeysByActiveWindow", true)
+        Assert.True(HotkeyManager.RegisterHotkey("ActionTwo", "^b", "global"))
+        Assert.True(HotkeyManager.activeHotkeys.Has("ActionTwo"))
+    }
     
     Teardown() {
         HotkeyManager.DisableAllHotkeys()
         HotkeyManager.activeHotkeys.Clear()
         HotkeyManager.hotkeyFunctions.Clear()
+        try FileDelete(Settings.settingsFile)
+        Settings.settingsFile := this.originalSettings
     }
 }

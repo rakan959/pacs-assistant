@@ -9,7 +9,8 @@ class ProfileManagerTest {
         "TestDefaultProfileTracking",
         "TestProfileRename",
         "TestProfileDeletionRules",
-        "TestCustomFunctionPersistence"
+        "TestCustomFunctionPersistence",
+        "TestScopePersistence"
     ]
 
     Setup() {
@@ -92,6 +93,22 @@ class ProfileManagerTest {
         loaded := ProfileManager.profiles["CustomProfile"].customFuncs["Custom: Test"]
         Assert.Equal("{Tab}", loaded.keys)
         Assert.Equal("TestWindow", loaded.window)
+    }
+
+    TestScopePersistence() {
+        profile := {
+            binds: Map("Toggle Dictation", "^d"),
+            scopes: Map("Toggle Dictation", "restricted"),
+            customFuncs: Map()
+        }
+        
+        ProfileManager.profiles["ScopedProfile"] := profile
+        ProfileManager.SaveProfile("ScopedProfile", profile.binds, profile.customFuncs, profile.scopes)
+        ProfileManager.LoadProfiles()
+        
+        Assert.True(ProfileManager.profiles.Has("ScopedProfile"))
+        loadedScope := ProfileManager.profiles["ScopedProfile"].scopes["Toggle Dictation"]
+        Assert.Equal("restricted", loadedScope)
     }
     
     Teardown() {
