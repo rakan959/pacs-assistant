@@ -183,7 +183,8 @@ class UpdateChecker {
                 }
             }
         } catch as err {
-            MsgBox("Error checking for updates: " err.Message, "Update Check Failed", "Icon!")
+            ; Log quietly to avoid interrupting the user
+            OutputDebug("Update check failed: " err.Message)
         }
         return { hasUpdate: false }
     }

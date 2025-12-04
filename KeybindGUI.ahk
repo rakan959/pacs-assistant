@@ -12,8 +12,10 @@ class KeybindGUI {
     static listeningControl := ""
 
     __New() {
-        ; Check for updates when starting
-        UpdateChecker.ShowUpdateDialog()
+        ; Check for updates when starting (respect user setting)
+        if (Settings.Get("AutoUpdate")) {
+            UpdateChecker.ShowUpdateDialog()
+        }
         
         ProfileManager.LoadProfiles()
         if ProfileManager.profiles.Count = 0 {

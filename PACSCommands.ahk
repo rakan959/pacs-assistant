@@ -207,7 +207,13 @@ wetRead() {
 		clipText := RegExReplace(clipText, "(\r)?\n", "`r`n")
 	}
 
-	; Clear and paste with verification using clipboard (faster and preserves order)
+	; Choose paste strategy for debugging/reliability
+	pasteMode := PromptWetReadMode()
+	if (pasteMode = "cancel") {
+		return
+	}
+
+	; Clear and paste with verification using selected strategy
 	focusNoteField(noteField)
 	Send("^a")
 	Send("{Backspace}")
@@ -220,7 +226,21 @@ wetRead() {
 
 	loop 3 {
 		focusNoteField(noteField)
-		Send("^v")
+		switch pasteMode {
+			case "send":
+				Send("^v")
+			case "uia":
+				try noteField.Value := clipText
+			case "control":
+				try {
+					hwnd := noteField.NativeWindowHandle
+					if hwnd {
+						ControlSetText("ahk_id " hwnd, clipText)
+					} else {
+						ControlSetText("", clipText, "Sticky Notes")
+					}
+				}
+		}
 		; Wait until text matches or timeout
 		start := A_TickCount
 		while (A_TickCount - start < 2000) {
@@ -253,6 +273,19 @@ wetRead() {
 		MsgBox("Wet read may not have pasted fully. Please verify the sticky note.")
 	}
 	Return
+}
+
+PromptWetReadMode() {
+	modeGui := Gui("+AlwaysOnTop", "Wet Read Paste Mode")
+	modeGui.Add("Text",, "Select paste method for this run:")
+	choice := "send"
+	modeGui.Add("Button", "w200", "Original (Ctrl+V)").OnEvent("Click", (*) => (choice := "send", modeGui.Destroy()))
+	modeGui.Add("Button", "w200", "UIA Value pattern").OnEvent("Click", (*) => (choice := "uia", modeGui.Destroy()))
+	modeGui.Add("Button", "w200", "ControlSetText").OnEvent("Click", (*) => (choice := "control", modeGui.Destroy()))
+	modeGui.Add("Button", "w200", "Cancel").OnEvent("Click", (*) => (choice := "cancel", modeGui.Destroy()))
+	modeGui.Show()
+	WinWaitClose(modeGui.Hwnd)
+	return choice
 }
 
 toggleWindow(winName) {

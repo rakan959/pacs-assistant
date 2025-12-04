@@ -4,7 +4,7 @@ on: push
 
 jobs:
   ahk2exe:
-    runs-on: self-hosted
+    runs-on: windows-latest
     permissions:
           contents: write
           packages: write

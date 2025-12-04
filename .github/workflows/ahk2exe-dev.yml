@@ -1,0 +1,33 @@
+name: Build dev artifact with ahk2exe
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  build-dev:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compile with ahk2exe (dev)
+        uses: benmusson/ahk2exe-action@v1
+        with:
+          in: main.ahk
+          out: pacs-assistant-dev.exe
+          compression: none
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload dev artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pacs-assistant-dev
+          path: pacs-assistant-dev.exe
+          retention-days: 14
