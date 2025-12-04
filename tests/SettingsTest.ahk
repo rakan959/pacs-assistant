@@ -24,6 +24,7 @@ class SettingsTest {
         Assert.Equal(60, Settings.Get("RefreshInterval"))
         Assert.False(Settings.Get("AudioAlertNewCase"))
         Assert.False(Settings.Get("MessageBoxNewCase"))
+        Assert.True(Settings.Get("AutoConvertWetReadLineEndings"))
         Assert.Equal("Default", Settings.Get("AlertSound"))
         Assert.Equal("", Settings.Get("CustomSoundFile"))
     }
@@ -34,6 +35,9 @@ class SettingsTest {
         
         Settings.Set("AutoUpdate", false)
         Assert.False(Settings.Get("AutoUpdate"))
+
+        Settings.Set("AutoConvertWetReadLineEndings", false)
+        Assert.False(Settings.Get("AutoConvertWetReadLineEndings"))
         
         Settings.Set("AlertSound", "Asterisk")
         Assert.Equal("Asterisk", Settings.Get("AlertSound"))

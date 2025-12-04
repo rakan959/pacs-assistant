@@ -10,7 +10,8 @@ class Settings {
         "AudioAlertNewCase", false,
         "MessageBoxNewCase", false,
         "AlertSound", "Default",  ; Default system sound
-        "CustomSoundFile", ""     ; Path to custom sound file
+        "CustomSoundFile", "",    ; Path to custom sound file
+        "AutoConvertWetReadLineEndings", true  ; Convert LF to CRLF when pasting wet reads
     )
     
     ; Predefined system sounds
@@ -40,7 +41,7 @@ class Settings {
             ; Handle boolean values
             if (settingName = "AutoUpdate" || settingName = "SkipBetaVersions" 
                 || settingName = "AutoRefreshPACS" || settingName = "AudioAlertNewCase" 
-                || settingName = "MessageBoxNewCase")
+                || settingName = "MessageBoxNewCase" || settingName = "AutoConvertWetReadLineEndings")
                 return value = "1" ? true : false
             ; Return string values as is
             return value
@@ -57,7 +58,7 @@ class Settings {
         ; Handle boolean values
         else if (settingName = "AutoUpdate" || settingName = "SkipBetaVersions" 
             || settingName = "AutoRefreshPACS" || settingName = "AudioAlertNewCase" 
-            || settingName = "MessageBoxNewCase")
+            || settingName = "MessageBoxNewCase" || settingName = "AutoConvertWetReadLineEndings")
             IniWrite(value ? "1" : "0", this.settingsFile, "Settings", settingName)
         ; Handle string values
         else
@@ -93,10 +94,11 @@ class Settings {
         
         ; PACS section
         y += 100  ; Consistent spacing between sections
-        settingsGui.Add("GroupBox", "x" margin " y" y " w" contentWidth " h110", "PACS")  ; Increased height to 110
+        settingsGui.Add("GroupBox", "x" margin " y" y " w" contentWidth " h140", "PACS")  ; Increased height to fit new option
         checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x" margin+10 " y" y+25, "Auto refresh PACS")
         settingsGui.Add("Text", "x" margin+10 " y+15", "Refresh interval (seconds):")
         refreshIntervalEdit := settingsGui.Add("Edit", "x" margin+10 " y+5 w60 Number", this.Get("RefreshInterval"))
+        checkboxes["AutoConvertWetReadLineEndings"] := settingsGui.Add("Checkbox", "x" margin+10 " y+15", "Convert wet read line endings (LF → CRLF)")
         
         ; Notifications section
         y += 130  ; Increased spacing between sections

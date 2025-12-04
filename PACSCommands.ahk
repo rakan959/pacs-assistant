@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
+#Include Settings.ahk
 
 class PACSCommands {
     static commands := Map(
@@ -148,31 +149,109 @@ restartPACS() {
 }
 
 wetRead() {
-	NuanceEl := UIA.ElementFromHandle("PowerScribe 360 | Reporting ahk_exe Nuance.PowerScribe360.exe")
-	haystack := NuanceEl.ElementFromPath("YYYYV").Value
-	checkAttending(haystack)
-	Sleep(100)
+	; Use clipboard contents; bail out if empty to avoid blank notes
+	clipText := A_Clipboard
+	if (clipText = "") {
+		MsgBox("No text in clipboard to paste as wet read.")
+		return
+	}
+
+	; Read current report for attending selection
+	try {
+		NuanceEl := UIA.ElementFromHandle("PowerScribe 360 | Reporting ahk_exe Nuance.PowerScribe360.exe")
+		haystack := NuanceEl.ElementFromPath("YYYYV").Value
+		checkAttending(haystack)
+	} catch {
+		; continue even if attending detection fails
+	}
+
+	; Activate Vue PACS and open sticky notes
 	WinActivate("Vue PACS ahk_exe mp.exe")
-	Sleep(100)
+	Sleep(150)
 	mpEl := UIA.ElementFromHandle("Vue PACS ahk_exe mp.exe")
-	Sleep(100)
-	mpEl.FindElement({Name:"scn_sticky_notes"}).Click()
-	WinWait("Sticky Notes", , 1)
-	mpEl := UIA.ElementFromHandle("Sticky Notes")
-	Sleep(100)
-	mpEl.ElementFromPath("YY0").Click()
-	Sleep(100)
-	MouseGetPos &xpos, &ypos 
-	mpEl.ElementFromPath("87K/").Click("left")
-	MouseMove xpos, ypos
-	Sleep(100)
-	Send('r')
-	Sleep(100)
-	mpEl.ElementFromPath("V").ControlClick()
-	Sleep(100)
-	Send A_Clipboard
-	Sleep(2*StrLen(A_Clipboard))
-	mpEl.ElementFromPath("YY0/").Click()
+	try {
+		mpEl.FindElement({Name:"scn_sticky_notes"}).Click()
+	} catch {
+		MsgBox("Could not find Sticky Notes button in PACS.")
+		return
+	}
+
+	; Wait for sticky notes window
+	if !WinWait("Sticky Notes", , 2) {
+		MsgBox("Sticky Notes window did not appear.")
+		return
+	}
+
+	sticky := UIA.ElementFromHandle("Sticky Notes")
+
+	; Helper to ensure the text field is focused
+	focusNoteField(field) {
+		loop 3 {
+			try field.SetFocus()
+			catch
+			try field.Click("left")
+			Sleep(50)
+		}
+	}
+
+	; Get note input field
+	try {
+		noteField := sticky.ElementFromPath("YY0/")
+	} catch {
+		MsgBox("Could not locate Sticky Notes text field.")
+		return
+	}
+
+	; Optionally normalize line endings to CRLF for sticky note field
+	if (Settings.Get("AutoConvertWetReadLineEndings")) {
+		clipText := RegExReplace(clipText, "(\r)?\n", "`r`n")
+	}
+
+	; Clear and paste with verification using clipboard (faster and preserves order)
+	focusNoteField(noteField)
+	Send("^a")
+	Send("{Backspace}")
+	Sleep(50)
+
+	success := false
+	clipBackup := ClipboardAll()
+	A_Clipboard := clipText
+	ClipWait(0.5)
+
+	loop 3 {
+		focusNoteField(noteField)
+		Send("^v")
+		; Wait until text matches or timeout
+		start := A_TickCount
+		while (A_TickCount - start < 2000) {
+			try {
+				current := noteField.Value
+			} catch {
+				current := ""
+			}
+			if (current = clipText) {
+				success := true
+				break
+			}
+			Sleep(100)
+		}
+		if success
+			break
+		; Retry: clear and try again
+		focusNoteField(noteField)
+		Send("^a")
+		Send("{Backspace}")
+		Sleep(100)
+	}
+
+	; Restore original clipboard
+	try {
+		A_Clipboard := clipBackup
+	}
+
+	if !success {
+		MsgBox("Wet read may not have pasted fully. Please verify the sticky note.")
+	}
 	Return
 }
 
