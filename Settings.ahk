@@ -94,14 +94,17 @@ class Settings {
         
         ; PACS section
         y += 100  ; Consistent spacing between sections
-        settingsGui.Add("GroupBox", "x" margin " y" y " w" contentWidth " h140", "PACS")  ; Increased height to fit new option
-        checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x" margin+10 " y" y+25, "Auto refresh PACS")
-        settingsGui.Add("Text", "x" margin+10 " y+15", "Refresh interval (seconds):")
-        refreshIntervalEdit := settingsGui.Add("Edit", "x" margin+10 " y+5 w60 Number", this.Get("RefreshInterval"))
-        checkboxes["AutoConvertWetReadLineEndings"] := settingsGui.Add("Checkbox", "x" margin+10 " y+15", "Convert wet read line endings (LF → CRLF)")
+        settingsGui.Add("GroupBox", "x" margin " y" y " w" contentWidth " h170", "PACS")
+        pacsY := y + 25
+        checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x" margin+10 " y" pacsY, "Auto refresh PACS")
+        pacsY += 25
+        settingsGui.Add("Text", "x" margin+10 " y" pacsY, "Refresh interval (seconds):")
+        refreshIntervalEdit := settingsGui.Add("Edit", "x" margin+10 " y" pacsY+5 " w60 Number", this.Get("RefreshInterval"))
+        pacsY += 35
+        checkboxes["AutoConvertWetReadLineEndings"] := settingsGui.Add("Checkbox", "x" margin+10 " y" pacsY, "Convert clipboard line endings")
         
         ; Notifications section
-        y += 130  ; Increased spacing between sections
+        y += 190  ; Spacing after larger PACS section
         notificationsY := y
         
         ; Calculate height for notifications section based on its contents:

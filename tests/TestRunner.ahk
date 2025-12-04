@@ -82,3 +82,12 @@ class Assert {
         }
     }
 }
+
+; Suppress pop-up dialogs during tests by overriding MsgBox
+MsgBox(text := "", title := "", options := "") {
+    FileAppend(Format("MSGBOX [{1}] {2}`n", title, text), "*")
+    ; Return a sensible default for Yes/No prompts
+    if InStr(options, "YesNo")
+        return "Yes"
+    return "OK"
+}
