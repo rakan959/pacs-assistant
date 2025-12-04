@@ -308,12 +308,36 @@ class KeybindGUI {
     ApplyBinds() {
         HotkeyManager.DisableAllHotkeys()
         currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
+        failed := []
+
+        ; Ensure built-in hotkey functions are loaded
+        if (HotkeyManager.hotkeyFunctions.Count = 0) {
+            HotkeyManager.hotkeyFunctions := PACSCommands.commands
+        }
+
         for funcName, bind in currentProfile.binds {
-            if (currentProfile.customFuncs.Has(funcName)) {
-                HotkeyManager.RegisterCustomHotkey(funcName, bind, currentProfile.customFuncs[funcName])
-            } else {
-                HotkeyManager.RegisterHotkey(funcName, bind)
+            try {
+                result := false
+                if (currentProfile.customFuncs.Has(funcName)) {
+                    result := HotkeyManager.RegisterCustomHotkey(funcName, bind, currentProfile.customFuncs[funcName])
+                } else {
+                    result := HotkeyManager.RegisterHotkey(funcName, bind)
+                }
+
+                if !result {
+                    failed.Push(funcName)
+                }
+            } catch as err {
+                failed.Push(funcName " (" err.Message ")")
             }
+        }
+
+        if (failed.Length) {
+            errMsg := "These keybinds failed to register:" "`n"
+            for item in failed {
+                errMsg .= "- " item "`n"
+            }
+            MsgBox(RTrim(errMsg, "`n"), "Keybind Errors", "Icon!")
         }
     }
 

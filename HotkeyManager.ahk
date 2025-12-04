@@ -23,6 +23,12 @@ class HotkeyManager {
         if (hotkeyStr = "")
             return true
 
+        ; Make sure we have a command to bind before attempting registration
+        if !this.hotkeyFunctions.Has(funcName) {
+            MsgBox("No command found for '" funcName "'. The keybind was not registered.")
+            return false
+        }
+
         ; Register new hotkey
         try {
             Hotkey(hotkeyStr, this.hotkeyFunctions[funcName])
