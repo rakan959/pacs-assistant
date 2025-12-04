@@ -127,9 +127,10 @@ class KeybindGUI {
             ; Initialize an empty profile with both binds and customFuncs maps
             ProfileManager.profiles[name] := {
                 binds: Map(),
+                scopes: Map(),
                 customFuncs: Map()
             }
-            ProfileManager.SaveProfile(name, ProfileManager.profiles[name].binds, ProfileManager.profiles[name].customFuncs)
+            ProfileManager.SaveProfile(name, ProfileManager.profiles[name].binds, ProfileManager.profiles[name].customFuncs, ProfileManager.profiles[name].scopes)
             ProfileManager.currentProfile := name
             inputGui.Destroy()
             this.CreateMainGUI()
@@ -197,7 +198,7 @@ class KeybindGUI {
         ih.Start()
     }
 
-    OnInputEnd(funcName, control, promptGui := 0, ih?) {
+    OnInputEnd(funcName, control, promptGui := 0, ih?, scopeControl := 0) {
         ; Get current state of modifier keys
         hasCtrl := GetKeyState("Ctrl")
         hasAlt := GetKeyState("Alt")
@@ -265,6 +266,9 @@ class KeybindGUI {
             
             ; Update profile
             ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName] := newBind
+            if (scopeControl) {
+                ProfileManager.profiles[ProfileManager.currentProfile].scopes[funcName] := scopeControl.Value ? "restricted" : "global"
+            }
             
             ; Update UI
             if (promptGui) {
@@ -302,14 +306,18 @@ class KeybindGUI {
         ProfileManager.SaveProfile(
             ProfileManager.currentProfile, 
             currentProfile.binds,
-            currentProfile.customFuncs
+            currentProfile.customFuncs,
+            currentProfile.scopes
         )
         MsgBox("Profile saved successfully!", "Success")
+        this.ApplyBinds()
     }
 
     ApplyBinds() {
         HotkeyManager.DisableAllHotkeys()
         currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
+        if (!IsSet(currentProfile.scopes))
+            currentProfile.scopes := Map()
         failed := []
 
         ; Ensure built-in hotkey functions are loaded
@@ -318,12 +326,13 @@ class KeybindGUI {
         }
 
         for funcName, bind in currentProfile.binds {
+            scope := currentProfile.scopes.Has(funcName) ? currentProfile.scopes[funcName] : "default"
             try {
                 result := false
                 if (currentProfile.customFuncs.Has(funcName)) {
-                    result := HotkeyManager.RegisterCustomHotkey(funcName, bind, currentProfile.customFuncs[funcName])
+                    result := HotkeyManager.RegisterCustomHotkey(funcName, bind, currentProfile.customFuncs[funcName], scope)
                 } else {
-                    result := HotkeyManager.RegisterHotkey(funcName, bind)
+                    result := HotkeyManager.RegisterHotkey(funcName, bind, scope)
                 }
 
                 if !result {
@@ -545,6 +554,7 @@ class KeybindGUI {
         
         ; Add to profile with empty binding
         ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName] := ""
+        ProfileManager.profiles[ProfileManager.currentProfile].scopes[funcName] := this.GetScopeDefault(funcName)
         
         ; Add to ListView (removed type)
         listView.Add(, funcName, "Unassigned")
@@ -564,6 +574,7 @@ class KeybindGUI {
         
         ; Add to profile with empty binding
         ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName] := ""
+        ProfileManager.profiles[ProfileManager.currentProfile].scopes[funcName] := this.GetScopeDefault(funcName)
         
         ; Add to ListView (removed type)
         listView.Add(, funcName, "Unassigned")
@@ -585,6 +596,8 @@ class KeybindGUI {
         if (MsgBox("Remove '" funcName "' from the profile?", "Confirm Remove", "YesNo Icon!") = "Yes") {
             currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
             currentProfile.binds.Delete(funcName)
+            if (currentProfile.scopes.Has(funcName))
+                currentProfile.scopes.Delete(funcName)
             ; No longer delete the custom function itself, only its binding
             listView.Delete(listView.GetNext(0))
             this.ResizeColumns(listView)
@@ -606,14 +619,25 @@ class KeybindGUI {
         promptGui := Gui(, "PACS Assistant - Set Keybind")
         promptGui.Add("Text",, "Press keys for '" funcName "'...")
         promptGui.Add("Edit", "w200 ReadOnly", "Press keys...")
+        scopeDefault := this.GetScopeDefault(funcName)
+        scopeCheckbox := promptGui.Add("Checkbox", "w250", "Only when PACS/PowerScribe/EPIC active")
+        scopeCheckbox.Value := scopeDefault = "restricted"
         promptGui.Add("Button",, "Cancel").OnEvent("Click", (*) => (promptGui.Destroy(), this.StopListening()))
         
         ih := InputHook("V B")
         ih.KeyOpt("{All}", "E")
-        ih.OnEnd := this.OnInputEnd.Bind(this, funcName, listView, promptGui)
+        ih.OnEnd := this.OnInputEnd.Bind(this, funcName, listView, promptGui, , scopeCheckbox)
         ih.Start()
         
         promptGui.Show()
+    }
+
+    GetScopeDefault(funcName) {
+        currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
+        if (currentProfile.scopes.Has(funcName)) {
+            return currentProfile.scopes[funcName]
+        }
+        return Settings.Get("RestrictHotkeysByActiveWindow") ? "restricted" : "global"
     }
 
     ResizeColumns(listView) {

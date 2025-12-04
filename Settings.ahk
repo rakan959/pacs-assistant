@@ -11,7 +11,8 @@ class Settings {
         "MessageBoxNewCase", false,
         "AlertSound", "Default",  ; Default system sound
         "CustomSoundFile", "",    ; Path to custom sound file
-        "AutoConvertWetReadLineEndings", true  ; Convert LF to CRLF when pasting wet reads
+        "AutoConvertWetReadLineEndings", true,  ; Convert LF to CRLF when pasting wet reads
+        "RestrictHotkeysByActiveWindow", true   ; Default: only active in PACS/PowerScribe/EPIC
     )
     
     ; Predefined system sounds
@@ -41,7 +42,8 @@ class Settings {
             ; Handle boolean values
             if (settingName = "AutoUpdate" || settingName = "SkipBetaVersions" 
                 || settingName = "AutoRefreshPACS" || settingName = "AudioAlertNewCase" 
-                || settingName = "MessageBoxNewCase" || settingName = "AutoConvertWetReadLineEndings")
+                || settingName = "MessageBoxNewCase" || settingName = "AutoConvertWetReadLineEndings"
+                || settingName = "RestrictHotkeysByActiveWindow")
                 return value = "1" ? true : false
             ; Return string values as is
             return value
@@ -58,7 +60,8 @@ class Settings {
         ; Handle boolean values
         else if (settingName = "AutoUpdate" || settingName = "SkipBetaVersions" 
             || settingName = "AutoRefreshPACS" || settingName = "AudioAlertNewCase" 
-            || settingName = "MessageBoxNewCase" || settingName = "AutoConvertWetReadLineEndings")
+            || settingName = "MessageBoxNewCase" || settingName = "AutoConvertWetReadLineEndings"
+            || settingName = "RestrictHotkeysByActiveWindow")
             IniWrite(value ? "1" : "0", this.settingsFile, "Settings", settingName)
         ; Handle string values
         else
@@ -102,9 +105,11 @@ class Settings {
         refreshIntervalEdit := settingsGui.Add("Edit", "x" margin+10 " y" pacsY+5 " w60 Number", this.Get("RefreshInterval"))
         pacsY += 35
         checkboxes["AutoConvertWetReadLineEndings"] := settingsGui.Add("Checkbox", "x" margin+10 " y" pacsY, "Convert clipboard line endings")
-        
+        pacsY += 25
+        checkboxes["RestrictHotkeysByActiveWindow"] := settingsGui.Add("Checkbox", "x" margin+10 " y" pacsY, "Restrict hotkeys to PACS/PowerScribe/EPIC")
+
         ; Notifications section
-        y += 190  ; Spacing after larger PACS section
+        y += 220  ; Spacing after larger PACS section
         notificationsY := y
         
         ; Calculate height for notifications section based on its contents:

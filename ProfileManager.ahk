@@ -36,6 +36,7 @@ class ProfileManager {
 
     static LoadProfile(path) {
         binds := Map()
+        scopes := Map()
         customFuncs := Map()  ; Store custom functions for this profile
         try {
             IniRead(path)
@@ -44,6 +45,7 @@ class ProfileManager {
             for funcName in functionList {
                 if (funcName != "") {
                     binds[funcName] := IniRead(path, "Keybinds", funcName, "")
+                    scopes[funcName] := IniRead(path, "KeybindScopes", funcName, "default")
                     ; If it's a custom function, load its configuration
                     if (InStr(funcName, "Custom: ") = 1) {
                         keys := IniRead(path, "CustomFunctions", funcName "_keys", "")
@@ -55,10 +57,10 @@ class ProfileManager {
                 }
             }
         }
-        return {binds: binds, customFuncs: customFuncs}
+        return {binds: binds, scopes: scopes, customFuncs: customFuncs}
     }
 
-    static SaveProfile(name, binds, customFuncs := 0) {
+    static SaveProfile(name, binds, customFuncs := 0, scopes := 0) {
         if !DirExist(this.profilesPath)
             DirCreate(this.profilesPath)
         
@@ -74,6 +76,11 @@ class ProfileManager {
         ; Save the keybinds
         for funcName, bind in binds {
             IniWrite(bind, path, "Keybinds", funcName)
+        }
+        if (scopes) {
+            for funcName, scope in scopes {
+                IniWrite(scope, path, "KeybindScopes", funcName)
+            }
         }
 
         ; Save custom function configurations if provided
@@ -132,6 +139,8 @@ class ProfileManager {
         try {
             ; Save the binds
             binds := this.profiles[oldName].binds
+            scopes := Map()
+            try scopes := this.profiles[oldName].scopes
             customFuncs := this.profiles[oldName].customFuncs
             
             ; Delete old profile
@@ -139,8 +148,8 @@ class ProfileManager {
             this.profiles.Delete(oldName)
             
             ; Create new profile
-            this.profiles[newName] := {binds: binds, customFuncs: customFuncs}
-            this.SaveProfile(newName, binds, customFuncs)
+            this.profiles[newName] := {binds: binds, scopes: scopes, customFuncs: customFuncs}
+            this.SaveProfile(newName, binds, customFuncs, scopes)
             
             ; Update default profile if needed
             if (this.defaultProfile = oldName) {

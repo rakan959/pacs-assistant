@@ -25,6 +25,7 @@ class SettingsTest {
         Assert.False(Settings.Get("AudioAlertNewCase"))
         Assert.False(Settings.Get("MessageBoxNewCase"))
         Assert.True(Settings.Get("AutoConvertWetReadLineEndings"))
+        Assert.True(Settings.Get("RestrictHotkeysByActiveWindow"))
         Assert.Equal("Default", Settings.Get("AlertSound"))
         Assert.Equal("", Settings.Get("CustomSoundFile"))
     }
@@ -38,6 +39,9 @@ class SettingsTest {
 
         Settings.Set("AutoConvertWetReadLineEndings", false)
         Assert.False(Settings.Get("AutoConvertWetReadLineEndings"))
+
+        Settings.Set("RestrictHotkeysByActiveWindow", false)
+        Assert.False(Settings.Get("RestrictHotkeysByActiveWindow"))
         
         Settings.Set("AlertSound", "Asterisk")
         Assert.Equal("Asterisk", Settings.Get("AlertSound"))
