@@ -13,8 +13,10 @@ class KeybindGUI {
     static activeInputHook := 0
 
     __New() {
-        ; Check for updates when starting
-        UpdateChecker.ShowUpdateDialog()
+        ; Check for updates when starting (respect user setting)
+        if (Settings.Get("AutoUpdate")) {
+            UpdateChecker.ShowUpdateDialog()
+        }
         
         ProfileManager.LoadProfiles()
         if ProfileManager.profiles.Count = 0 {
@@ -326,18 +328,45 @@ class KeybindGUI {
             ProfileManager.profiles[ProfileManager.currentProfile]
         )
         MsgBox("Profile saved successfully!", "Success")
+        this.ApplyBinds()
     }
 
     ApplyBinds() {
         HotkeyManager.DisableAllHotkeys()
         currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
+        if (!currentProfile.HasProp("scopes"))
+            currentProfile.scopes := Map()
+        failed := []
+
+        ; Ensure built-in hotkey functions are loaded
+        if (HotkeyManager.hotkeyFunctions.Count = 0) {
+            HotkeyManager.hotkeyFunctions := PACSCommands.commands
+        }
+
         for funcName, bind in currentProfile.binds {
             scope := currentProfile.scopes.Has(funcName) ? currentProfile.scopes[funcName] : "Any"
-            if (currentProfile.customFuncs.Has(funcName)) {
-                HotkeyManager.RegisterCustomHotkey(funcName, bind, currentProfile.customFuncs[funcName], scope)
-            } else {
-                HotkeyManager.RegisterHotkey(funcName, bind, scope)
+            try {
+                if (currentProfile.customFuncs.Has(funcName)) {
+                    result := HotkeyManager.RegisterCustomHotkey(funcName, bind, currentProfile.customFuncs[funcName], scope)
+                } else {
+                    result := HotkeyManager.RegisterHotkey(funcName, bind, scope)
+                }
+
+                if !result {
+                    failed.Push(funcName (HotkeyManager.lastError != "" ? " (" HotkeyManager.lastError ")" : ""))
+                }
+            } catch as err {
+                failed.Push(funcName " (" err.Message ")")
             }
+        }
+
+        ; One message for the whole apply rather than a dialog per bind
+        if (failed.Length) {
+            errMsg := "These keybinds failed to register:" "`n"
+            for item in failed {
+                errMsg .= "- " item "`n"
+            }
+            MsgBox(RTrim(errMsg, "`n"), "Keybind Errors", "Icon!")
         }
     }
 

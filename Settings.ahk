@@ -11,8 +11,13 @@ class Settings {
         "MessageBoxNewCase", false,
         "AlertSound", "Default Beep",  ; Name from alertSounds
         "CustomSoundFile", "",         ; Path to custom sound file
+        "AutoConvertWetReadLineEndings", true,  ; Convert LF to CRLF when pasting wet reads
         "SwapMicrophoneOnLogin", false,
-        "MicrophoneName", ""           ; Blank = leave PowerScribe's selection alone
+        "MicrophoneName", "",          ; Blank = leave PowerScribe's selection alone
+        ; Superseded by per-bind scopes, kept only so profiles written under the older
+        ; [KeybindScopes] scheme migrate to the right scope. See
+        ; ProfileManager.MigrateLegacyScope.
+        "RestrictHotkeysByActiveWindow", true
     )
 
     ; Settings persisted as "1"/"0" rather than as free text
@@ -22,7 +27,9 @@ class Settings {
         "AutoRefreshPACS",
         "AudioAlertNewCase",
         "MessageBoxNewCase",
-        "SwapMicrophoneOnLogin"
+        "AutoConvertWetReadLineEndings",
+        "SwapMicrophoneOnLogin",
+        "RestrictHotkeysByActiveWindow"
     ]
 
     ; Alert sounds, each backed by a distinct file shipped in %WinDir%\Media.
@@ -143,13 +150,22 @@ class Settings {
         
         ; PACS section
         y += 100  ; Consistent spacing between sections
-        settingsGui.Add("GroupBox", "x" margin " y" y " w" contentWidth " h110", "PACS")  ; Increased height to 110
-        checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x" margin+10 " y" y+25, "Auto refresh PACS")
-        settingsGui.Add("Text", "x" margin+10 " y+15", "Refresh interval (seconds):")
-        refreshIntervalEdit := settingsGui.Add("Edit", "x" margin+10 " y+5 w60 Number", this.Get("RefreshInterval"))
+        settingsGui.Add("GroupBox", "x" margin " y" y " w" contentWidth " h140", "PACS")
+        pacsY := y + 25
+        checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x" margin+10 " y" pacsY, "Auto refresh PACS")
+        pacsY += 28
+        settingsGui.Add("Text", "x" margin+10 " y" pacsY, "Refresh interval (seconds):")
+        ; The edit sits below its label, not 5px under it - at the old offset the two
+        ; drew on top of each other
+        refreshIntervalEdit := settingsGui.Add("Edit", "x" margin+10 " y" pacsY+22 " w60 Number", this.Get("RefreshInterval"))
+        pacsY += 52
+        checkboxes["AutoConvertWetReadLineEndings"] := settingsGui.Add("Checkbox", "x" margin+10 " y" pacsY, "Convert clipboard line endings")
+
+        ; Hotkey scope is set per keybind now (main window > Set Scope), so there is no
+        ; global restrict checkbox here any more.
 
         ; PowerScribe section
-        y += 130
+        y += 160
         settingsGui.Add("GroupBox", "x" margin " y" y " w" contentWidth " h120", "PowerScribe")
         checkboxes["SwapMicrophoneOnLogin"] := settingsGui.Add("Checkbox", "x" margin+10 " y" y+25, "Set microphone on login")
         settingsGui.Add("Text", "x" margin+10 " y+15", "Microphone (blank = leave unchanged):")

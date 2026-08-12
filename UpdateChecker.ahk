@@ -28,7 +28,7 @@ class UpdateChecker {
         ; Clear any existing timer
         if this.updateTimer {
             SetTimer(this.updateTimer, 0)
-            this.refreshTimer := 0
+            this.updateTimer := 0
         }
         
         ; Set up new timer if auto-update is enabled
@@ -183,7 +183,8 @@ class UpdateChecker {
                 }
             }
         } catch as err {
-            MsgBox("Error checking for updates: " err.Message, "Update Check Failed", "Icon!")
+            ; Log quietly to avoid interrupting the user
+            OutputDebug("Update check failed: " err.Message)
         }
         return { hasUpdate: false }
     }

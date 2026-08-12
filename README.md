@@ -1,123 +1,96 @@
 # PACS Assistant
 
-PACS Assistant is a helpful tool designed to make your radiology workflow smoother and more efficient. It provides quick keyboard shortcuts and automated features to help you work faster with PowerScribe and PACS.
+PACS Assistant makes your radiology workflow faster with keyboard shortcuts, smart monitoring, and profile-based customization for PowerScribe and PACS.
 
-## 🌟 Features
+## Features
 
-### Quick Commands - can be assigned to any key!
-- **Toggle Dictation** - Start or stop dictation
-- **Select Next Field** - Move to the next field in PowerScribe
-- **Select Previous Field** - Move to the previous field in PowerScribe
-- **Delete Previous Word** - Quickly delete the word before the cursor
-- **Delete Next Word** - Quickly delete the word after the cursor
-- **Draft Report** - Draft your report
-- **Sign Report** - Sign your report
-- **Open/Force Restart PACS** - Restart PACS if it's frozen or not responding (asks PowerScribe to save first)
-- **Paste Wet Read** - Copy your read and paste it as a PACS note
-- **Toggle PowerScribe Window** - Quickly switch PowerScribe window to front/back
-- **Toggle EPIC Window** - Quickly switch EPIC window to front/back
-- **Set PowerScribe Microphone** - Pick your microphone on the PowerScribe login screen
+### Quick commands (bind to any key)
+- Toggle Dictation, Draft Report, Sign Report
+- Select Next/Previous Field, Delete Previous/Next Word
+- Open/Force Restart PACS (asks PowerScribe to save first, answering the save prompt)
+- Paste Wet Read (optional LF→CRLF conversion; choose Ctrl+V, UIA Value, or ControlSetText paste)
+- Toggle PowerScribe / EPIC windows, Next/Previous Series
+- Set PowerScribe Microphone
 
-### Smart Notifications
-- Get notified when new studies arrive
-- Choose from different notification sounds - each one is a different sound
-- See study types at a glance
-- Stay focused with non-intrusive alerts
+### Profiles & custom binds
+- Multiple profiles with default selection
+- Custom keybind creator (send keys to any window)
+- GUI to add/change/remove binds and set a default profile
+- Per-bind scope: limit a shortcut to PACS, PowerScribe, or both. Outside its scope the
+  key is passed through to whatever app is focused rather than being swallowed
+- Per-modality attending assignment, used when routing a wet read
 
-### Customization
-- Create custom keyboard shortcuts
-- Limit any shortcut to PACS, PowerScribe, or both
-- Assign an attending per modality
-- Set up multiple profiles for different workflows
-- Choose which notifications you want to receive
-- Adjust refresh intervals for new study checks
-
-## 🚀 Getting Started
-
-1. **Download**
-   - Download the latest version from the releases page
-   - Place the file in your preferred directory (profiles will be stored here)
-   - Run pacs-assistant.exe - no installation required!
-
-2. **Initial Setup**
-   - Create a profile when first launching
-   - Set up your preferred keyboard shortcuts
-   - Configure notification settings
-
-3. **Basic Usage**
-   - Use keyboard shortcuts to perform actions
-   - Watch for notifications about new studies
-   - Switch between profiles as needed
-
-## ⚙️ Settings
-
-### Notifications
-- **Auto Refresh**: Choose if PACS should automatically check for new studies
-- **Sound Alerts**: Pick from various notification sounds
-- **Visual Alerts**: Enable/disable pop-up notifications
-- **Refresh Interval**: Set how often to check for new studies
-
-### PowerScribe
-- **Set microphone on login**: Selects your microphone on the PowerScribe login screen
-- **Microphone**: The name to pick, matched on part of the name (e.g. `PowerMic` matches `PowerMic III`). Leave blank to leave the selection alone
+### Monitoring & notifications
+- Auto-refresh PACS (interval configurable)
+- New study detection with tray notifications and optional sounds
+- Alert sounds are backed by distinct files, so the options are audibly different
+- Warns if the refresh button can't be found instead of failing silently
 
 ### Updates
-- **Auto Update**: Choose to automatically check for new versions
-- **Beta Versions**: Opt in/out of beta updates
+- Optional auto-check for updates
+- Skip beta versions
+- Background-only error logging (no popups)
 
-## 🎯 Tips & Tricks
+## Getting started
 
-1. **Wet Reads**
-   - Copy your wet read text
-   - Use the wet read shortcut
-   - The PACS note will be created automatically
-   - The report will automatically be assigned to the appropriate section queue
+1) **Download**
+- Tagged releases publish `pacs-assistant.exe`.
+- Dev pushes upload a `pacs-assistant-dev` artifact from CI.
+- Place the EXE anywhere; profiles/settings live alongside it.
 
-2. **Multiple Profiles**
-   - Create different profiles for different workflows
-   - Switch between profiles easily
-   - Each profile can have its own shortcuts
+2) **Initial setup**
+- Launch, create a profile, assign keybinds, and set notification/update preferences.
 
-3. **Custom Shortcuts**
-   - Create shortcuts for frequently used actions
-   - Assign them to easy-to-remember key combinations
-   - Target specific windows for certain actions
+3) **Wet read workflow**
+- Copy your wet read text to clipboard.
+- Use the wet read hotkey; if prompted, pick a paste method (Ctrl+V/UIA Value/ControlSetText).
+- Enable "Convert clipboard line endings" in Settings to normalize LF→CRLF before pasting.
 
-4. **Keybind Scope**
-   - Select a keybind and click **Set Scope**
-   - Tick PACS and/or PowerScribe to only fire that shortcut when one of them is in front
-   - Leave both unticked and the shortcut works everywhere, which is how every existing keybind behaves
+4) **Keybind scope**
+- Select a bind and click **Set Scope**.
+- Tick PACS and/or PowerScribe to fire only when one of them is in front; leave both
+  unticked for a bind that works everywhere.
 
-5. **Modality Attendings**
-   - Click **Modality Attendings** to assign an attending per modality for the current profile
-   - Wet reads are routed to the attending assigned to the study's modality
-   - Leave a modality blank to keep whatever default attending PowerScribe already has
-   - Each profile has its own assignments, so a call shift assigned by modality can be its own profile
+5) **Modality attendings**
+- Click **Modality Attendings** to assign an attending per modality for the current profile.
+- Wet reads route to the attending assigned to the study's modality.
+- Leave a modality blank to keep whatever default attending PowerScribe already has.
+- Assignments are per profile, so a call shift assigned by modality can be its own profile.
 
-## 🧪 Development
+## Settings
+- Auto refresh PACS + interval
+- Convert clipboard line endings (LF→CRLF) for wet reads
+- PowerScribe: set microphone on login, and the name to match (part of the name is
+  enough — `PowerMic` matches `PowerMic III`)
+- Notifications: sound on/off, message popups, choose alert sound, custom sound file
+- Updates: auto-check toggle, skip betas
 
-Tests run headlessly and need nothing but AutoHotkey v2:
+Hotkey scope is set per bind from the main window, not here.
 
-```
-"C:\Program Files\AutoHotkey\v2\AutoHotkey.exe" tests\run-tests.ahk
-"C:\Program Files\AutoHotkey\v2\AutoHotkey.exe" tests\run-hotkey-tests.ahk
-```
+## Tests
 
-`run-tests.ahk` covers modality classification, alert sounds, scope handling and
-profile persistence. `run-hotkey-tests.ahk` registers real hotkeys and synthesises
-keystrokes to check that binds survive being disabled and re-applied. Both exit
-non-zero on failure.
+All suites are headless and exit non-zero on failure.
 
-To check syntax without running:
+- Module tests:\
+  `& "$Env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe" /ErrorStdOut tests/RunTests.ahk`
+- Logic tests (modality classification, alert sounds, scopes, profile persistence):\
+  `& "$Env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe" /ErrorStdOut tests/run-tests.ahk`
+- Hotkey tests (registers real hotkeys and synthesises keystrokes):\
+  `& "$Env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe" /ErrorStdOut tests/run-hotkey-tests.ahk`
+- GUI smoke test (builds every window; windows flash on screen):\
+  `& "$Env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe" /ErrorStdOut tests/run-gui-smoke.ahk`
 
-```
-"C:\Program Files\AutoHotkey\v2\AutoHotkey.exe" /validate /ErrorStdOut main.ahk
-```
+The module test runner suppresses MsgBoxes and writes results to stdout.
 
-## 🆘 Need Help?
+Syntax check without running:\
+`& "$Env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe" /validate /ErrorStdOut main.ahk`
 
-If you encounter any issues:
-1. Check if PACS Assistant is running (look for the icon in your system tray)
-2. Make sure PowerScribe and PACS are open
-3. Try restarting PACS Assistant
-4. If all else fails, text me
+## CI / builds
+- GitHub Actions builds on every push using a GitHub-hosted Windows runner:\
+  - Tagged pushes publish a release with `pacs-assistant.exe`.\
+  - Other pushes upload a `pacs-assistant-dev` artifact for quick testing.
+
+## Need help?
+- Ensure PACS Assistant is running (tray icon).
+- Make sure PowerScribe and PACS are open.
+- Try restarting PACS Assistant.

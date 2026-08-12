@@ -5,6 +5,11 @@ class PACSMonitor {
     static knownAccessions := []
     static refreshTimer := 0
 
+    static testMode := false          ; When true, avoid UI automation and use test data
+    static testStudyRows := []        ; Rows to process in test mode
+    static testRefreshCalls := 0      ; Counter for RefreshAndCheck invocations in test mode
+    static testLastNewStudies := []   ; Captured new studies in test mode
+
     static portalTitle := "Explorer Portal ahk_exe msedge.exe"
 
     ; Positional UIA paths. These are brittle - they encode the portal's layout, so
@@ -33,25 +38,39 @@ class PACSMonitor {
     static StartMonitoring() {
         ; Clear any existing timer
         if this.refreshTimer {
-            SetTimer(this.refreshTimer, 0)
+            if (this.refreshTimer != -1) {
+                SetTimer(this.refreshTimer, 0)
+            }
             this.refreshTimer := 0
         }
 
         ; Set up new timer if auto-refresh is enabled
         if Settings.Get("AutoRefreshPACS") {
-            interval := Settings.Get("RefreshInterval") * 1000  ; Convert to milliseconds
-            this.refreshTimer := ObjBindMethod(this, "RefreshAndCheck")
-            SetTimer(this.refreshTimer, interval)
+            ; In tests, skip real timers and just run once
+            if (this.testMode) {
+                this.refreshTimer := -1  ; Sentinel to show monitoring is active in tests
+                this.RefreshAndCheck()
+            } else {
+                interval := Settings.Get("RefreshInterval") * 1000  ; Convert to milliseconds
+                this.refreshTimer := ObjBindMethod(this, "RefreshAndCheck")
+                SetTimer(this.refreshTimer, interval)
 
-            ; Do an initial refresh
-            this.RefreshAndCheck()
+                ; Do an initial refresh
+                this.RefreshAndCheck()
+            }
         }
     }
 
     static StopMonitoring() {
         if this.refreshTimer {
-            SetTimer(this.refreshTimer, 0)
+            if (this.refreshTimer != -1) {
+                SetTimer(this.refreshTimer, 0)
+            }
             this.refreshTimer := 0
+        }
+        if (this.testMode) {
+            this.testStudyRows := []
+            this.testLastNewStudies := []
         }
     }
 
@@ -158,6 +177,11 @@ class PACSMonitor {
     }
 
     static RefreshAndCheck() {
+        if (this.testMode) {
+            this.testRefreshCalls++
+            return this.ProcessRows(this.testStudyRows, true)
+        }
+
         try {
             ; Try to get the Explorer Portal window
             if !WinExist(this.portalTitle) {
@@ -185,50 +209,12 @@ class PACSMonitor {
             Sleep(1000)
 
             ; Get current accession numbers and study info
-            currentStudies := []
             root := UIA.ElementFromHandle(this.portalTitle)
             studyList := this.FindStudyList(root)
             if !studyList
                 return
 
-            for row in studyList {
-                ; Extract study type and accession numbers
-                rowText := row.Name
-                ; Find any accession numbers
-                accessions := []
-                pos := 1
-                while pos := RegExMatch(rowText, "\d{8}", &accMatch, pos) {
-                    accessions.Push(accMatch[0])
-                    pos += accMatch.Len
-                }
-
-                ; Find study type (any uppercase string that starts with two letters)
-                if RegExMatch(rowText, "[A-Z]{2}\s[A-Z\s]+?(?=\s+\d|$)", &studyMatch) {
-                    studyType := Trim(studyMatch[0])
-
-                    ; Add entry for each new accession
-                    for acc in accessions {
-                        if !this.HasAccession(acc) {
-                            currentStudies.Push({
-                                studyType: studyType,
-                                accession: acc
-                            })
-                        }
-                    }
-                }
-            }
-
-            ; Add new studies to known accessions and prepare notifications
-            newStudies := []
-            for study in currentStudies {
-                newStudies.Push(study)
-                this.knownAccessions.Push(study.accession)
-            }
-
-            ; Alert if new studies found
-            if newStudies.Length > 0 {
-                this.AlertNewCases(newStudies)
-            }
+            this.ProcessRows(studyList)
 
         } catch as err {
             ; Silent fail - we don't want to interrupt the user with error messages
@@ -249,7 +235,59 @@ class PACSMonitor {
         return false
     }
 
+    static ProcessRows(rows, isTest := false) {
+        currentStudies := []
+
+        for row in rows {
+            rowText := row.Name
+            ; Find any accession numbers
+            accessions := []
+            pos := 1
+            while (pos := RegExMatch(rowText, "\d{8}", &accMatch, pos)) {
+                accessions.Push(accMatch[0])
+                pos += StrLen(accMatch[0])
+            }
+
+            ; Find study type (any uppercase string that starts with two letters)
+            if RegExMatch(rowText, "[A-Z]{2}\s[A-Z\s]+?(?=\s+\d|$)", &studyMatch) {
+                studyType := Trim(studyMatch[0])
+
+                ; Add entry for each new accession
+                for acc in accessions {
+                    if !this.HasAccession(acc) {
+                        currentStudies.Push({
+                            studyType: studyType,
+                            accession: acc
+                        })
+                    }
+                }
+            }
+        }
+
+        ; Add new studies to known accessions and prepare notifications
+        newStudies := []
+        for study in currentStudies {
+            newStudies.Push(study)
+            this.knownAccessions.Push(study.accession)
+        }
+
+        ; Alert if new studies found
+        if newStudies.Length > 0 {
+            if (isTest || this.testMode) {
+                this.testLastNewStudies := newStudies
+            } else {
+                this.AlertNewCases(newStudies)
+            }
+        }
+
+        return newStudies
+    }
+
     static AlertNewCases(newStudies) {
+        if (this.testMode) {
+            this.testLastNewStudies := newStudies
+            return
+        }
         if Settings.Get("AudioAlertNewCase") {
             Settings.PlayAlertSound(Settings.Get("AlertSound"))
         }

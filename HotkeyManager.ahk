@@ -5,6 +5,11 @@ class HotkeyManager {
     static activeHotkeys := Map()  ; funcName -> {hotkey: "^j", scope: "PACS"}
     static hotkeyFunctions := Map()
 
+    ; Why the last Register call failed. Registration reports failure by return value
+    ; rather than a dialog, so ApplyBinds can collect every failure and show one
+    ; message instead of a dialog per bind.
+    static lastError := ""
+
     ; Scope names in the order they are presented, and the only values persisted to a
     ; profile. "Any" means the bind fires regardless of which window has focus.
     static scopes := [
@@ -81,6 +86,8 @@ class HotkeyManager {
     }
 
     static Register(funcName, hotkeyStr, callback, scope := "Any") {
+        this.lastError := ""
+
         ; Drop any previous registration first, in the context it was made under
         this.Unregister(funcName)
 
@@ -89,7 +96,7 @@ class HotkeyManager {
             return true
 
         if !callback {
-            MsgBox("No action is defined for '" funcName "'. The keybind was not applied.", "Keybind Error", "Icon!")
+            this.lastError := "no command is defined for it"
             return false
         }
 
@@ -104,7 +111,7 @@ class HotkeyManager {
             this.activeHotkeys[funcName] := {hotkey: hotkeyStr, scope: scope}
             return true
         } catch as err {
-            MsgBox("Error setting hotkey: " hotkeyStr " for " funcName "`nError: " err.Message)
+            this.lastError := err.Message
             return false
         } finally {
             this.ExitScope()
