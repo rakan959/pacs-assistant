@@ -24,6 +24,17 @@ class PACSCommands {
     ; A window title or body that looks like an unsaved-changes prompt
     static savePromptPattern := "i)(save|unsaved)"
 
+    static psWindowTitle := "PowerScribe 360 | Reporting ahk_exe Nuance.PowerScribe360.exe"
+
+    ; Positional path to the report text. Brittle - kept only as a last resort behind
+    ; a property-based lookup.
+    static reportPath := "YYYYV"
+
+    ; Whether a piece of text reads like a report body rather than some other field
+    static LooksLikeReport(text) {
+        return RegExMatch(text, "i)EXAMINATION:") > 0
+    }
+
     static CreateCustomKeybind(keys, targetWindow := "") {
         ; Create a function that stores its configuration
         func := targetWindow != "" ?
@@ -94,6 +105,61 @@ closeKill(x) {
             ProcessClose(WinGetProcessName(x))
         }
     }
+}
+
+/**
+ * Reads the text of the report currently open in PowerScribe.
+ *
+ * The report control used to be addressed by a fixed positional path. When
+ * PowerScribe's element tree shifted, that path stopped resolving and threw, taking
+ * the whole wet read down with it - the sticky note never got pasted either
+ * (issue #28). Candidates are matched on their control type instead, and the one
+ * whose text actually reads like a report wins; the positional path is only a last
+ * resort.
+ *
+ * @returns the report text, or "" if it could not be read
+ */
+readReportText() {
+    try {
+        root := UIA.ElementFromHandle(PACSCommands.psWindowTitle)
+    } catch {
+        return ""
+    }
+
+    ; The report editor presents as a Document, but has been seen as a plain Edit
+    best := ""
+    for condition in [{Type: "Document"}, {Type: "Edit"}] {
+        elements := ""
+        try {
+            elements := root.FindElements(condition)
+        } catch {
+            continue
+        }
+
+        for el in elements {
+            text := ""
+            try text := el.Value
+            if (text = "")
+                continue
+
+            ; A real report names the study, so prefer that over any other text field
+            if PACSCommands.LooksLikeReport(text)
+                return text
+
+            if (StrLen(text) > StrLen(best))
+                best := text
+        }
+    }
+
+    if (best != "")
+        return best
+
+    ; Positional fallback for the case where nothing matched by type
+    try {
+        return root.ElementFromPath(PACSCommands.reportPath).Value
+    }
+
+    return ""
 }
 
 /**
@@ -294,13 +360,16 @@ wetRead() {
 		return
 	}
 
-	; Read current report for attending selection
-	try {
-		NuanceEl := UIA.ElementFromHandle("PowerScribe 360 | Reporting ahk_exe Nuance.PowerScribe360.exe")
-		haystack := NuanceEl.ElementFromPath("YYYYV").Value
-		checkAttending(haystack)
-	} catch {
-		; continue even if attending detection fails
+	; Read current report for attending selection. A failure here must not abort the
+	; wet read - the sticky note is the point - but it does get reported at the end,
+	; because a report that silently keeps the wrong attending goes to the wrong queue.
+	attendingRouted := false
+	haystack := readReportText()
+	if (haystack != "") {
+		try {
+			checkAttending(haystack)
+			attendingRouted := true
+		}
 	}
 
 	; Activate Vue PACS and open sticky notes
@@ -410,6 +479,10 @@ wetRead() {
 
 	if !success {
 		MsgBox("Wet read may not have pasted fully. Please verify the sticky note.")
+	}
+
+	if !attendingRouted {
+		MsgBox("Could not read the report from PowerScribe, so the attending was not assigned. Set it manually.", "Attending Not Assigned", "Icon!")
 	}
 	Return
 }
