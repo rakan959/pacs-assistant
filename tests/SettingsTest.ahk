@@ -6,7 +6,8 @@ class SettingsTest {
     static Tests := [
         "TestDefaultSettingsLoaded",
         "TestSetAndGetValues",
-        "TestSystemSoundMappings",
+        "TestAlertSoundsAreDistinct",
+        "TestLegacySoundNamesMigrate",
         "TestFindSoundIndexFallback"
     ]
 
@@ -26,8 +27,10 @@ class SettingsTest {
         Assert.False(Settings.Get("MessageBoxNewCase"))
         Assert.True(Settings.Get("AutoConvertWetReadLineEndings"))
         Assert.True(Settings.Get("RestrictHotkeysByActiveWindow"))
-        Assert.Equal("Default", Settings.Get("AlertSound"))
+        Assert.Equal("Default Beep", Settings.Get("AlertSound"))
         Assert.Equal("", Settings.Get("CustomSoundFile"))
+        Assert.False(Settings.Get("SwapMicrophoneOnLogin"))
+        Assert.Equal("", Settings.Get("MicrophoneName"))
     }
     
     TestSetAndGetValues() {
@@ -47,18 +50,38 @@ class SettingsTest {
         Assert.Equal("Asterisk", Settings.Get("AlertSound"))
     }
     
-    TestSystemSoundMappings() {
-        Assert.Equal("*-1", Settings.GetSystemSoundValue("Default"))
-        Assert.Equal("*64", Settings.GetSystemSoundValue("Asterisk"))
-        Assert.Equal("*48", Settings.GetSystemSoundValue("Exclamation"))
-        Assert.Equal("*16", Settings.GetSystemSoundValue("Hand"))
-        Assert.Equal("*32", Settings.GetSystemSoundValue("Question"))
+    ; The alert sounds used to be MessageBeep aliases, which the stock Windows sound
+    ; scheme collapses onto a couple of files, so every option sounded the same. Each
+    ; one must now resolve to its own file.
+    TestAlertSoundsAreDistinct() {
+        seen := Map()
+        for name, file in Settings.soundFiles {
+            path := Settings.ResolveSoundFile(name)
+            Assert.True(path != "", "No file for alert sound: " name " (" file ")")
+            Assert.False(seen.Has(path), "Alert sound reuses another sound's file: " name)
+            seen[path] := name
+        }
+        Assert.Equal(Settings.soundFiles.Count, seen.Count)
+
+        ; These two are handled without a file
+        Assert.Equal("", Settings.ResolveSoundFile("Default Beep"))
+        Assert.Equal("", Settings.ResolveSoundFile("Custom File"))
     }
-    
+
+    TestLegacySoundNamesMigrate() {
+        Assert.Equal("Default Beep", Settings.NormalizeSoundName("Default"))
+        Assert.Equal("Notification", Settings.NormalizeSoundName("Asterisk"))
+        Assert.Equal("Chime", Settings.NormalizeSoundName("Exclamation"))
+        Assert.Equal("Chord", Settings.NormalizeSoundName("Hand"))
+        Assert.Equal("Ding", Settings.NormalizeSoundName("Question"))
+        Assert.Equal("Tada", Settings.NormalizeSoundName("Tada"))
+        Assert.Equal("Default Beep", Settings.NormalizeSoundName("NotRealSound"))
+    }
+
     TestFindSoundIndexFallback() {
-        Assert.Equal(1, Settings.FindSoundIndex("Default"))
-        Assert.Equal(2, Settings.FindSoundIndex("Asterisk"))
-        Assert.Equal(1, Settings.FindSoundIndex("NotRealSound"))  ; should fall back to first entry
+        Assert.Equal("Default Beep", Settings.alertSounds[Settings.FindSoundIndex("Default")])
+        Assert.Equal("Notification", Settings.alertSounds[Settings.FindSoundIndex("Asterisk")])
+        Assert.Equal("Default Beep", Settings.alertSounds[Settings.FindSoundIndex("NotRealSound")])
     }
     
     Teardown() {

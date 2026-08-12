@@ -7,19 +7,24 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 ### Quick commands (bind to any key)
 - Toggle Dictation, Draft Report, Sign Report
 - Select Next/Previous Field, Delete Previous/Next Word
-- Open/Force Restart PACS
+- Open/Force Restart PACS (asks PowerScribe to save first, answering the save prompt)
 - Paste Wet Read (optional LF→CRLF conversion; choose Ctrl+V, UIA Value, or ControlSetText paste)
 - Toggle PowerScribe / EPIC windows, Next/Previous Series
+- Set PowerScribe Microphone
 
 ### Profiles & custom binds
 - Multiple profiles with default selection
 - Custom keybind creator (send keys to any window)
 - GUI to add/change/remove binds and set a default profile
+- Per-bind scope: limit a shortcut to PACS, PowerScribe, or both. Outside its scope the
+  key is passed through to whatever app is focused rather than being swallowed
+- Per-modality attending assignment, used when routing a wet read
 
 ### Monitoring & notifications
 - Auto-refresh PACS (interval configurable)
 - New study detection with tray notifications and optional sounds
-- Per-setting controls for audio and message notifications
+- Alert sounds are backed by distinct files, so the options are audibly different
+- Warns if the refresh button can't be found instead of failing silently
 
 ### Updates
 - Optional auto-check for updates
@@ -39,21 +44,49 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 3) **Wet read workflow**
 - Copy your wet read text to clipboard.
 - Use the wet read hotkey; if prompted, pick a paste method (Ctrl+V/UIA Value/ControlSetText).
-- Enable “Convert clipboard line endings” in Settings to normalize LF→CRLF before pasting.
+- Enable "Convert clipboard line endings" in Settings to normalize LF→CRLF before pasting.
+
+4) **Keybind scope**
+- Select a bind and click **Set Scope**.
+- Tick PACS and/or PowerScribe to fire only when one of them is in front; leave both
+  unticked for a bind that works everywhere.
+
+5) **Modality attendings**
+- Click **Modality Attendings** to assign an attending per modality for the current profile.
+- Wet reads route to the attending assigned to the study's modality.
+- Leave a modality blank to keep whatever default attending PowerScribe already has.
+- Assignments are per profile, so a call shift assigned by modality can be its own profile.
 
 ## Settings
 - Auto refresh PACS + interval
 - Convert clipboard line endings (LF→CRLF) for wet reads
-- Notifications: sound on/off, message popups, choose system sound, custom sound file
+- PowerScribe: set microphone on login, and the name to match (part of the name is
+  enough — `PowerMic` matches `PowerMic III`)
+- Notifications: sound on/off, message popups, choose alert sound, custom sound file
 - Updates: auto-check toggle, skip betas
 
+Hotkey scope is set per bind from the main window, not here.
+
 ## Tests
-- Run all tests:\
+
+All suites are headless and exit non-zero on failure.
+
+- Module tests:\
   `& "$Env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe" /ErrorStdOut tests/RunTests.ahk`
-- Test runner suppresses MsgBoxes and writes results to stdout.
+- Logic tests (modality classification, alert sounds, scopes, profile persistence):\
+  `& "$Env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe" /ErrorStdOut tests/run-tests.ahk`
+- Hotkey tests (registers real hotkeys and synthesises keystrokes):\
+  `& "$Env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe" /ErrorStdOut tests/run-hotkey-tests.ahk`
+- GUI smoke test (builds every window; windows flash on screen):\
+  `& "$Env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe" /ErrorStdOut tests/run-gui-smoke.ahk`
+
+The module test runner suppresses MsgBoxes and writes results to stdout.
+
+Syntax check without running:\
+`& "$Env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe" /validate /ErrorStdOut main.ahk`
 
 ## CI / builds
-- GitHub Actions builds on every push:\
+- GitHub Actions builds on every push using a GitHub-hosted Windows runner:\
   - Tagged pushes publish a release with `pacs-assistant.exe`.\
   - Other pushes upload a `pacs-assistant-dev` artifact for quick testing.
 

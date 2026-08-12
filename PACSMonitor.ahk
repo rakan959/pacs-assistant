@@ -4,21 +4,37 @@
 class PACSMonitor {
     static knownAccessions := []
     static refreshTimer := 0
+
     static testMode := false          ; When true, avoid UI automation and use test data
     static testStudyRows := []        ; Rows to process in test mode
     static testRefreshCalls := 0      ; Counter for RefreshAndCheck invocations in test mode
     static testLastNewStudies := []   ; Captured new studies in test mode
-    
+
+    static portalTitle := "Explorer Portal ahk_exe msedge.exe"
+
+    ; Positional UIA paths. These are brittle - they encode the portal's layout, so
+    ; they break whenever it shifts - and are only used as a fallback behind a
+    ; property-based lookup.
+    static refreshButtonPath := "Y/YYY/YqYYYVRvrRK"
+    static studyListPath := "Y/YYY/YqYYYVRxrTR"
+
+    ; Refresh failures used to be swallowed entirely: the portal kept being scraped,
+    ; so new studies still alerted, while nothing was actually being refreshed and
+    ; nothing said so. Count them and speak up once instead.
+    static consecutiveRefreshFailures := 0
+    static refreshFailureThreshold := 3
+    static refreshFailureNotified := false
+
     static Start() {
         ; Clear known accessions
         this.knownAccessions := []
-        
+
         ; Start monitoring if enabled
         if Settings.Get("AutoRefreshPACS") {
             this.StartMonitoring()
         }
     }
-    
+
     static StartMonitoring() {
         ; Clear any existing timer
         if this.refreshTimer {
@@ -27,7 +43,7 @@ class PACSMonitor {
             }
             this.refreshTimer := 0
         }
-        
+
         ; Set up new timer if auto-refresh is enabled
         if Settings.Get("AutoRefreshPACS") {
             ; In tests, skip real timers and just run once
@@ -38,13 +54,13 @@ class PACSMonitor {
                 interval := Settings.Get("RefreshInterval") * 1000  ; Convert to milliseconds
                 this.refreshTimer := ObjBindMethod(this, "RefreshAndCheck")
                 SetTimer(this.refreshTimer, interval)
-                
+
                 ; Do an initial refresh
                 this.RefreshAndCheck()
             }
         }
     }
-    
+
     static StopMonitoring() {
         if this.refreshTimer {
             if (this.refreshTimer != -1) {
@@ -57,60 +73,160 @@ class PACSMonitor {
             this.testLastNewStudies := []
         }
     }
-    
+
     static OnSettingsChanged() {
+        ; Reset failure state so a fixed setup is not still complaining
+        this.consecutiveRefreshFailures := 0
+        this.refreshFailureNotified := false
+
         ; Restart monitoring with new settings
         this.StartMonitoring()
     }
-    
+
+    /**
+     * Locates the portal's refresh button.
+     * Properties are tried before the positional path so a layout change no longer
+     * silently disables refreshing.
+     * @returns the button element, or 0 if it cannot be found
+     */
+    static FindRefreshButton(root) {
+        conditions := [
+            {Type: "Button", Name: "Refresh", mm: "SubString", cs: false},
+            {Type: "Button", AutomationId: "refresh", mm: "SubString", cs: false}
+        ]
+        for condition in conditions {
+            try {
+                return root.FindElement(condition)
+            }
+        }
+
+        ; Positional fallback
+        try {
+            return root.ElementFromPath(this.refreshButtonPath)
+        }
+
+        return 0
+    }
+
+    /**
+     * Locates the study list. The positional path is tried first here because it is
+     * the one that has been working; the property lookups only cover it breaking.
+     * @returns the list element, or 0 if it cannot be found
+     */
+    static FindStudyList(root) {
+        try {
+            return root.ElementFromPath(this.studyListPath)
+        }
+
+        for condition in [{Type: "Table"}, {Type: "DataGrid"}, {Type: "List"}] {
+            try {
+                return root.FindElement(condition)
+            }
+        }
+
+        return 0
+    }
+
+    /**
+     * Clicks refresh in the portal.
+     * @returns true if the button was found and actioned
+     */
+    static ClickRefresh() {
+        try {
+            root := UIA.ElementFromHandle(this.portalTitle)
+        } catch {
+            return false
+        }
+
+        button := this.FindRefreshButton(root)
+        if !button
+            return false
+
+        ; Invoke through the UIA pattern first. That works even when the portal is
+        ; minimised or the button is scrolled out of view, which a positional click
+        ; does not. Click() with no arguments returns the pattern it used, or 0 when
+        ; the element exposes none.
+        try {
+            if button.Click()
+                return true
+        }
+
+        ; Fall back to the positional click the previous implementation used
+        try {
+            button.ControlClick()
+            return true
+        }
+
+        return false
+    }
+
+    static RecordRefreshResult(succeeded) {
+        if succeeded {
+            this.consecutiveRefreshFailures := 0
+            this.refreshFailureNotified := false
+            return
+        }
+
+        this.consecutiveRefreshFailures++
+        if (this.consecutiveRefreshFailures >= this.refreshFailureThreshold && !this.refreshFailureNotified) {
+            this.refreshFailureNotified := true
+            TrayTip("PACS auto-refresh is not working",
+                    "The refresh button could not be found in Explorer Portal. New study alerts still work, but the list is not being refreshed.",
+                    "Icon!")
+        }
+    }
+
     static RefreshAndCheck() {
         if (this.testMode) {
             this.testRefreshCalls++
-            rows := this.testStudyRows
-            return this.ProcessRows(rows, true)
+            return this.ProcessRows(this.testStudyRows, true)
         }
 
         try {
             ; Try to get the Explorer Portal window
-            if !WinExist("Explorer Portal ahk_exe msedge.exe") {
+            if !WinExist(this.portalTitle) {
                 return  ; Portal not open, skip this check
             }
-            
+
             ; Skip refresh if Explorer Portal is the active window
-            if WinActive("Explorer Portal ahk_exe msedge.exe") {
+            if WinActive(this.portalTitle) {
                 return  ; Don't refresh when user is actively using the portal
             }
-            
+
             ; Store the currently active window
             previousWindow := WinExist("A")
-            
-            ; Click refresh button
-            msedgeEl := UIA.ElementFromHandle("Explorer Portal ahk_exe msedge.exe")
-            msedgeEl.ElementFromPath("Y/YYY/YqYYYVRvrRK").ControlClick()
+
+            refreshed := this.ClickRefresh()
 
             ; Restore the previously active window
-            if IsSet(previousWindow) && previousWindow && WinExist(previousWindow) {
+            if (previousWindow && WinExist("ahk_id " previousWindow)) {
                 WinActivate("ahk_id " previousWindow)
             }
 
+            this.RecordRefreshResult(refreshed)
+
             ; Wait a moment for the refresh to complete
             Sleep(1000)
-            
+
             ; Get current accession numbers and study info
-            msedgeEl := UIA.ElementFromHandle("Explorer Portal ahk_exe msedge.exe")
-            rows := msedgeEl.ElementFromPath("Y/YYY/YqYYYVRxrTR")
-            this.ProcessRows(rows)
+            root := UIA.ElementFromHandle(this.portalTitle)
+            studyList := this.FindStudyList(root)
+            if !studyList
+                return
+
+            this.ProcessRows(studyList)
+
         } catch as err {
             ; Silent fail - we don't want to interrupt the user with error messages
             ; during background monitoring
-            
+
             ; Still try to restore the active window if we have it
-            if IsSet(previousWindow) && previousWindow && WinExist(previousWindow) {
+            if (IsSet(previousWindow) && previousWindow && WinExist("ahk_id " previousWindow)) {
                 WinActivate("ahk_id " previousWindow)
             }
         }
     }
-    
+
     static HasAccession(accession) {
         for known in this.knownAccessions {
             if (known = accession)
@@ -118,10 +234,10 @@ class PACSMonitor {
         }
         return false
     }
-    
+
     static ProcessRows(rows, isTest := false) {
         currentStudies := []
-        
+
         for row in rows {
             rowText := row.Name
             ; Find any accession numbers
@@ -131,11 +247,11 @@ class PACSMonitor {
                 accessions.Push(accMatch[0])
                 pos += StrLen(accMatch[0])
             }
-            
+
             ; Find study type (any uppercase string that starts with two letters)
             if RegExMatch(rowText, "[A-Z]{2}\s[A-Z\s]+?(?=\s+\d|$)", &studyMatch) {
                 studyType := Trim(studyMatch[0])
-                
+
                 ; Add entry for each new accession
                 for acc in accessions {
                     if !this.HasAccession(acc) {
@@ -147,14 +263,14 @@ class PACSMonitor {
                 }
             }
         }
-        
+
         ; Add new studies to known accessions and prepare notifications
         newStudies := []
         for study in currentStudies {
             newStudies.Push(study)
             this.knownAccessions.Push(study.accession)
         }
-        
+
         ; Alert if new studies found
         if newStudies.Length > 0 {
             if (isTest || this.testMode) {
@@ -166,38 +282,29 @@ class PACSMonitor {
 
         return newStudies
     }
-    
+
     static AlertNewCases(newStudies) {
         if (this.testMode) {
             this.testLastNewStudies := newStudies
             return
         }
         if Settings.Get("AudioAlertNewCase") {
-            selectedSound := Settings.Get("AlertSound")
-            if (selectedSound = "Custom File") {
-                customFile := Settings.Get("CustomSoundFile")
-                if customFile && FileExist(customFile)
-                    SoundPlay(customFile)
-                else
-                    SoundPlay("*-1")  ; Fallback to default if custom file not found
-            } else {
-                SoundPlay(Settings.GetSystemSoundValue(selectedSound))
-            }
+            Settings.PlayAlertSound(Settings.Get("AlertSound"))
         }
-        
+
         if Settings.Get("MessageBoxNewCase") {
             ; Create a TrayTip for each new study
             for study in newStudies {
                 TrayTip("New Study Available", study.studyType, "Iconi")
             }
-            
+
             ; If there are multiple studies, show a summary notification
             if newStudies.Length > 1 {
                 Sleep(1000)  ; Wait a bit to not overlap notifications
-                TrayTip("Multiple New Studies", 
+                TrayTip("Multiple New Studies",
                        newStudies.Length " new studies available",
                        "Iconi")
             }
         }
     }
-} 
+}

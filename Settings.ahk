@@ -9,29 +9,88 @@ class Settings {
         "RefreshInterval", 60,
         "AudioAlertNewCase", false,
         "MessageBoxNewCase", false,
-        "AlertSound", "Default",  ; Default system sound
-        "CustomSoundFile", "",    ; Path to custom sound file
+        "AlertSound", "Default Beep",  ; Name from alertSounds
+        "CustomSoundFile", "",         ; Path to custom sound file
         "AutoConvertWetReadLineEndings", true,  ; Convert LF to CRLF when pasting wet reads
-        "RestrictHotkeysByActiveWindow", true   ; Default: only active in PACS/PowerScribe/EPIC
+        "SwapMicrophoneOnLogin", false,
+        "MicrophoneName", "",          ; Blank = leave PowerScribe's selection alone
+        ; Superseded by per-bind scopes, kept only so profiles written under the older
+        ; [KeybindScopes] scheme migrate to the right scope. See
+        ; ProfileManager.MigrateLegacyScope.
+        "RestrictHotkeysByActiveWindow", true
     )
-    
-    ; Predefined system sounds
-    static systemSounds := [
-        "Default",           ; Default beep
-        "Asterisk",         ; Information
-        "Exclamation",      ; Warning
-        "Hand",             ; Error
-        "Question",         ; Question
-        "Custom File"       ; Option to use custom file
+
+    ; Settings persisted as "1"/"0" rather than as free text
+    static booleanSettings := [
+        "AutoUpdate",
+        "SkipBetaVersions",
+        "AutoRefreshPACS",
+        "AudioAlertNewCase",
+        "MessageBoxNewCase",
+        "AutoConvertWetReadLineEndings",
+        "SwapMicrophoneOnLogin",
+        "RestrictHotkeysByActiveWindow"
     ]
-    
+
+    ; Alert sounds, each backed by a distinct file shipped in %WinDir%\Media.
+    ;
+    ; The previous implementation used SoundPlay's "*N" aliases (MessageBeep). Those
+    ; do not name sounds, they name *sound scheme events*, and the stock Windows
+    ; scheme points several events at one file - Asterisk, Exclamation and the
+    ; default beep all resolve to Windows Background.wav, and Question resolves to
+    ; nothing at all. Every option therefore played the same thing. Naming the files
+    ; directly is what actually makes the choices audibly different.
+    static soundFiles := Map(
+        "Chime",        "chimes.wav",
+        "Ding",         "ding.wav",
+        "Chord",        "chord.wav",
+        "Notification", "Windows Notify System Generic.wav",
+        "Ring",         "Ring01.wav",
+        "Alarm",        "Alarm01.wav",
+        "Tada",         "tada.wav"
+    )
+
+    ; Order shown in the settings dropdown. "Default Beep" is a generated tone, so it
+    ; works even on a machine with a stripped Media folder; "Custom File" defers to
+    ; the user's own file.
+    static alertSounds := [
+        "Default Beep",
+        "Chime",
+        "Ding",
+        "Chord",
+        "Notification",
+        "Ring",
+        "Alarm",
+        "Tada",
+        "Custom File"
+    ]
+
+    ; Sound names written by versions <= v2.0b4, mapped onto their closest replacement
+    ; so an existing settings.ini keeps working (and finally sounds distinct).
+    static legacySoundAliases := Map(
+        "Default",     "Default Beep",
+        "Asterisk",    "Notification",
+        "Exclamation", "Chime",
+        "Hand",        "Chord",
+        "Question",    "Ding"
+    )
+
     static __New() {
         ; Create settings file if it doesn't exist
         if !FileExist(this.settingsFile) {
             this.SaveAllSettings()
         }
     }
-    
+
+    ; Whether a setting is stored as a boolean flag
+    static IsBooleanSetting(settingName) {
+        for name in this.booleanSettings {
+            if (name = settingName)
+                return true
+        }
+        return false
+    }
+
     ; Get a setting value, returns the default if not found
     static Get(settingName) {
         try {
@@ -40,10 +99,7 @@ class Settings {
             if (settingName = "RefreshInterval")
                 return Integer(value)
             ; Handle boolean values
-            if (settingName = "AutoUpdate" || settingName = "SkipBetaVersions" 
-                || settingName = "AutoRefreshPACS" || settingName = "AudioAlertNewCase" 
-                || settingName = "MessageBoxNewCase" || settingName = "AutoConvertWetReadLineEndings"
-                || settingName = "RestrictHotkeysByActiveWindow")
+            if this.IsBooleanSetting(settingName)
                 return value = "1" ? true : false
             ; Return string values as is
             return value
@@ -51,17 +107,14 @@ class Settings {
             return this.defaultSettings.Has(settingName) ? this.defaultSettings[settingName] : false
         }
     }
-    
+
     ; Save a setting value
     static Set(settingName, value) {
         ; Handle numeric values
         if (settingName = "RefreshInterval")
             IniWrite(value, this.settingsFile, "Settings", settingName)
         ; Handle boolean values
-        else if (settingName = "AutoUpdate" || settingName = "SkipBetaVersions" 
-            || settingName = "AutoRefreshPACS" || settingName = "AudioAlertNewCase" 
-            || settingName = "MessageBoxNewCase" || settingName = "AutoConvertWetReadLineEndings"
-            || settingName = "RestrictHotkeysByActiveWindow")
+        else if this.IsBooleanSetting(settingName)
             IniWrite(value ? "1" : "0", this.settingsFile, "Settings", settingName)
         ; Handle string values
         else
@@ -97,19 +150,29 @@ class Settings {
         
         ; PACS section
         y += 100  ; Consistent spacing between sections
-        settingsGui.Add("GroupBox", "x" margin " y" y " w" contentWidth " h170", "PACS")
+        settingsGui.Add("GroupBox", "x" margin " y" y " w" contentWidth " h140", "PACS")
         pacsY := y + 25
         checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x" margin+10 " y" pacsY, "Auto refresh PACS")
-        pacsY += 25
+        pacsY += 28
         settingsGui.Add("Text", "x" margin+10 " y" pacsY, "Refresh interval (seconds):")
-        refreshIntervalEdit := settingsGui.Add("Edit", "x" margin+10 " y" pacsY+5 " w60 Number", this.Get("RefreshInterval"))
-        pacsY += 35
+        ; The edit sits below its label, not 5px under it - at the old offset the two
+        ; drew on top of each other
+        refreshIntervalEdit := settingsGui.Add("Edit", "x" margin+10 " y" pacsY+22 " w60 Number", this.Get("RefreshInterval"))
+        pacsY += 52
         checkboxes["AutoConvertWetReadLineEndings"] := settingsGui.Add("Checkbox", "x" margin+10 " y" pacsY, "Convert clipboard line endings")
-        pacsY += 25
-        checkboxes["RestrictHotkeysByActiveWindow"] := settingsGui.Add("Checkbox", "x" margin+10 " y" pacsY, "Restrict hotkeys to PACS/PowerScribe/EPIC")
+
+        ; Hotkey scope is set per keybind now (main window > Set Scope), so there is no
+        ; global restrict checkbox here any more.
+
+        ; PowerScribe section
+        y += 160
+        settingsGui.Add("GroupBox", "x" margin " y" y " w" contentWidth " h120", "PowerScribe")
+        checkboxes["SwapMicrophoneOnLogin"] := settingsGui.Add("Checkbox", "x" margin+10 " y" y+25, "Set microphone on login")
+        settingsGui.Add("Text", "x" margin+10 " y+15", "Microphone (blank = leave unchanged):")
+        micNameEdit := settingsGui.Add("Edit", "x" margin+10 " y+5 w" contentWidth-20, this.Get("MicrophoneName"))
 
         ; Notifications section
-        y += 220  ; Spacing after larger PACS section
+        y += 140  ; Increased spacing between sections
         notificationsY := y
         
         ; Calculate height for notifications section based on its contents:
@@ -132,7 +195,7 @@ class Settings {
         
         ; Sound selection
         settingsGui.Add("Text", "x" margin+10 " y+15", "Alert Sound:")
-        soundDropDown := settingsGui.Add("DropDownList", "x" margin+10 " y+5 w" contentWidth-20, this.systemSounds)
+        soundDropDown := settingsGui.Add("DropDownList", "x" margin+10 " y+5 w" contentWidth-20, this.alertSounds)
         soundDropDown.Value := this.FindSoundIndex(this.Get("AlertSound"))
         
         ; Custom sound file section
@@ -159,8 +222,15 @@ class Settings {
         startX := margin + (contentWidth - totalButtonWidth) // 2
         
         ; Add buttons with proper alignment
+        controls := {
+            checkboxes: checkboxes,
+            refreshInterval: refreshIntervalEdit,
+            micName: micNameEdit,
+            soundDropDown: soundDropDown,
+            customSound: customSoundEdit
+        }
         settingsGui.Add("Button", "x" startX " y" y " w" buttonWidth, "Save")
-            .OnEvent("Click", (*) => this.SaveSettings(checkboxes, refreshIntervalEdit, soundDropDown, customSoundEdit, settingsGui))
+            .OnEvent("Click", (*) => this.SaveSettings(controls, settingsGui))
         settingsGui.Add("Button", "x+" spacing " yp w" buttonWidth, "Cancel")
             .OnEvent("Click", (*) => settingsGui.Destroy())
         
@@ -171,72 +241,128 @@ class Settings {
         settingsGui.Show()
     }
     
-    ; Find index of sound in systemSounds array
+    ; Find index of sound in alertSounds array
     static FindSoundIndex(sound) {
-        loop this.systemSounds.Length {
-            if (this.systemSounds[A_Index] = sound)
+        sound := this.NormalizeSoundName(sound)
+        loop this.alertSounds.Length {
+            if (this.alertSounds[A_Index] = sound)
                 return A_Index
         }
         return 1  ; Default if not found
     }
-    
+
+    ; Map a stored sound name onto a currently supported one
+    static NormalizeSoundName(sound) {
+        if this.legacySoundAliases.Has(sound)
+            return this.legacySoundAliases[sound]
+        for name in this.alertSounds {
+            if (name = sound)
+                return name
+        }
+        return "Default Beep"
+    }
+
+    ; Full path of the .wav backing a named sound, or "" if it has no file
+    ; (or the file is missing on this machine)
+    static ResolveSoundFile(sound) {
+        sound := this.NormalizeSoundName(sound)
+        if !this.soundFiles.Has(sound)
+            return ""
+        path := A_WinDir "\Media\" this.soundFiles[sound]
+        return FileExist(path) ? path : ""
+    }
+
+    ; Play an alert sound. Returns true if the requested sound played; false if it
+    ; could not and the fallback beep was used instead - the alert is never silent.
+    static PlayAlertSound(sound, customFile?) {
+        sound := this.NormalizeSoundName(sound)
+
+        if (sound = "Custom File") {
+            file := IsSet(customFile) ? customFile : this.Get("CustomSoundFile")
+            if (file != "" && FileExist(file)) {
+                try {
+                    SoundPlay(file)
+                    return true
+                }
+            }
+            SoundBeep(750, 300)
+            return false
+        }
+
+        if (sound != "Default Beep") {
+            path := this.ResolveSoundFile(sound)
+            if (path != "") {
+                try {
+                    SoundPlay(path)
+                    return true
+                }
+            }
+            SoundBeep(750, 300)
+            return false
+        }
+
+        SoundBeep(750, 300)
+        return true
+    }
+
     ; Browse for custom sound file
     static BrowseSound(editControl) {
         file := FileSelect(3,, "Select Sound File", "Sound Files (*.wav; *.mp3)")
         if file
             editControl.Value := file
     }
-    
+
     ; Test selected sound
     static TestSound(selectedSound, customFile) {
-        if (selectedSound = "Custom File" && customFile) {
-            try {
-                SoundPlay(customFile)
-            } catch {
-                MsgBox("Error playing custom sound file.", "Error", "Icon!")
-            }
-        } else {
-            SoundPlay(this.GetSystemSoundValue(selectedSound))
-        }
-    }
-    
-    ; Get system sound value
-    static GetSystemSoundValue(sound) {
-        switch sound {
-            case "Default": return "*-1"   ; Default beep
-            case "Asterisk": return "*64"
-            case "Exclamation": return "*48"
-            case "Hand": return "*16"
-            case "Question": return "*32"
-            default: return "*-1"
-        }
+        if this.PlayAlertSound(selectedSound, customFile)
+            return
+
+        if (selectedSound = "Custom File")
+            MsgBox("Could not play the custom sound file. Check that the file still exists and is a .wav or .mp3.", "Error", "Icon!")
+        else
+            MsgBox("'" selectedSound "' is not available on this machine (missing from " A_WinDir "\Media). Played the default beep instead.", "Sound Unavailable", "Icon!")
     }
     
     ; Save settings from GUI
-    static SaveSettings(checkboxes, refreshIntervalEdit, soundDropDown, customSoundEdit, settingsGui) {
+    static SaveSettings(controls, settingsGui) {
         ; Validate refresh interval
-        interval := Integer(refreshIntervalEdit.Value)
+        interval := Integer(controls.refreshInterval.Value)
         if (interval < 10) {
             MsgBox("Refresh interval must be at least 10 seconds.", "Invalid Setting", "Icon!")
             return
         }
-        
+
+        ; Validate the microphone name is present when the swap is enabled, otherwise
+        ; the setting silently does nothing
+        micName := Trim(controls.micName.Value)
+        if (controls.checkboxes["SwapMicrophoneOnLogin"].Value && micName = "") {
+            MsgBox("Enter a microphone name to select on login, or turn off 'Set microphone on login'.", "Invalid Setting", "Icon!")
+            return
+        }
+
         ; Save all checkbox settings
-        for setting, checkbox in checkboxes {
+        for setting, checkbox in controls.checkboxes {
             this.Set(setting, checkbox.Value)
         }
-        
+
         ; Save refresh interval
         this.Set("RefreshInterval", interval)
-        
+
+        ; Save microphone name
+        this.Set("MicrophoneName", micName)
+
         ; Save sound settings
-        this.Set("AlertSound", soundDropDown.Text)
-        this.Set("CustomSoundFile", customSoundEdit.Text)
-        
+        this.Set("AlertSound", controls.soundDropDown.Text)
+        this.Set("CustomSoundFile", controls.customSound.Text)
+
         settingsGui.Destroy()
-        
+
         ; Notify PACSMonitor of settings change
         if IsSet(PACSMonitor)
             PACSMonitor.OnSettingsChanged()
+
+        ; Notify MicrophoneManager of settings change
+        if IsSet(MicrophoneManager)
+            MicrophoneManager.OnSettingsChanged()
     }
 } 

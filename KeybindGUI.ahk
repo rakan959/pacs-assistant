@@ -10,6 +10,7 @@ class KeybindGUI {
     gui := ""
     static isListening := false
     static listeningControl := ""
+    static activeInputHook := 0
 
     __New() {
         ; Check for updates when starting (respect user setting)
@@ -40,37 +41,38 @@ class KeybindGUI {
         y := 70
         
         ; Create ListView for keybinds with adjusted column widths (removed Type column)
-        lv := this.gui.Add("ListView", "xm y" y " w400 h200", ["Function", "Keybind"])
-        
+        lv := this.gui.Add("ListView", "xm y" y " w520 h200", ["Function", "Keybind", "Active In"])
+
         ; Populate ListView with current bindings (no more type column)
         currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
         for funcName, bind in currentProfile.binds {
-            lv.Add(, funcName, this.PrettifyHotkey(bind))
+            lv.Add(, funcName, this.PrettifyHotkey(bind), this.ScopeLabel(funcName))
         }
 
         this.ResizeColumns(lv)
-        
-        ; Auto-size columns to fit content
-        lv.ModifyCol(1, "AutoHdr")  ; Function column - size to fit both content and header
-        lv.ModifyCol(2, "AutoHdr")  ; Keybind column - size to fit both content and header
-        
+
         ; Add buttons below ListView
         y += 210
         this.gui.Add("Button", "xm y" y " w120", "Add Function").OnEvent("Click", (*) => this.ShowAddFunctionDialog(lv))
         this.gui.Add("Button", "x+10 yp w120", "Remove Function").OnEvent("Click", (*) => this.RemoveFunction(lv))
         this.gui.Add("Button", "x+10 yp w120", "Change Keybind").OnEvent("Click", (*) => this.ChangeSelectedKeybind(lv))
-        
+        this.gui.Add("Button", "x+10 yp w120", "Set Scope").OnEvent("Click", (*) => this.ShowScopeDialog(lv))
+
         ; Add profile management buttons
         y += 30
         this.gui.Add("Button", "xm y" y, "Save").OnEvent("Click", (*) => this.SaveCurrentProfile())
         this.gui.Add("Button", "x+10", "Switch Profile").OnEvent("Click", (*) => (this.gui.Destroy(), this.ShowProfileSelector()))
-        
+
         ; Add Check for Updates button
         this.gui.Add("Button", "x+10", "Check for Updates").OnEvent("Click", (*) => UpdateChecker.ShowUpdateDialog())
-        
+
         ; Add Settings button
         this.gui.Add("Button", "x+10", "Settings").OnEvent("Click", (*) => Settings.ShowDialog())
-        
+
+        ; Add modality attending assignments
+        y += 30
+        this.gui.Add("Button", "xm y" y " w160", "Modality Attendings").OnEvent("Click", (*) => this.ShowModalityAttendingsDialog())
+
         this.gui.OnEvent("Close", (*) => ExitApp())
         this.gui.Show()
         
@@ -124,13 +126,8 @@ class KeybindGUI {
 
     CreateProfile(name, inputGui) {
         if name != "" {
-            ; Initialize an empty profile with both binds and customFuncs maps
-            ProfileManager.profiles[name] := {
-                binds: Map(),
-                scopes: Map(),
-                customFuncs: Map()
-            }
-            ProfileManager.SaveProfile(name, ProfileManager.profiles[name].binds, ProfileManager.profiles[name].customFuncs, ProfileManager.profiles[name].scopes)
+            ProfileManager.profiles[name] := ProfileManager.NewProfile()
+            ProfileManager.SaveProfile(name, ProfileManager.profiles[name])
             ProfileManager.currentProfile := name
             inputGui.Destroy()
             this.CreateMainGUI()
@@ -185,20 +182,40 @@ class KeybindGUI {
     }
 
     StartListening(control, funcName, *) {
-        if KeybindGUI.isListening
+        if !this.BeginListening(funcName, control)
             return
-        
+
+        control.Value := "Press keys..."
+    }
+
+    /**
+     * Takes ownership of key capture. Only one capture can be in flight at a time.
+     * @returns true if capture started
+     */
+    BeginListening(funcName, control, promptGui := 0) {
+        if KeybindGUI.isListening
+            return false
+
         KeybindGUI.isListening := true
         KeybindGUI.listeningControl := control
-        control.Value := "Press keys..."
-        
+        this.StartInputHook(funcName, control, promptGui)
+        return true
+    }
+
+    ; Creates the capture hook and records it so it can always be torn down again
+    StartInputHook(funcName, control, promptGui := 0) {
         ih := InputHook("V B")
         ih.KeyOpt("{All}", "E")
-        ih.OnEnd := this.OnInputEnd.Bind(this, funcName, control)
+        if (promptGui) {
+            ih.OnEnd := this.OnInputEnd.Bind(this, funcName, control, promptGui)
+        } else {
+            ih.OnEnd := this.OnInputEnd.Bind(this, funcName, control)
+        }
+        KeybindGUI.activeInputHook := ih
         ih.Start()
     }
 
-    OnInputEnd(funcName, control, promptGui := 0, ih?, scopeControl := 0) {
+    OnInputEnd(funcName, control, promptGui := 0, ih?) {
         ; Get current state of modifier keys
         hasCtrl := GetKeyState("Ctrl")
         hasAlt := GetKeyState("Alt")
@@ -223,14 +240,7 @@ class KeybindGUI {
         ; Skip if the key is just a modifier
         if key ~= "^[LR]?(Control|Alt|Shift|Win)$" {
             ; Create and start a new input hook since the old one is ended
-            newIh := InputHook("V B")
-            newIh.KeyOpt("{All}", "E")
-            if (promptGui) {
-                newIh.OnEnd := this.OnInputEnd.Bind(this, funcName, control, promptGui)
-            } else {
-                newIh.OnEnd := this.OnInputEnd.Bind(this, funcName, control)
-            }
-            newIh.Start()
+            this.StartInputHook(funcName, control, promptGui)
             return
         }
         
@@ -266,9 +276,6 @@ class KeybindGUI {
             
             ; Update profile
             ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName] := newBind
-            if (scopeControl) {
-                ProfileManager.profiles[ProfileManager.currentProfile].scopes[funcName] := scopeControl.Value ? "restricted" : "global"
-            }
             
             ; Update UI
             if (promptGui) {
@@ -296,18 +303,29 @@ class KeybindGUI {
         }
     }
 
+    /**
+     * Ends key capture and tears down the hook.
+     *
+     * Stopping the hook is the important part. A hook left running after its dialog
+     * went away kept listening, so the next key pressed anywhere fired OnInputEnd and
+     * silently rebound whichever function had been open - binds "breaking" with no
+     * apparent cause.
+     */
     StopListening() {
+        if KeybindGUI.activeInputHook {
+            try {
+                KeybindGUI.activeInputHook.Stop()
+            }
+            KeybindGUI.activeInputHook := 0
+        }
         KeybindGUI.isListening := false
         KeybindGUI.listeningControl := ""
     }
 
     SaveCurrentProfile() {
-        currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
         ProfileManager.SaveProfile(
-            ProfileManager.currentProfile, 
-            currentProfile.binds,
-            currentProfile.customFuncs,
-            currentProfile.scopes
+            ProfileManager.currentProfile,
+            ProfileManager.profiles[ProfileManager.currentProfile]
         )
         MsgBox("Profile saved successfully!", "Success")
         this.ApplyBinds()
@@ -326,9 +344,8 @@ class KeybindGUI {
         }
 
         for funcName, bind in currentProfile.binds {
-            scope := currentProfile.scopes.Has(funcName) ? currentProfile.scopes[funcName] : "default"
+            scope := currentProfile.scopes.Has(funcName) ? currentProfile.scopes[funcName] : "Any"
             try {
-                result := false
                 if (currentProfile.customFuncs.Has(funcName)) {
                     result := HotkeyManager.RegisterCustomHotkey(funcName, bind, currentProfile.customFuncs[funcName], scope)
                 } else {
@@ -336,13 +353,14 @@ class KeybindGUI {
                 }
 
                 if !result {
-                    failed.Push(funcName)
+                    failed.Push(funcName (HotkeyManager.lastError != "" ? " (" HotkeyManager.lastError ")" : ""))
                 }
             } catch as err {
                 failed.Push(funcName " (" err.Message ")")
             }
         }
 
+        ; One message for the whole apply rather than a dialog per bind
         if (failed.Length) {
             errMsg := "These keybinds failed to register:" "`n"
             for item in failed {
@@ -486,14 +504,13 @@ class KeybindGUI {
             if (currentProfile.binds.Has(funcName)) {
                 currentProfile.binds.Delete(funcName)
             }
-            
+            if (currentProfile.scopes.Has(funcName)) {
+                currentProfile.scopes.Delete(funcName)
+            }
+
             ; Save the current profile
-            ProfileManager.SaveProfile(
-                ProfileManager.currentProfile, 
-                currentProfile.binds,
-                currentProfile.customFuncs
-            )
-            
+            ProfileManager.SaveProfile(ProfileManager.currentProfile, currentProfile)
+
             ; Just destroy both GUIs and recreate them
             selectorGui.Destroy()
             this.gui.Destroy()
@@ -551,15 +568,15 @@ class KeybindGUI {
         
         ; Create the custom function
         ProfileManager.profiles[ProfileManager.currentProfile].customFuncs[funcName] := PACSCommands.CreateCustomKeybind(keys, window)
-        
-        ; Add to profile with empty binding
+
+        ; Add to profile with empty binding, active in any window until scoped
         ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName] := ""
-        ProfileManager.profiles[ProfileManager.currentProfile].scopes[funcName] := this.GetScopeDefault(funcName)
-        
+        ProfileManager.profiles[ProfileManager.currentProfile].scopes[funcName] := "Any"
+
         ; Add to ListView (removed type)
-        listView.Add(, funcName, "Unassigned")
+        listView.Add(, funcName, "Unassigned", this.ScopeLabel(funcName))
         this.ResizeColumns(listView)
-        
+
         customGui.Destroy()
         
         ; Prompt user to set the keybind
@@ -572,14 +589,14 @@ class KeybindGUI {
             return
         }
         
-        ; Add to profile with empty binding
+        ; Add to profile with empty binding, active in any window until scoped
         ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName] := ""
-        ProfileManager.profiles[ProfileManager.currentProfile].scopes[funcName] := this.GetScopeDefault(funcName)
-        
+        ProfileManager.profiles[ProfileManager.currentProfile].scopes[funcName] := "Any"
+
         ; Add to ListView (removed type)
-        listView.Add(, funcName, "Unassigned")
+        listView.Add(, funcName, "Unassigned", this.ScopeLabel(funcName))
         this.ResizeColumns(listView)
-        
+
         selectorGui.Destroy()
         
         ; Prompt user to set the keybind
@@ -596,8 +613,9 @@ class KeybindGUI {
         if (MsgBox("Remove '" funcName "' from the profile?", "Confirm Remove", "YesNo Icon!") = "Yes") {
             currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
             currentProfile.binds.Delete(funcName)
-            if (currentProfile.scopes.Has(funcName))
+            if (currentProfile.scopes.Has(funcName)) {
                 currentProfile.scopes.Delete(funcName)
+            }
             ; No longer delete the custom function itself, only its binding
             listView.Delete(listView.GetNext(0))
             this.ResizeColumns(listView)
@@ -616,32 +634,101 @@ class KeybindGUI {
     }
 
     PromptKeybind(funcName, listView) {
+        if KeybindGUI.isListening {
+            MsgBox("Already waiting for a keybind. Finish or cancel that one first.", "Keybind In Progress", "Icon!")
+            return
+        }
+
         promptGui := Gui(, "PACS Assistant - Set Keybind")
         promptGui.Add("Text",, "Press keys for '" funcName "'...")
         promptGui.Add("Edit", "w200 ReadOnly", "Press keys...")
-        scopeDefault := this.GetScopeDefault(funcName)
-        scopeCheckbox := promptGui.Add("Checkbox", "w250", "Only when PACS/PowerScribe/EPIC active")
-        scopeCheckbox.Value := scopeDefault = "restricted"
-        promptGui.Add("Button",, "Cancel").OnEvent("Click", (*) => (promptGui.Destroy(), this.StopListening()))
-        
-        ih := InputHook("V B")
-        ih.KeyOpt("{All}", "E")
-        ih.OnEnd := this.OnInputEnd.Bind(this, funcName, listView, promptGui, , scopeCheckbox)
-        ih.Start()
-        
-        promptGui.Show()
-    }
+        promptGui.Add("Button",, "Cancel").OnEvent("Click", (*) => (this.StopListening(), promptGui.Destroy()))
 
-    GetScopeDefault(funcName) {
-        currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
-        if (currentProfile.scopes.Has(funcName)) {
-            return currentProfile.scopes[funcName]
-        }
-        return Settings.Get("RestrictHotkeysByActiveWindow") ? "restricted" : "global"
+        ; Closing with the X has to tear the hook down as well, otherwise it keeps
+        ; capturing and rebinds the next key pressed anywhere
+        promptGui.OnEvent("Close", (*) => this.StopListening())
+
+        this.BeginListening(funcName, listView, promptGui)
+
+        promptGui.Show()
     }
 
     ResizeColumns(listView) {
         listView.ModifyCol(1, "AutoHdr")  ; Function column
         listView.ModifyCol(2, "AutoHdr")  ; Keybind column
+        listView.ModifyCol(3, "AutoHdr")  ; Scope column
+    }
+
+    ; How a bind's window scope reads in the ListView
+    ScopeLabel(funcName) {
+        scope := ProfileManager.GetScope(funcName)
+        return scope = "Any" ? "Any window" : scope
+    }
+
+    ShowScopeDialog(listView) {
+        if (listView.GetNext(0) = 0) {
+            MsgBox("Please select a function first.", "Error", "Icon!")
+            return
+        }
+
+        rowIndex := listView.GetNext(0)
+        funcName := listView.GetText(rowIndex, 1)
+        flags := HotkeyManager.FlagsFromScope(ProfileManager.GetScope(funcName))
+
+        scopeGui := Gui(, "PACS Assistant - Keybind Scope")
+        scopeGui.Add("Text",, "Only activate '" funcName "' when one of these is the active window:")
+        pacsBox := scopeGui.Add("Checkbox", "y+10", "PACS")
+        pacsBox.Value := flags.requirePACS
+        psBox := scopeGui.Add("Checkbox", "y+5", "PowerScribe")
+        psBox.Value := flags.requirePowerScribe
+        scopeGui.Add("Text", "y+10", "Leave both unchecked to activate in any window.")
+
+        scopeGui.Add("Button", "y+15 w80", "OK")
+            .OnEvent("Click", (*) => this.ApplyScope(funcName, pacsBox.Value, psBox.Value, listView, rowIndex, scopeGui))
+        scopeGui.Add("Button", "x+10 w80", "Cancel").OnEvent("Click", (*) => scopeGui.Destroy())
+        scopeGui.Show()
+    }
+
+    ApplyScope(funcName, requirePACS, requirePowerScribe, listView, rowIndex, scopeGui) {
+        ProfileManager.SetScope(funcName, HotkeyManager.ScopeFromFlags(requirePACS, requirePowerScribe))
+
+        listView.Modify(rowIndex,, funcName, listView.GetText(rowIndex, 2), this.ScopeLabel(funcName))
+        this.ResizeColumns(listView)
+
+        scopeGui.Destroy()
+        this.ApplyBinds()
+    }
+
+    ShowModalityAttendingsDialog() {
+        if (ProfileManager.GetCurrentProfile() = 0) {
+            MsgBox("Load a profile first.", "Error", "Icon!")
+            return
+        }
+
+        modGui := Gui(, "PACS Assistant - Modality Attendings")
+        modGui.Add("Text",, "Attending to assign per modality for '" ProfileManager.currentProfile "'.")
+        modGui.Add("Text", "y+5", "Leave a modality blank to keep PowerScribe's default attending.")
+
+        edits := Map()
+        for modality in ReportModality.names {
+            modGui.Add("Text", "xm y+10 w100", modality ":")
+            edits[modality] := modGui.Add("Edit", "x+5 yp-3 w220", ProfileManager.GetModalityAttending(modality))
+        }
+
+        modGui.Add("Button", "xm y+15 w80", "Save").OnEvent("Click", (*) => this.SaveModalityAttendings(edits, modGui))
+        modGui.Add("Button", "x+10 w80", "Cancel").OnEvent("Click", (*) => modGui.Destroy())
+        modGui.Show()
+    }
+
+    SaveModalityAttendings(edits, modGui) {
+        for modality, edit in edits {
+            ProfileManager.SetModalityAttending(modality, Trim(edit.Value))
+        }
+
+        ProfileManager.SaveProfile(
+            ProfileManager.currentProfile,
+            ProfileManager.profiles[ProfileManager.currentProfile]
+        )
+        modGui.Destroy()
     }
 } 
