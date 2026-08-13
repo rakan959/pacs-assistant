@@ -59,6 +59,22 @@ jobs:
 
           Get-Content Version.ahk
 
+      # The suite existed but nothing ran it, so a regression could reach a release
+      # with every check green. Only the unit suite runs here: run-hotkey-tests.ahk
+      # registers real hotkeys and run-gui-smoke.ahk opens real windows, neither of
+      # which is dependable on a hosted runner.
+      - name: Run unit tests
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.18/AutoHotkey_2.0.18.zip'
+          Invoke-WebRequest -Uri $url -OutFile ahk.zip
+          Expand-Archive -Path ahk.zip -DestinationPath ahk -Force
+          $exe = Join-Path (Resolve-Path ahk) 'AutoHotkey64.exe'
+          & $exe /ErrorStdOut tests\RunTests.ahk
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unit tests failed (exit $LASTEXITCODE)"
+          }
+
       - name: Compile with ahk2exe
         uses: benmusson/ahk2exe-action@v1
         with:
