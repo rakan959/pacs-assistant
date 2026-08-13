@@ -1,10 +1,19 @@
 #Requires AutoHotkey v2.0
 #Include Settings.ahk
+#Include Version.ahk
 
 class UpdateChecker {
-    static currentVersion := "v2.0b4"  ; Match this with your current version
+    ; Read through a property rather than copied into a static, so there is no second
+    ; place a version is stated and can drift from the tag
+    static currentVersion => AppVersion.current
+
     static repoUrl := "https://github.com/rakan959/pacs-assistant"
-    static apiUrl := "https://api.github.com/repos/rakan959/pacs-assistant/releases/latest"
+
+    ; GitHub's own prerelease flag decides what counts as a beta. /releases/latest
+    ; excludes prereleases natively; asking for the newest release includes them.
+    static latestStableUrl := "https://api.github.com/repos/rakan959/pacs-assistant/releases/latest"
+    static newestReleaseUrl := "https://api.github.com/repos/rakan959/pacs-assistant/releases?per_page=1"
+
     static updateTimer := 0
     static skippedVersion := ""  ; Track which version the user chose to skip
     static lastRemindTime := 0   ; Track when the user last clicked "Remind Me Later"
@@ -57,107 +66,177 @@ class UpdateChecker {
         this.StartAutoCheck()
     }
     
-    ; Parse version string into components
+    ; Leading integer of a version field, 0 if there isn't one
+    static ToInt(text) {
+        if RegExMatch(text, "^\d+", &m)
+            return Integer(m[0])
+        return 0
+    }
+
+    static Sign(a, b) {
+        return a < b ? -1 : (a > b ? 1 : 0)
+    }
+
+    /**
+     * Parses a version string into SemVer components.
+     *
+     * Accepts SemVer ("v2.1.0-beta.1") and the older scheme ("v2.0b4"), normalising the
+     * latter to its SemVer equivalent (2.0.0-b.4) so old and new tags still order
+     * correctly against each other.
+     *
+     * The previous parser read only major and minor, so every patch release compared
+     * equal - v2.0.1 and v2.0.9 were indistinguishable and no client would ever have
+     * been offered a patch update.
+     */
     static ParseVersion(version) {
-        ; Remove 'v' prefix if present
-        version := RegExReplace(version, "^v", "")
-        
-        ; Parse version components
-        parts := StrSplit(version, ".")
-        try {
-            major := Integer(RegExReplace(parts[1], "b.*$"))  ; Remove beta suffix before converting
-            minor := parts.Length >= 2 ? Integer(RegExReplace(RegExReplace(parts[2], "b.*$"), "\D+")) : 0
-        } catch as err {
-            major := 0
-            minor := 0
+        version := Trim(version)
+        version := RegExReplace(version, "^[vV]")
+
+        ; Legacy "2.0b4" / "2.0b" -> "2.0.0-b.4" / "2.0.0-b.0"
+        if RegExMatch(version, "^(\d+)\.(\d+)b(\d*)$", &legacy)
+            version := legacy[1] "." legacy[2] ".0-b." (legacy[3] != "" ? legacy[3] : "0")
+
+        ; Build metadata takes no part in precedence
+        core := version
+        if (pos := InStr(core, "+"))
+            core := SubStr(core, 1, pos - 1)
+
+        prerelease := ""
+        if (pos := InStr(core, "-")) {
+            prerelease := SubStr(core, pos + 1)
+            core := SubStr(core, 1, pos - 1)
         }
-        
-        ; Handle beta versions (e.g., "2.0b", "2.0b2")
-        if (RegExMatch(version, "b\d*$")) {
-            betaMatch := RegExMatch(version, "b(\d*)", &betaNum)
-            isBeta := true
-            try {
-                betaVersion := betaNum[1] != "" ? Integer(betaNum[1]) : 1
-            } catch as err {
-                betaVersion := 1
-            }
-        } else {
-            isBeta := false
-            betaVersion := 0
-        }
-        
+
+        parts := StrSplit(core, ".")
+
         return {
-            major: major,
-            minor: minor,
-            isBeta: isBeta,
-            betaVersion: betaVersion
+            major: this.ToInt(parts.Has(1) ? parts[1] : "0"),
+            minor: this.ToInt(parts.Has(2) ? parts[2] : "0"),
+            patch: this.ToInt(parts.Has(3) ? parts[3] : "0"),
+            prerelease: prerelease,
+            isPrerelease: prerelease != ""
         }
     }
-    
-    ; Compare two version strings
+
+    /**
+     * Compares two versions by SemVer precedence.
+     * @returns -1 if v1 is older than v2, 1 if newer, 0 if equal
+     */
     static CompareVersions(v1, v2) {
-        v1Info := this.ParseVersion(v1)
-        v2Info := this.ParseVersion(v2)
-        
-        ; Compare major versions first
-        if (v1Info.major != v2Info.major)
-            return v1Info.major < v2Info.major ? -1 : 1
-            
-        ; Compare minor versions next
-        if (v1Info.minor != v2Info.minor)
-            return v1Info.minor < v2Info.minor ? -1 : 1
-            
-        ; If we get here, the base version numbers are the same
-        ; For beta versions, we consider them older than their regular counterparts
-        ; e.g., v2.0b is older than v2.0
-        if (v1Info.isBeta && !v2Info.isBeta)
-            return -1  ; v1 is beta, v2 is regular, so v1 is older
-        if (!v1Info.isBeta && v2Info.isBeta)
-            return 1   ; v1 is regular, v2 is beta, so v1 is newer
-            
-        ; If both are beta, compare beta versions
-        if (v1Info.isBeta && v2Info.isBeta) {
-            return v1Info.betaVersion < v2Info.betaVersion ? -1 : 
-                   (v1Info.betaVersion > v2Info.betaVersion ? 1 : 0)
+        a := this.ParseVersion(v1)
+        b := this.ParseVersion(v2)
+
+        if (a.major != b.major)
+            return this.Sign(a.major, b.major)
+        if (a.minor != b.minor)
+            return this.Sign(a.minor, b.minor)
+        if (a.patch != b.patch)
+            return this.Sign(a.patch, b.patch)
+
+        ; A prerelease ranks below the release it precedes
+        if (!a.isPrerelease && !b.isPrerelease)
+            return 0
+        if (!a.isPrerelease)
+            return 1
+        if (!b.isPrerelease)
+            return -1
+
+        return this.ComparePrerelease(a.prerelease, b.prerelease)
+    }
+
+    /**
+     * Compares dot-separated prerelease identifiers per SemVer: numeric identifiers
+     * compare numerically, alphanumeric ones as text, numeric ranks below alphanumeric,
+     * and a shorter set of identifiers ranks below a longer one that matches so far.
+     */
+    static ComparePrerelease(p1, p2) {
+        left := StrSplit(p1, ".")
+        right := StrSplit(p2, ".")
+
+        loop Max(left.Length, right.Length) {
+            if (A_Index > left.Length)
+                return -1
+            if (A_Index > right.Length)
+                return 1
+
+            x := left[A_Index]
+            y := right[A_Index]
+            xIsNum := RegExMatch(x, "^\d+$") > 0
+            yIsNum := RegExMatch(y, "^\d+$") > 0
+
+            if (xIsNum && yIsNum) {
+                if (Integer(x) != Integer(y))
+                    return this.Sign(Integer(x), Integer(y))
+                continue
+            }
+            if (xIsNum)
+                return -1
+            if (yIsNum)
+                return 1
+
+            if (result := StrCompare(x, y, true))
+                return result < 0 ? -1 : 1
         }
-        
-        ; If neither is beta and we got here, versions are equal
+
         return 0
     }
     
+    /**
+     * Turns a JSON string literal back into text.
+     * Only the escapes GitHub actually emits in release notes are handled.
+     */
+    static DecodeJsonString(text) {
+        text := StrReplace(text, "\r\n", "`n")
+        text := StrReplace(text, "\n", "`n")
+        text := StrReplace(text, "\t", "`t")
+        text := StrReplace(text, "\/", "/")
+        text := StrReplace(text, '\"', '"')
+        return StrReplace(text, "\\", "\")
+    }
+
     static CheckForUpdates() {
-        ; Download the latest release info
+        ; Never offer to update an uncompiled run: PerformUpdate replaces
+        ; A_ScriptFullPath, which for a script is main.ahk, so it would drop an EXE on
+        ; top of the source. Untagged builds have no meaningful version to compare.
+        if (!A_IsCompiled || AppVersion.isDevBuild)
+            return { hasUpdate: false }
+
+        ; Ask GitHub for the right release rather than filtering on the tag name.
+        ; /releases/latest excludes prereleases natively; the newest release includes
+        ; them. The old code parsed "beta" out of the tag, which disagreed with the
+        ; prerelease flag GitHub actually stores, and - because every published release
+        ; was named like a beta while SkipBetaVersions defaults on - meant no user with
+        ; default settings was ever offered an update.
+        url := Settings.Get("SkipBetaVersions") ? this.latestStableUrl : this.newestReleaseUrl
+
         try {
             ; Set up the HTTP request with headers for GitHub API
             whr := ComObject("WinHttp.WinHttpRequest.5.1")
-            whr.Open("GET", this.apiUrl, true)
+            whr.Open("GET", url, true)
             whr.SetRequestHeader("User-Agent", "PACS-Assistant-Update-Checker")
+            whr.SetRequestHeader("Accept", "application/vnd.github+json")
             whr.Send()
             whr.WaitForResponse()
-            
+
+            ; 404 is expected from /releases/latest when every release is a prerelease
             if (whr.Status = 200) {
-                ; Parse the JSON response
+                ; Parse the JSON response. per_page=1 keeps the array to a single
+                ; release, so the first match of each field belongs to that release.
                 responseText := whr.ResponseText
-                
+
                 ; Extract the required fields using RegEx since we know the format
-                tagMatch := RegExMatch(responseText, '"tag_name"\s*:\s*"(v[^"]+)"', &tag)
-                bodyMatch := RegExMatch(responseText, '"body"\s*:\s*"([^"]*)"', &body)
-                assetsMatch := RegExMatch(responseText, '"browser_download_url"\s*:\s*"([^"]+\.exe)"', &asset)
-                
+                tagMatch := RegExMatch(responseText, '"tag_name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', &tag)
+                bodyMatch := RegExMatch(responseText, '"body"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', &body)
+                ; Match the asset by name so a future extra asset cannot be picked up
+                assetsMatch := RegExMatch(responseText, '"browser_download_url"\s*:\s*"([^"]+/pacs-assistant\.exe)"', &asset)
+
                 if (!tagMatch)
                     return { hasUpdate: false }
-                    
+
                 latestVersion := tag[1]
-                releaseNotes := bodyMatch ? RegExReplace(RegExReplace(body[1], "\\r\\n", "`n"), "\\n", "`n") : "No release notes available."
+                releaseNotes := bodyMatch ? this.DecodeJsonString(body[1]) : "No release notes available."
                 downloadUrl := assetsMatch ? asset[1] : ""
-                
-                ; Skip beta versions if enabled in settings
-                if (Settings.Get("SkipBetaVersions")) {
-                    versionInfo := this.ParseVersion(latestVersion)
-                    if (versionInfo.isBeta)
-                        return { hasUpdate: false }
-                }
-                
+
                 ; Check if user chose to skip this version
                 if (latestVersion = this.skippedVersion)
                     return { hasUpdate: false }
@@ -274,77 +353,3 @@ class UpdateChecker {
         }
     }
 }
-
-; Simple JSON parser
-class Jsons {
-    static Load(text) {
-        text := Trim(text)
-        if !(text ~= "^[{[]") || !(text ~= "[}\]]$")
-            throw Error("Invalid JSON")
-        
-        return this.Parse(&text)
-    }
-    
-    static Parse(&text) {
-        text := Trim(text)
-        switch SubStr(text, 1, 1) {
-            case "{":
-                obj := Map()
-                text := SubStr(text, 2)
-                loop {
-                    text := Trim(text)
-                    if (SubStr(text, 1, 1) = "}")
-                        break
-                    key := this.Parse(&text)
-                    text := Trim(text)
-                    if (SubStr(text, 1, 1) != ":")
-                        throw Error("Expected ':'")
-                    text := Trim(SubStr(text, 2))
-                    value := this.Parse(&text)
-                    obj[key] := value
-                    text := Trim(text)
-                    if (SubStr(text, 1, 1) = "}")
-                        break
-                    if (SubStr(text, 1, 1) != ",")
-                        throw Error("Expected ',' or '}'")
-                    text := SubStr(text, 2)
-                }
-                text := SubStr(text, 2)
-                return obj
-            case "[":
-                arr := []
-                text := SubStr(text, 2)
-                loop {
-                    text := Trim(text)
-                    if (SubStr(text, 1, 1) = "]")
-                        break
-                    value := this.Parse(&text)
-                    arr.Push(value)
-                    text := Trim(text)
-                    if (SubStr(text, 1, 1) = "]")
-                        break
-                    if (SubStr(text, 1, 1) != ",")
-                        throw Error("Expected ',' or ']'")
-                    text := SubStr(text, 2)
-                }
-                text := SubStr(text, 2)
-                return arr
-            case '"':
-                pos := 2
-                while (pos := InStr(text, '"',, pos)) {
-                    if (SubStr(text, pos-1, 1) != "\")
-                        break
-                    pos++
-                }
-                if (!pos)
-                    throw Error("Missing closing quote")
-                value := SubStr(text, 2, pos-2)
-                text := SubStr(text, pos+1)
-                return value
-            default:
-                if (text ~= "^(true|false|null|-?\d+\.?\d*([eE][+-]?\d+)?)")
-                    return SubStr(text, 1, RegExMatch(text, "[\s,}\]]|$")-1)
-                throw Error("Invalid value")
-        }
-    }
-} 
