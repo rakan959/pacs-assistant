@@ -2,6 +2,7 @@
 #Include UIA-v2/Lib/UIA.ahk
 #Include Settings.ahk
 #Include PowerScribe.ahk
+#Include UIAValue.ahk
 
 wetRead() {
 	; Use clipboard contents; bail out if empty to avoid blank notes
@@ -84,6 +85,7 @@ wetRead() {
 	Sleep(50)
 
 	success := false
+	unsupportedStrategy := false
 	clipBackup := ClipboardAll()
 	A_Clipboard := clipText
 	ClipWait(0.5)
@@ -94,7 +96,14 @@ wetRead() {
 			case "send":
 				Send("^v")
 			case "uia":
-				try noteField.Value := clipText
+				; Assigning to .Value on a field with no ValuePattern raises an
+				; uncatchable destructor error instead of failing cleanly (issue #32).
+				; Gate the write, and stop rather than retrying something that cannot
+				; work for six seconds.
+				if !UIAValue.Write(noteField, clipText) {
+					unsupportedStrategy := true
+					break
+				}
 			case "control":
 				try {
 					hwnd := noteField.NativeWindowHandle
@@ -109,11 +118,7 @@ wetRead() {
 		; Wait until text matches or timeout
 		start := A_TickCount
 		while (A_TickCount - start < 2000) {
-			try {
-				current := noteField.Value
-			} catch {
-				current := ""
-			}
+			current := UIAValue.Read(noteField)
 			if (current = clipText) {
 				success := true
 				break
@@ -134,7 +139,9 @@ wetRead() {
 		A_Clipboard := clipBackup
 	}
 
-	if !success {
+	if unsupportedStrategy {
+		MsgBox("This Sticky Notes field does not accept the UIA Value method. Run the wet read again and choose Original (Ctrl+V) or ControlSetText.", "Paste Method Unavailable", "Icon!")
+	} else if !success {
 		MsgBox("Wet read may not have pasted fully. Please verify the sticky note.")
 	}
 

@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
+#Include UIAValue.ahk
 
 /**
  * The PowerScribe report itself: locating it, reading it, and routing it to an
@@ -94,7 +95,7 @@ readReportText() {
 
         for el in elements {
             text := ""
-            try text := el.Value
+            text := UIAValue.Read(el)
             if (text = "")
                 continue
 
@@ -112,7 +113,7 @@ readReportText() {
 
     ; Positional fallback for the case where nothing matched by type
     try {
-        return root.ElementFromPath(PowerScribe.reportPath).Value
+        return UIAValue.Read(root.ElementFromPath(PowerScribe.reportPath))
     }
 
     return ""
