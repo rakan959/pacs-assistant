@@ -90,6 +90,40 @@ Syntax check without running:\
   - Tagged pushes publish a release with `pacs-assistant.exe`.\
   - Other pushes upload a `pacs-assistant-dev` artifact for quick testing.
 
+## Versioning and releases
+
+Versions follow [SemVer](https://semver.org): `vMAJOR.MINOR.PATCH`, with an optional
+prerelease suffix such as `v2.1.0-beta.1`.
+
+**The git tag is the only place a version is stated.** CI generates `Version.ahk` from
+the tag before compiling, and the app reads `AppVersion.current` from it. Nothing is
+hand-edited to bump a release — hand-syncing a constant to a tag is what previously let
+the shipped build report `v2.0b4` while `v2.0b7` was published.
+
+To cut a release:
+
+```
+git tag v2.1.0
+git push origin v2.1.0
+```
+
+That's the whole process. CI compiles, stamps the EXE's file properties, generates
+release notes from the commits, and publishes `pacs-assistant.exe`.
+
+**Prereleases.** A tag containing a hyphen (`v2.1.0-beta.1`) is published as a GitHub
+prerelease. The update checker uses that flag rather than reading the tag name:
+
+| `Skip beta versions` | Endpoint | Sees |
+|---|---|---|
+| on (default) | `/releases/latest` | stable releases only — GitHub excludes prereleases |
+| off | `/releases?per_page=1` | the newest release, prerelease or not |
+
+Name betas with a hyphen, or users on default settings won't be offered them — and
+don't name a stable release with one.
+
+Untagged and uncompiled builds report `v0.0.0-dev` and skip update checks entirely, so
+running from source never offers to overwrite `main.ahk` with an EXE.
+
 ## Need help?
 - Ensure PACS Assistant is running (tray icon).
 - Make sure PowerScribe and PACS are open.

@@ -11,6 +11,7 @@
 #Include ../ProfileManager.ahk
 #Include ../HotkeyManager.ahk
 #Include ../Settings.ahk
+#Include ../UpdateChecker.ahk
 
 global TestsRun := 0
 global TestsFailed := 0
@@ -252,6 +253,83 @@ TestLegacyProfile() {
 }
 
 ; ---------------------------------------------------------------------------
+; Version precedence
+; ---------------------------------------------------------------------------
+TestVersionPrecedence() {
+    Section("UpdateChecker version precedence")
+
+    ; Each row is {older, newer}: the first must sort strictly below the second
+    ordered := [
+        ; Core numbers
+        ["v1.9.0", "v2.0.0"],
+        ["v2.0.0", "v2.1.0"],
+        ; Patch releases. The old parser read only major and minor, so these compared
+        ; equal and a patch update was never offered to anyone.
+        ["v2.0.1", "v2.0.2"],
+        ["v2.0.1", "v2.0.9"],
+        ["v2.0.9", "v2.0.10"],
+        ; A prerelease ranks below its release
+        ["v2.1.0-beta.1", "v2.1.0"],
+        ["v2.1.0-beta.1", "v2.1.0-beta.2"],
+        ["v2.1.0-beta.2", "v2.1.0-beta.10"],
+        ["v2.1.0-alpha.1", "v2.1.0-beta.1"],
+        ["v2.1.0-beta", "v2.1.0-beta.1"],
+        ; Numeric identifiers rank below alphanumeric ones
+        ["v2.1.0-1", "v2.1.0-alpha"],
+        ; Legacy tags still order among themselves
+        ["v2.0b4", "v2.0b7"],
+        ["v2.0b9", "v2.0b10"],
+        ["v2.0b", "v2.0b1"],
+        ["v2.0b7", "v2.0"],
+        ["v1.0", "v2.0b1"],
+        ; ... and against the SemVer tags that replace them, so an install on the old
+        ; scheme still sees the first SemVer release as an update
+        ["v2.0b7", "v2.1.0"],
+        ["v2.0b7", "v2.1.0-beta.1"],
+        ["v2.0b4", "v2.0.1"]
+    ]
+
+    for pair in ordered {
+        AssertEqual(UpdateChecker.CompareVersions(pair[1], pair[2]), -1, "'" pair[1] "' < '" pair[2] "'")
+        AssertEqual(UpdateChecker.CompareVersions(pair[2], pair[1]), 1, "'" pair[2] "' > '" pair[1] "'")
+    }
+
+    equal := [
+        ["v2.0.0", "v2.0.0"],
+        ["v2.0.0", "2.0.0"],
+        ["v2.1.0-beta.1", "v2.1.0-beta.1"],
+        ; Build metadata takes no part in precedence
+        ["v2.1.0+abc123", "v2.1.0"],
+        ; The short forms mean the same thing
+        ["v2.0", "v2.0.0"]
+    ]
+
+    for pair in equal {
+        AssertEqual(UpdateChecker.CompareVersions(pair[1], pair[2]), 0, "'" pair[1] "' == '" pair[2] "'")
+    }
+
+    ; Components
+    v := UpdateChecker.ParseVersion("v2.1.3-beta.4+build9")
+    AssertEqual(v.major, 2, "major parsed")
+    AssertEqual(v.minor, 1, "minor parsed")
+    AssertEqual(v.patch, 3, "patch parsed")
+    AssertEqual(v.prerelease, "beta.4", "prerelease parsed")
+    Assert(v.isPrerelease, "prerelease detected")
+
+    legacy := UpdateChecker.ParseVersion("v2.0b7")
+    AssertEqual(legacy.major, 2, "legacy major parsed")
+    AssertEqual(legacy.minor, 0, "legacy minor parsed")
+    AssertEqual(legacy.patch, 0, "legacy patch defaults to 0")
+    Assert(legacy.isPrerelease, "legacy beta counts as a prerelease")
+
+    release := UpdateChecker.ParseVersion("v2.1.0")
+    Assert(!release.isPrerelease, "plain release is not a prerelease")
+
+    ; The version is read from the generated file, so there is only one place it lives
+    AssertEqual(UpdateChecker.currentVersion, AppVersion.current, "version comes from AppVersion")
+}
+
+; ---------------------------------------------------------------------------
 
 Main() {
     global TestsRun, TestsFailed, TempDir
@@ -268,6 +346,7 @@ Main() {
     TestScopes()
     TestProfilePersistence()
     TestLegacyProfile()
+    TestVersionPrecedence()
 
     SetWorkingDir(A_ScriptDir)
     try DirDelete(TempDir, true)
