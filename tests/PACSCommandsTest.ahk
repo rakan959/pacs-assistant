@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include ../PACSCommands.ahk
+#Include ../PowerScribe.ahk
 #Include TestRunner.ahk
 
 class PACSCommandsTest {
@@ -85,10 +86,10 @@ class PACSCommandsTest {
     ; Picks the report body out of the other text fields in the PowerScribe window,
     ; so the report no longer has to be found by a fixed positional path (issue #28)
     TestLooksLikeReport() {
-        Assert.True(PACSCommands.LooksLikeReport("EXAMINATION: CT CHEST`n`nFINDINGS: ..."))
-        Assert.True(PACSCommands.LooksLikeReport("examination: mri brain"))
-        Assert.False(PACSCommands.LooksLikeReport(""))
-        Assert.False(PACSCommands.LooksLikeReport("Smith, John"))
-        Assert.False(PACSCommands.LooksLikeReport("Search"))
+        Assert.True(PowerScribe.LooksLikeReport("EXAMINATION: CT CHEST`n`nFINDINGS: ..."))
+        Assert.True(PowerScribe.LooksLikeReport("examination: mri brain"))
+        Assert.False(PowerScribe.LooksLikeReport(""))
+        Assert.False(PowerScribe.LooksLikeReport("Smith, John"))
+        Assert.False(PowerScribe.LooksLikeReport("Search"))
     }
 }
