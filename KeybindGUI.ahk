@@ -180,13 +180,6 @@ class KeybindGUI {
         }
     }
 
-    StartListening(control, funcName, *) {
-        if !this.BeginListening(funcName, control)
-            return
-
-        control.Value := "Press keys..."
-    }
-
     /**
      * Takes ownership of key capture. Only one capture can be in flight at a time.
      * @returns true if capture started
@@ -432,12 +425,6 @@ class KeybindGUI {
         } else {
             MsgBox("Failed to rename profile. The name may already be in use.", "Error", "Icon!")
         }
-    }
-
-    UnassignHotkey(control, funcName, *) {
-        ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName] := ""
-        control.Value := "Unassigned"
-        this.ApplyBinds()
     }
 
     ShowAddFunctionDialog(listView) {

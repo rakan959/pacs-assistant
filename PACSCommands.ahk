@@ -78,10 +78,6 @@ class ReportModality {
     }
 }
 
-pacsActive() {
-    return WinActive("PowerScribe") or WinActive("ahk_exe mp.exe")
-}
-
 sendPs(x) {
     WinActivate("PowerScribe")
     Send x
@@ -94,17 +90,6 @@ setAttending(x) {
     Send x
     Sleep(100)
     Send "{tab}{space}{tab}{Enter}"
-}
-
-closeKill(x) {
-    if ProcessExist(x) {
-        ProcessClose(x)
-    } else if WinExist(x) {
-        WinKill(x)
-        if WinExist(x) {
-            ProcessClose(WinGetProcessName(x))
-        }
-    }
 }
 
 /**
