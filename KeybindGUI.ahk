@@ -184,7 +184,7 @@ class KeybindGUI {
      * Takes ownership of key capture. Only one capture can be in flight at a time.
      * @returns true if capture started
      */
-    BeginListening(funcName, control, promptGui := 0) {
+    BeginListening(funcName, control, promptGui) {
         if KeybindGUI.isListening
             return false
 
@@ -195,19 +195,15 @@ class KeybindGUI {
     }
 
     ; Creates the capture hook and records it so it can always be torn down again
-    StartInputHook(funcName, control, promptGui := 0) {
+    StartInputHook(funcName, control, promptGui) {
         ih := InputHook("V B")
         ih.KeyOpt("{All}", "E")
-        if (promptGui) {
-            ih.OnEnd := this.OnInputEnd.Bind(this, funcName, control, promptGui)
-        } else {
-            ih.OnEnd := this.OnInputEnd.Bind(this, funcName, control)
-        }
+        ih.OnEnd := this.OnInputEnd.Bind(this, funcName, control, promptGui)
         KeybindGUI.activeInputHook := ih
         ih.Start()
     }
 
-    OnInputEnd(funcName, control, promptGui := 0, ih?) {
+    OnInputEnd(funcName, control, promptGui, ih?) {
         ; Get current state of modifier keys
         hasCtrl := GetKeyState("Ctrl")
         hasAlt := GetKeyState("Alt")
@@ -219,11 +215,7 @@ class KeybindGUI {
         ; Handle Escape to cancel
         if (key = "Escape") {
             this.StopListening()
-            if (promptGui) {
-                promptGui.Destroy()
-            } else {
-                control.Value := this.PrettifyHotkey(ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName])
-            }
+            promptGui.Destroy()
             ; Ensure binds are reapplied even on cancel
             this.ApplyBinds()
             return
@@ -251,11 +243,7 @@ class KeybindGUI {
             if (otherFunc != funcName && otherBind = newBind) {
                 MsgBox("This hotkey is already assigned to '" otherFunc "'", "Duplicate Binding", "Icon!")
                 this.StopListening()
-                if (promptGui) {
-                    promptGui.Destroy()
-                } else {
-                    control.Value := this.PrettifyHotkey(currentProfile.binds[funcName])
-                }
+                promptGui.Destroy()
                 ; Ensure binds are reapplied even on duplicate binding
                 this.ApplyBinds()
                 return
@@ -269,23 +257,18 @@ class KeybindGUI {
             ; Update profile
             ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName] := newBind
             
-            ; Update UI
-            if (promptGui) {
-                ; Find and update the ListView row before destroying the prompt
-                Loop control.GetCount() {
-                    if (control.GetText(A_Index, 1) = funcName) {
-                        control.Modify(A_Index,, funcName, this.PrettifyHotkey(newBind))
-                        break
-                    }
+            ; Find and update the ListView row before destroying the prompt
+            Loop control.GetCount() {
+                if (control.GetText(A_Index, 1) = funcName) {
+                    control.Modify(A_Index,, funcName, this.PrettifyHotkey(newBind))
+                    break
                 }
-                this.ResizeColumns(control)
-                this.StopListening()
-                promptGui.Destroy()
-            } else {
-                control.Value := this.PrettifyHotkey(newBind)
-                this.StopListening()
             }
-            
+            this.ResizeColumns(control)
+            this.StopListening()
+            promptGui.Destroy()
+
+
             ; Reapply all binds
             this.ApplyBinds()
         } catch as err {
