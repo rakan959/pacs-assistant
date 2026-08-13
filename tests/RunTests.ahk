@@ -7,6 +7,7 @@
 #Include ProfileManagerTest.ahk
 #Include PACSCommandsTest.ahk
 #Include KeybindGUITest.ahk
+#Include UIAValueTest.ahk
 
 TestRunner.AddTest(UpdateCheckerTest)
 TestRunner.AddTest(SettingsTest)
@@ -15,6 +16,7 @@ TestRunner.AddTest(HotkeyManagerTest)
 TestRunner.AddTest(ProfileManagerTest)
 TestRunner.AddTest(PACSCommandsTest)
 TestRunner.AddTest(KeybindGUITest)
+TestRunner.AddTest(UIAValueTest)
 
 TestRunner.RunAll()
 

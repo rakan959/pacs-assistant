@@ -2,6 +2,7 @@
 #Include UIA-v2/Lib/UIA.ahk
 #Include Settings.ahk
 #Include PowerScribe.ahk
+#Include UIAValue.ahk
 
 /**
  * Selects a microphone on the PowerScribe login screen.
@@ -124,16 +125,15 @@ class MicrophoneManager {
         if (micName = "")
             return false
 
-        ; Already on the wanted microphone
-        try {
-            if InStr(combo.Value, micName)
-                return true
-        }
+        ; Already on the wanted microphone. Read through UIAValue: a combo box with no
+        ; ValuePattern would otherwise raise an uncatchable destructor error (issue #32).
+        if InStr(UIAValue.Read(combo), micName)
+            return true
 
-        ; Editable combo boxes accept the value directly
-        try {
-            combo.Value := micName
-            if InStr(combo.Value, micName)
+        ; Editable combo boxes accept the value directly; gated so an unsupported one
+        ; falls through to the dropdown instead of erroring
+        if UIAValue.Write(combo, micName) {
+            if InStr(UIAValue.Read(combo), micName)
                 return true
         }
 
