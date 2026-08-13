@@ -62,7 +62,7 @@ wetRead() {
 	; Get note input field
 	noteField := ""
 	try noteField := sticky.ElementFromPath("YY0/")
-	if (!IsSet(noteField) || noteField = "" || !noteField) {
+	if (!noteField) {
 		; Try another attempt after slight delay
 		Sleep(200)
 		try noteField := sticky.ElementFromPath("YY0/")
@@ -147,7 +147,12 @@ wetRead() {
 PromptWetReadMode() {
 	modeGui := Gui("+AlwaysOnTop", "Wet Read Paste Mode")
 	modeGui.Add("Text",, "Select paste method for this run:")
-	choice := "send"
+
+	; Default to cancelling. Closing the window with the X leaves whatever this holds,
+	; and defaulting to "send" meant dismissing the dialog silently went ahead and
+	; pasted rather than backing out.
+	choice := "cancel"
+
 	modeGui.Add("Button", "w200", "Original (Ctrl+V)").OnEvent("Click", (*) => (choice := "send", modeGui.Destroy()))
 	modeGui.Add("Button", "w200", "UIA Value pattern").OnEvent("Click", (*) => (choice := "uia", modeGui.Destroy()))
 	modeGui.Add("Button", "w200", "ControlSetText").OnEvent("Click", (*) => (choice := "control", modeGui.Destroy()))

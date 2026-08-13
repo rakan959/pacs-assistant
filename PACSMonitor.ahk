@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
+#Include Settings.ahk
 
 class PACSMonitor {
     ; Accessions already alerted on, held as a set. This was an Array scanned

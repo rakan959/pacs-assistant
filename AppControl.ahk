@@ -145,36 +145,20 @@ restartPACS() {
         Sleep(500)
     }
 
-    found := False
-
-    Loop Files, A_DesktopCommon "\*"
-    {
-        if InStr(A_LoopFileName, "Vue Client (Integrated)")
-        {
-            found := True
-            Run A_LoopFileFullPath
-            break
-        }
-    }
-    if !found
-    {
-        Loop Files, A_Desktop "\*"
-            {
-                if InStr(A_LoopFileName, "Vue Client (Integrated)")
-                {
-                    found := True
-                    Run A_LoopFileFullPath
-                    break
-                }
+    ; The shortcut sits on either the all-users desktop or this user's own
+    launchVuePacs(directory) {
+        Loop Files, directory "\*" {
+            if InStr(A_LoopFileName, "Vue Client (Integrated)") {
+                Run A_LoopFileFullPath
+                return true
             }
+        }
+        return false
     }
-    if !found
-    {
+
+    if !(launchVuePacs(A_DesktopCommon) || launchVuePacs(A_Desktop)) {
         MsgBox "ERROR: PACS not found..."
     }
-
-	Return
-
 }
 
 toggleWindow(winName) {

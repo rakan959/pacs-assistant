@@ -122,6 +122,12 @@ readReportText() {
  * Assigns the report to the attending configured for its modality.
  * A modality configured with a blank attending is left alone so the report keeps
  * PowerScribe's own default attending.
+ *
+ * ProfileManager is resolved through main.ahk's include graph rather than included
+ * here: ProfileManager pulls in PACSCommands, which pulls in this file, and the
+ * resulting order would run ProfileManager's static initialiser before
+ * PACSCommands.commands exists.
+ *
  * @returns the modality the report was classified as
  */
 checkAttending(haystack) {
