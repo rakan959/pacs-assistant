@@ -13,11 +13,10 @@ class KeybindGUI {
     static activeInputHook := 0
 
     __New() {
-        ; Check for updates when starting (respect user setting)
-        if (Settings.Get("AutoUpdate")) {
-            UpdateChecker.ShowUpdateDialog()
-        }
-        
+        ; The launch-time update check belongs to UpdateChecker.Start(), called from
+        ; main.ahk under the same AutoUpdate setting. Repeating it here meant a second
+        ; GitHub request every launch for a dialog that had already been offered.
+
         ProfileManager.LoadProfiles()
         if ProfileManager.profiles.Count = 0 {
             this.PromptNewProfile()
@@ -181,18 +180,11 @@ class KeybindGUI {
         }
     }
 
-    StartListening(control, funcName, *) {
-        if !this.BeginListening(funcName, control)
-            return
-
-        control.Value := "Press keys..."
-    }
-
     /**
      * Takes ownership of key capture. Only one capture can be in flight at a time.
      * @returns true if capture started
      */
-    BeginListening(funcName, control, promptGui := 0) {
+    BeginListening(funcName, control, promptGui) {
         if KeybindGUI.isListening
             return false
 
@@ -203,19 +195,15 @@ class KeybindGUI {
     }
 
     ; Creates the capture hook and records it so it can always be torn down again
-    StartInputHook(funcName, control, promptGui := 0) {
+    StartInputHook(funcName, control, promptGui) {
         ih := InputHook("V B")
         ih.KeyOpt("{All}", "E")
-        if (promptGui) {
-            ih.OnEnd := this.OnInputEnd.Bind(this, funcName, control, promptGui)
-        } else {
-            ih.OnEnd := this.OnInputEnd.Bind(this, funcName, control)
-        }
+        ih.OnEnd := this.OnInputEnd.Bind(this, funcName, control, promptGui)
         KeybindGUI.activeInputHook := ih
         ih.Start()
     }
 
-    OnInputEnd(funcName, control, promptGui := 0, ih?) {
+    OnInputEnd(funcName, control, promptGui, ih?) {
         ; Get current state of modifier keys
         hasCtrl := GetKeyState("Ctrl")
         hasAlt := GetKeyState("Alt")
@@ -227,11 +215,7 @@ class KeybindGUI {
         ; Handle Escape to cancel
         if (key = "Escape") {
             this.StopListening()
-            if (promptGui) {
-                promptGui.Destroy()
-            } else {
-                control.Value := this.PrettifyHotkey(ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName])
-            }
+            promptGui.Destroy()
             ; Ensure binds are reapplied even on cancel
             this.ApplyBinds()
             return
@@ -259,11 +243,7 @@ class KeybindGUI {
             if (otherFunc != funcName && otherBind = newBind) {
                 MsgBox("This hotkey is already assigned to '" otherFunc "'", "Duplicate Binding", "Icon!")
                 this.StopListening()
-                if (promptGui) {
-                    promptGui.Destroy()
-                } else {
-                    control.Value := this.PrettifyHotkey(currentProfile.binds[funcName])
-                }
+                promptGui.Destroy()
                 ; Ensure binds are reapplied even on duplicate binding
                 this.ApplyBinds()
                 return
@@ -277,23 +257,18 @@ class KeybindGUI {
             ; Update profile
             ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName] := newBind
             
-            ; Update UI
-            if (promptGui) {
-                ; Find and update the ListView row before destroying the prompt
-                Loop control.GetCount() {
-                    if (control.GetText(A_Index, 1) = funcName) {
-                        control.Modify(A_Index,, funcName, this.PrettifyHotkey(newBind))
-                        break
-                    }
+            ; Find and update the ListView row before destroying the prompt
+            Loop control.GetCount() {
+                if (control.GetText(A_Index, 1) = funcName) {
+                    control.Modify(A_Index,, funcName, this.PrettifyHotkey(newBind))
+                    break
                 }
-                this.ResizeColumns(control)
-                this.StopListening()
-                promptGui.Destroy()
-            } else {
-                control.Value := this.PrettifyHotkey(newBind)
-                this.StopListening()
             }
-            
+            this.ResizeColumns(control)
+            this.StopListening()
+            promptGui.Destroy()
+
+
             ; Reapply all binds
             this.ApplyBinds()
         } catch as err {
@@ -435,12 +410,6 @@ class KeybindGUI {
         }
     }
 
-    UnassignHotkey(control, funcName, *) {
-        ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName] := ""
-        control.Value := "Unassigned"
-        this.ApplyBinds()
-    }
-
     ShowAddFunctionDialog(listView) {
         selectorGui := Gui(, "PACS Assistant - Add Function")
         
@@ -469,18 +438,36 @@ class KeybindGUI {
         selectorGui.Add("Text", "xm y+20", "Built-in Functions:")
         lbBuiltIn := selectorGui.Add("ListBox", "w200 h150", builtInFunctions)
         
-        ; Add custom functions section (now always show if there are any custom functions)
+        ; Add custom functions section (now always show if there are any custom functions).
+        ; lbCustom stays defined either way - the Add Selected handler reads it, and an
+        ; unassigned local raised an unset-variable error whenever a profile had no
+        ; custom functions and nothing was selected in the built-in list.
+        lbCustom := ""
         if (customFunctions.Length > 0) {
             selectorGui.Add("Text", "xm y+10", "Custom Functions:")
             lbCustom := selectorGui.Add("ListBox", "w200 h100", customFunctions)
             selectorGui.Add("Button", "y+5 w200", "Delete Selected Custom Function").OnEvent("Click", (*) => this.DeleteCustomFunction(lbCustom.Text, selectorGui))
         }
-        
+
         ; Add action buttons
-        selectorGui.Add("Button", "xm y+10", "Add Selected").OnEvent("Click", (*) => this.AddFunction(lbBuiltIn.Text || lbCustom.Text, listView, selectorGui))
+        selectorGui.Add("Button", "xm y+10", "Add Selected").OnEvent("Click", (*) => this.AddFunction(this.SelectedFunction(lbBuiltIn, lbCustom), listView, selectorGui))
         selectorGui.Add("Button", "x+10", "Cancel").OnEvent("Click", (*) => selectorGui.Destroy())
         
         selectorGui.Show()
+    }
+
+    /**
+     * The function selected in either list, built-in first.
+     * Accepts "" for a list that was not created, which is why it takes the controls
+     * rather than their text.
+     * @returns the selected name, or "" when neither list has a selection
+     */
+    SelectedFunction(lbBuiltIn, lbCustom) {
+        if (lbBuiltIn && lbBuiltIn.Text != "")
+            return lbBuiltIn.Text
+        if (lbCustom && lbCustom.Text != "")
+            return lbCustom.Text
+        return ""
     }
 
     DeleteCustomFunction(funcName, selectorGui) {
@@ -488,8 +475,11 @@ class KeybindGUI {
             MsgBox("Please select a custom function to delete.", "Error", "Icon!")
             return
         }
-        
-        if (!InStr(funcName, "Custom: ") = 1) {
+
+        ; Note the parentheses: without them this parses as "(!InStr(...)) = 1", which
+        ; is true only when the prefix is absent entirely and lets a name containing
+        ; "Custom: " anywhere past the start through
+        if (InStr(funcName, "Custom: ") != 1) {
             MsgBox("Only custom functions can be deleted.", "Error", "Icon!")
             return
         }

@@ -1,6 +1,7 @@
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
 #Include Settings.ahk
+#Include PowerScribe.ahk
 
 /**
  * Selects a microphone on the PowerScribe login screen.
@@ -10,7 +11,9 @@
  * logging in.
  */
 class MicrophoneManager {
-    static winTitle := "PowerScribe 360 | Reporting ahk_exe Nuance.PowerScribe360.exe"
+    ; The PowerScribe window is declared once, in PowerScribe, rather than restated
+    ; here where the two copies could drift
+    static winTitle => PowerScribe.windowTitle
 
     ; The dropdown, by AutomationId, with the positional path as a fallback for when
     ; the id changes. The fallback is only trusted if the element it lands on has the

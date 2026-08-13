@@ -32,38 +32,41 @@ class Settings {
         "RestrictHotkeysByActiveWindow"
     ]
 
-    ; Alert sounds, each backed by a distinct file shipped in %WinDir%\Media.
-    ;
-    ; The previous implementation used SoundPlay's "*N" aliases (MessageBeep). Those
-    ; do not name sounds, they name *sound scheme events*, and the stock Windows
-    ; scheme points several events at one file - Asterisk, Exclamation and the
-    ; default beep all resolve to Windows Background.wav, and Question resolves to
-    ; nothing at all. Every option therefore played the same thing. Naming the files
-    ; directly is what actually makes the choices audibly different.
-    static soundFiles := Map(
-        "Chime",        "chimes.wav",
-        "Ding",         "ding.wav",
-        "Chord",        "chord.wav",
-        "Notification", "Windows Notify System Generic.wav",
-        "Ring",         "Ring01.wav",
-        "Alarm",        "Alarm01.wav",
-        "Tada",         "tada.wav"
-    )
-
-    ; Order shown in the settings dropdown. "Default Beep" is a generated tone, so it
-    ; works even on a machine with a stripped Media folder; "Custom File" defers to
-    ; the user's own file.
-    static alertSounds := [
-        "Default Beep",
-        "Chime",
-        "Ding",
-        "Chord",
-        "Notification",
-        "Ring",
-        "Alarm",
-        "Tada",
-        "Custom File"
+    /**
+     * Alert sounds, in the order the settings dropdown shows them, each backed by a
+     * distinct file shipped in %WinDir%\Media.
+     *
+     * This is the only place a sound is declared: alertSounds and soundFiles are
+     * derived from it in __New. Keeping a name list and a name-to-file map by hand
+     * meant adding a sound to one and not the other silently dropped the option or
+     * broke it.
+     *
+     * A blank file means the entry is not backed by one - "Default Beep" is a
+     * synthesised tone, so it works even where the Media folder has been stripped,
+     * and "Custom File" defers to the user's own file.
+     *
+     * The previous implementation used SoundPlay's "*N" aliases (MessageBeep). Those
+     * do not name sounds, they name *sound scheme events*, and the stock Windows
+     * scheme points several events at one file - Asterisk, Exclamation and the
+     * default beep all resolve to Windows Background.wav, and Question resolves to
+     * nothing at all. Every option therefore played the same thing. Naming the files
+     * directly is what makes the choices audibly different.
+     */
+    static soundCatalogue := [
+        {name: "Default Beep", file: ""},
+        {name: "Chime",        file: "chimes.wav"},
+        {name: "Ding",         file: "ding.wav"},
+        {name: "Chord",        file: "chord.wav"},
+        {name: "Notification", file: "Windows Notify System Generic.wav"},
+        {name: "Ring",         file: "Ring01.wav"},
+        {name: "Alarm",        file: "Alarm01.wav"},
+        {name: "Tada",         file: "tada.wav"},
+        {name: "Custom File",  file: ""}
     ]
+
+    ; Derived from soundCatalogue in __New
+    static alertSounds := []
+    static soundFiles := Map()
 
     ; Sound names written by versions <= v2.0b4, mapped onto their closest replacement
     ; so an existing settings.ini keeps working (and finally sounds distinct).
@@ -76,6 +79,13 @@ class Settings {
     )
 
     static __New() {
+        ; Derive the dropdown order and the name-to-file lookup from the one catalogue
+        for entry in this.soundCatalogue {
+            this.alertSounds.Push(entry.name)
+            if (entry.file != "")
+                this.soundFiles[entry.name] := entry.file
+        }
+
         ; Create settings file if it doesn't exist
         if !FileExist(this.settingsFile) {
             this.SaveAllSettings()
