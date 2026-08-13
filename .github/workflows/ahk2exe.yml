@@ -70,9 +70,18 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile ahk.zip
           Expand-Archive -Path ahk.zip -DestinationPath ahk -Force
           $exe = Join-Path (Resolve-Path ahk) 'AutoHotkey64.exe'
-          & $exe /ErrorStdOut tests\RunTests.ahk
-          if ($LASTEXITCODE -ne 0) {
-            throw "Unit tests failed (exit $LASTEXITCODE)"
+
+          # AutoHotkey is a GUI-subsystem binary, so the call operator does not wait
+          # for it and never sets $LASTEXITCODE - the results printed after the check
+          # had already run. Start-Process -Wait -PassThru gives a real exit code.
+          $proc = Start-Process -FilePath $exe `
+            -ArgumentList '/ErrorStdOut', 'tests\RunTests.ahk' `
+            -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput test-output.txt -RedirectStandardError test-errors.txt
+          Get-Content test-output.txt
+          if (Test-Path test-errors.txt) { Get-Content test-errors.txt }
+          if ($proc.ExitCode -ne 0) {
+            throw "Unit tests failed (exit $($proc.ExitCode))"
           }
 
       - name: Compile with ahk2exe
