@@ -13,11 +13,10 @@ class KeybindGUI {
     static activeInputHook := 0
 
     __New() {
-        ; Check for updates when starting (respect user setting)
-        if (Settings.Get("AutoUpdate")) {
-            UpdateChecker.ShowUpdateDialog()
-        }
-        
+        ; The launch-time update check belongs to UpdateChecker.Start(), called from
+        ; main.ahk under the same AutoUpdate setting. Repeating it here meant a second
+        ; GitHub request every launch for a dialog that had already been offered.
+
         ProfileManager.LoadProfiles()
         if ProfileManager.profiles.Count = 0 {
             this.PromptNewProfile()
@@ -469,18 +468,36 @@ class KeybindGUI {
         selectorGui.Add("Text", "xm y+20", "Built-in Functions:")
         lbBuiltIn := selectorGui.Add("ListBox", "w200 h150", builtInFunctions)
         
-        ; Add custom functions section (now always show if there are any custom functions)
+        ; Add custom functions section (now always show if there are any custom functions).
+        ; lbCustom stays defined either way - the Add Selected handler reads it, and an
+        ; unassigned local raised an unset-variable error whenever a profile had no
+        ; custom functions and nothing was selected in the built-in list.
+        lbCustom := ""
         if (customFunctions.Length > 0) {
             selectorGui.Add("Text", "xm y+10", "Custom Functions:")
             lbCustom := selectorGui.Add("ListBox", "w200 h100", customFunctions)
             selectorGui.Add("Button", "y+5 w200", "Delete Selected Custom Function").OnEvent("Click", (*) => this.DeleteCustomFunction(lbCustom.Text, selectorGui))
         }
-        
+
         ; Add action buttons
-        selectorGui.Add("Button", "xm y+10", "Add Selected").OnEvent("Click", (*) => this.AddFunction(lbBuiltIn.Text || lbCustom.Text, listView, selectorGui))
+        selectorGui.Add("Button", "xm y+10", "Add Selected").OnEvent("Click", (*) => this.AddFunction(this.SelectedFunction(lbBuiltIn, lbCustom), listView, selectorGui))
         selectorGui.Add("Button", "x+10", "Cancel").OnEvent("Click", (*) => selectorGui.Destroy())
         
         selectorGui.Show()
+    }
+
+    /**
+     * The function selected in either list, built-in first.
+     * Accepts "" for a list that was not created, which is why it takes the controls
+     * rather than their text.
+     * @returns the selected name, or "" when neither list has a selection
+     */
+    SelectedFunction(lbBuiltIn, lbCustom) {
+        if (lbBuiltIn && lbBuiltIn.Text != "")
+            return lbBuiltIn.Text
+        if (lbCustom && lbCustom.Text != "")
+            return lbCustom.Text
+        return ""
     }
 
     DeleteCustomFunction(funcName, selectorGui) {
@@ -488,8 +505,11 @@ class KeybindGUI {
             MsgBox("Please select a custom function to delete.", "Error", "Icon!")
             return
         }
-        
-        if (!InStr(funcName, "Custom: ") = 1) {
+
+        ; Note the parentheses: without them this parses as "(!InStr(...)) = 1", which
+        ; is true only when the prefix is absent entirely and lets a name containing
+        ; "Custom: " anywhere past the start through
+        if (InStr(funcName, "Custom: ") != 1) {
             MsgBox("Only custom functions can be deleted.", "Error", "Icon!")
             return
         }
