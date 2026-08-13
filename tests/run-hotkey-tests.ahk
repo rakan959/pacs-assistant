@@ -2,9 +2,10 @@
 #SingleInstance Off
 #Warn All, Off
 
-; Functional tests for hotkey registration. Unlike run-tests.ahk these actually
-; register hotkeys and synthesise keystrokes, so they exercise AutoHotkey's real
-; enable/disable and HotIf behaviour rather than our model of it.
+; Functional tests for hotkey registration. Unlike the unit suite in RunTests.ahk,
+; these actually register hotkeys and synthesise keystrokes, so they exercise
+; AutoHotkey's real enable/disable and HotIf behaviour rather than our model of it.
+; That needs a real desktop, which is why CI does not run this one.
 ;
 ; Ctrl+F13 is used throughout: there is no physical F13 on a normal keyboard, and
 ; while the hotkey is registered AutoHotkey swallows it, so nothing reaches the
