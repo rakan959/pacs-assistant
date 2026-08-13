@@ -7,6 +7,7 @@ class PACSMonitorTest {
     static Tests := [
         "TestHasAccession",
         "TestProcessRowsFindsNewStudies",
+        "TestRepeatedAccessionAlertsOnce",
         "TestMonitoringUsesTestMode",
         "TestOnSettingsChangedRespectsAutoRefresh"
     ]
@@ -18,7 +19,7 @@ class PACSMonitorTest {
         Settings.SaveAllSettings()
         
         PACSMonitor.testMode := true
-        PACSMonitor.knownAccessions := []
+        PACSMonitor.knownAccessions := Map()
         PACSMonitor.testStudyRows := []
         PACSMonitor.testRefreshCalls := 0
         PACSMonitor.testLastNewStudies := []
@@ -27,7 +28,7 @@ class PACSMonitorTest {
     
     TestHasAccession() {
         Assert.False(PACSMonitor.HasAccession("12345678"))
-        PACSMonitor.knownAccessions.Push("12345678")
+        PACSMonitor.MarkAccessionSeen("12345678")
         Assert.True(PACSMonitor.HasAccession("12345678"))
     }
     
@@ -45,6 +46,27 @@ class PACSMonitorTest {
         Assert.Equal(3, PACSMonitor.testLastNewStudies.Length)
     }
     
+    ; An accession can appear in more than one row of a single refresh. It must be
+    ; reported once, not once per row.
+    TestRepeatedAccessionAlertsOnce() {
+        PACSMonitor.testStudyRows := [
+            {Name: "CT HEAD WITHOUT CONTRAST 12345678"},
+            {Name: "CT HEAD WITHOUT CONTRAST 12345678"},
+            {Name: "XR CHEST 2 VIEW 99887766"}
+        ]
+
+        PACSMonitor.RefreshAndCheck()
+        Assert.Equal(2, PACSMonitor.testLastNewStudies.Length)
+        Assert.True(PACSMonitor.HasAccession("12345678"))
+        Assert.True(PACSMonitor.HasAccession("99887766"))
+        Assert.Equal(2, PACSMonitor.knownAccessions.Count)
+
+        ; A later pass over the same rows reports nothing new
+        PACSMonitor.testLastNewStudies := []
+        PACSMonitor.RefreshAndCheck()
+        Assert.Equal(0, PACSMonitor.testLastNewStudies.Length)
+    }
+
     TestMonitoringUsesTestMode() {
         Settings.Set("AutoRefreshPACS", true)
         Settings.Set("RefreshInterval", 1)
@@ -68,7 +90,7 @@ class PACSMonitorTest {
         PACSMonitor.testMode := false
         PACSMonitor.testStudyRows := []
         PACSMonitor.testLastNewStudies := []
-        PACSMonitor.knownAccessions := []
+        PACSMonitor.knownAccessions := Map()
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalSettings
     }

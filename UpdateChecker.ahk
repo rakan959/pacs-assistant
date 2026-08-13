@@ -19,18 +19,16 @@ class UpdateChecker {
     static lastRemindTime := 0   ; Track when the user last clicked "Remind Me Later"
     
     static Start() {
-        ; Check for updates immediately if enabled
-        if Settings.Get("AutoUpdate") {
-            updateInfo := this.CheckForUpdates()
-            if updateInfo.hasUpdate {
-                this.ShowUpdateDialog()
-            }
+        if !Settings.Get("AutoUpdate")
+            return
+
+        ; Check for updates immediately, reusing the result rather than asking again
+        updateInfo := this.CheckForUpdates()
+        if updateInfo.hasUpdate {
+            this.ShowUpdateDialog(updateInfo)
         }
-        
-        ; Set up hourly check if auto-update is enabled
-        if Settings.Get("AutoUpdate") {
-            this.StartAutoCheck()
-        }
+
+        this.StartAutoCheck()
     }
     
     static StartAutoCheck() {
@@ -57,7 +55,7 @@ class UpdateChecker {
     static AutoCheck() {
         updateInfo := this.CheckForUpdates()
         if updateInfo.hasUpdate {
-            this.ShowUpdateDialog()
+            this.ShowUpdateDialog(updateInfo)
         }
     }
     
@@ -268,8 +266,17 @@ class UpdateChecker {
         return { hasUpdate: false }
     }
     
-    static ShowUpdateDialog() {
-        updateInfo := this.CheckForUpdates()
+    /**
+     * Shows the update dialog.
+     * @param updateInfo Result of an earlier CheckForUpdates call. Callers that
+     * already checked pass theirs; asking again cost a second HTTP round trip against
+     * an unauthenticated 60/hour GitHub limit, and could return a different answer -
+     * the rate-limit and remind-later gates would suppress a dialog the first call had
+     * already authorised.
+     */
+    static ShowUpdateDialog(updateInfo?) {
+        if !IsSet(updateInfo)
+            updateInfo := this.CheckForUpdates()
         if (!updateInfo.hasUpdate)
             return
             
@@ -294,24 +301,33 @@ class UpdateChecker {
         skipBetaCheckbox := updateGui.Add("Checkbox", "y+5", "Skip beta versions")
         skipBetaCheckbox.Value := Settings.Get("SkipBetaVersions")
         
+        ; Persisting the two checkboxes has to happen on every way out of the dialog.
+        ; It used to live only in the Close handler, and Gui.Destroy() does not raise
+        ; Close - so every button discarded the user's choices.
+        saveChoices := (*) => (
+            Settings.Set("AutoUpdate", autoUpdateCheckbox.Value),
+            Settings.Set("SkipBetaVersions", skipBetaCheckbox.Value),
+            this.OnSettingsChanged()
+        )
+        dismiss := (*) => (saveChoices(), updateGui.Destroy())
+
         ; Buttons
         buttonGroup := updateGui.Add("GroupBox", "y+15 w400 h50")
-        updateGui.Add("Button", "xp+10 yp+15 w120", "Update Now").OnEvent("Click", (*) => this.PerformUpdate(updateInfo.downloadUrl, updateGui))
+        updateGui.Add("Button", "xp+10 yp+15 w120", "Update Now").OnEvent("Click", (*) => (
+            saveChoices(),
+            this.PerformUpdate(updateInfo.downloadUrl, updateGui)
+        ))
         updateGui.Add("Button", "x+10 w120", "Remind Me Later").OnEvent("Click", (*) => (
             this.lastRemindTime := A_TickCount,  ; Set the remind time
-            updateGui.Destroy()
+            dismiss()
         ))
         updateGui.Add("Button", "x+10 w120", "Skip This Version").OnEvent("Click", (*) => (
             this.skippedVersion := updateInfo.latestVersion,  ; Set the skipped version
-            updateGui.Destroy()
+            dismiss()
         ))
-        
-        ; Save settings when closing
-        updateGui.OnEvent("Close", (*) => (
-            Settings.Set("AutoUpdate", autoUpdateCheckbox.Value),
-            Settings.Set("SkipBetaVersions", skipBetaCheckbox.Value)
-        ))
-        
+
+        updateGui.OnEvent("Close", saveChoices)
+
         updateGui.Show()
     }
     
@@ -329,7 +345,11 @@ class UpdateChecker {
             ; Download new version
             Download(downloadUrl, newExe)
             
-            ; Create a batch file to perform the update after this process exits
+            ; Create a batch file to perform the update after this process exits.
+            ; Written next to the executable, not into whatever the working directory
+            ; happens to be, and replaced rather than appended - FileAppend onto a
+            ; leftover script from a failed update ran the stale commands first.
+            batchPath := A_ScriptDir "\update.bat"
             batchScript := "
             (
             @echo off
@@ -338,11 +358,13 @@ class UpdateChecker {
             start `"`" `"" currentExe "`"
             del `"%~f0`"
             )"
-            
-            FileAppend(batchScript, "update.bat")
-            
+
+            if FileExist(batchPath)
+                FileDelete(batchPath)
+            FileAppend(batchScript, batchPath)
+
             ; Run the update batch file and exit this process
-            Run("update.bat", , "Hide")
+            Run('"' batchPath '"', A_ScriptDir, "Hide")
             updateGui.Destroy()
             ExitApp
         } catch as err {

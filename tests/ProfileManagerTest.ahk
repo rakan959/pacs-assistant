@@ -11,7 +11,9 @@ class ProfileManagerTest {
         "TestProfileDeletionRules",
         "TestCustomFunctionPersistence",
         "TestScopePersistence",
+        "TestScopeDefaultsToAnyWhenAbsent",
         "TestLegacyScopeMigration",
+        "TestLegacyProfileWithoutScopesSection",
         "TestModalityAttendingPersistence"
     ]
 
@@ -104,6 +106,44 @@ class ProfileManagerTest {
         Assert.Equal("PACS or PowerScribe", ProfileManager.profiles["ScopedProfile"].scopes["Toggle Dictation"])
     }
 
+    ; A bind saved with no scope at all reloads as Any, which is how every bind
+    ; behaved before scopes existed
+    TestScopeDefaultsToAnyWhenAbsent() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Draft Report"] := "^f"
+        ; deliberately no profile.scopes entry
+
+        ProfileManager.SaveProfile("NoScope", profile)
+        reloaded := ProfileManager.LoadProfile(ProfileManager.profilesPath "\NoScope.ini")
+
+        Assert.Equal("^f", reloaded.binds["Draft Report"])
+        Assert.Equal("Any", reloaded.scopes["Draft Report"])
+    }
+
+    ; A profile file written before scopes existed has no [Scopes] section at all
+    TestLegacyProfileWithoutScopesSection() {
+        path := ProfileManager.profilesPath "\Ancient.ini"
+        IniWrite("Sign Report|Custom: Yell|", path, "Functions", "Order")
+        IniWrite("^s", path, "Keybinds", "Sign Report")
+        IniWrite("!y", path, "Keybinds", "Custom: Yell")
+        IniWrite("HELLO", path, "CustomFunctions", "Custom: Yell_keys")
+        IniWrite("", path, "CustomFunctions", "Custom: Yell_window")
+
+        legacy := ProfileManager.LoadProfile(path)
+        Assert.Equal("^s", legacy.binds["Sign Report"])
+        Assert.Equal("Any", legacy.scopes["Sign Report"])
+        Assert.True(legacy.customFuncs.Has("Custom: Yell"))
+        Assert.Equal("HELLO", legacy.customFuncs["Custom: Yell"].keys)
+        Assert.Equal(0, legacy.modalityAttendings.Count)
+
+        ; Re-saving must not lose the custom function or invent modality entries
+        ProfileManager.SaveProfile("AncientResaved", legacy)
+        resaved := ProfileManager.LoadProfile(ProfileManager.profilesPath "\AncientResaved.ini")
+        Assert.Equal("^s", resaved.binds["Sign Report"])
+        Assert.Equal("Any", resaved.scopes["Sign Report"])
+        Assert.Equal("HELLO", resaved.customFuncs["Custom: Yell"].keys)
+    }
+
     ; Profiles written under the older [KeybindScopes] scheme must not silently lose
     ; their restriction when loaded by the per-bind scope code
     TestLegacyScopeMigration() {
@@ -141,6 +181,12 @@ class ProfileManagerTest {
         Assert.Equal("", ProfileManager.GetModalityAttending("Chest"))
         ; Unconfigured modalities keep the pre-assignment behaviour
         Assert.Equal("Body", ProfileManager.GetModalityAttending("Body"))
+
+        ; A blank assignment stays on file, so "leave PowerScribe's default" survives a
+        ; reload rather than reverting to the modality name
+        stored := ProfileManager.profiles["ModalityProfile"]
+        Assert.True(stored.modalityAttendings.Has("Chest"))
+        Assert.False(stored.modalityAttendings.Has("Body"), "Unconfigured modality must not be invented on load")
     }
 
     Teardown() {
