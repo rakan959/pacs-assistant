@@ -35,7 +35,7 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 
 1) **Download**
 - Tagged releases publish `pacs-assistant.exe`.
-- Dev pushes upload a `pacs-assistant-dev` artifact from CI.
+- Untagged pushes upload a `pacs-assistant-dev` artifact from CI.
 - Place the EXE anywhere; profiles/settings live alongside it.
 
 2) **Initial setup**
