@@ -12,7 +12,9 @@ class HotkeyManagerTest {
         "TestDisableAllHotkeys",
         "TestRegistersWithScope",
         "TestUnknownScopeFallsBackToAny",
-        "TestScopeFlagsRoundTrip"
+        "TestScopeFlagsRoundTrip",
+        "TestScopeFromFlagsMatrix",
+        "TestScopePredicatesAreStable"
     ]
 
     Setup() {
@@ -89,6 +91,31 @@ class HotkeyManagerTest {
         for scope in HotkeyManager.scopes {
             flags := HotkeyManager.FlagsFromScope(scope)
             Assert.Equal(scope, HotkeyManager.ScopeFromFlags(flags.requirePACS, flags.requirePowerScribe))
+        }
+    }
+
+    TestScopeFromFlagsMatrix() {
+        Assert.Equal("Any", HotkeyManager.ScopeFromFlags(false, false))
+        Assert.Equal("PACS", HotkeyManager.ScopeFromFlags(true, false))
+        Assert.Equal("PowerScribe", HotkeyManager.ScopeFromFlags(false, true))
+        Assert.Equal("PACS or PowerScribe", HotkeyManager.ScopeFromFlags(true, true))
+
+        Assert.Equal("Any", HotkeyManager.NormalizeScope(""))
+        Assert.Equal("PACS", HotkeyManager.NormalizeScope("PACS"))
+    }
+
+    ; AutoHotkey identifies a hotkey variant by the exact function object handed to
+    ; HotIf, so a fresh closure per registration would leak an unreachable variant
+    ; every time a bind is re-applied
+    TestScopePredicatesAreStable() {
+        for scope in HotkeyManager.scopes {
+            if (scope == "Any") {
+                Assert.False(HotkeyManager.scopePredicates.Has(scope), "'Any' must register globally, with no predicate")
+                continue
+            }
+            Assert.True(HotkeyManager.scopePredicates.Has(scope), "No HotIf predicate for scope: " scope)
+            Assert.True(HotkeyManager.scopePredicates[scope] == HotkeyManager.scopePredicates[scope],
+                "Predicate for '" scope "' is not a stable object")
         }
     }
 

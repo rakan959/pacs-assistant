@@ -7,6 +7,7 @@ class PACSCommandsTest {
         "TestBuiltInCommandsExist",
         "TestCreateCustomKeybindStoresConfig",
         "TestModalityClassification",
+        "TestModalityNamesCoverEveryRule",
         "TestLooksLikeReport"
     ]
 
@@ -44,14 +45,41 @@ class PACSCommandsTest {
 
     TestModalityClassification() {
         Assert.Equal("Body", ReportModality.Classify("EXAMINATION: CT ABDOMEN AND PELVIS"))
+        Assert.Equal("Body", ReportModality.Classify("EXAMINATION: XR ABDOMEN"))
         Assert.Equal("Chest", ReportModality.Classify("EXAMINATION: CT CHEST"))
+        Assert.Equal("Chest", ReportModality.Classify("EXAMINATION: CT CHEST WITH CONTRAST"))
         Assert.Equal("Neuro", ReportModality.Classify("EXAMINATION: MRI BRAIN"))
+        Assert.Equal("Neuro", ReportModality.Classify("EXAMINATION: CT HEAD WITHOUT CONTRAST"))
         Assert.Equal("Nucs", ReportModality.Classify("EXAMINATION: NM BONE SCAN"))
         ; The Peds rules are ultrasounds, so they must beat the catch-all US rule
         Assert.Equal("Peds", ReportModality.Classify("EXAMINATION: US RIGHT LOWER QUADRANT"))
+        Assert.Equal("Peds", ReportModality.Classify("EXAMINATION: US NEUROSONOGRAPHY"))
         Assert.Equal("Ultrasound", ReportModality.Classify("EXAMINATION: US RENAL"))
         ; Anything unmatched falls through to MSK
         Assert.Equal("MSK", ReportModality.Classify("EXAMINATION: XR KNEE"))
+        Assert.Equal("MSK", ReportModality.Classify(""))
+        ; Matching is case insensitive
+        Assert.Equal("Chest", ReportModality.Classify("examination: ct chest"))
+    }
+
+    ; Every modality the classifier can return has to be assignable in the GUI,
+    ; otherwise a study routes to a modality with no attending field
+    TestModalityNamesCoverEveryRule() {
+        for rule in ReportModality.rules {
+            found := false
+            for name in ReportModality.names {
+                if (name == rule.name)
+                    found := true
+            }
+            Assert.True(found, "Modality not listed in names: " rule.name)
+        }
+
+        fallbackListed := false
+        for name in ReportModality.names {
+            if (name == ReportModality.fallback)
+                fallbackListed := true
+        }
+        Assert.True(fallbackListed, "Fallback modality not listed in names")
     }
 
     ; Picks the report body out of the other text fields in the PowerScribe window,

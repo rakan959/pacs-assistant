@@ -7,6 +7,7 @@ class SettingsTest {
         "TestDefaultSettingsLoaded",
         "TestSetAndGetValues",
         "TestAlertSoundsAreDistinct",
+        "TestLegacyAliasesAreSelectable",
         "TestLegacySoundNamesMigrate",
         "TestFindSoundIndexFallback"
     ]
@@ -66,6 +67,19 @@ class SettingsTest {
         ; These two are handled without a file
         Assert.Equal("", Settings.ResolveSoundFile("Default Beep"))
         Assert.Equal("", Settings.ResolveSoundFile("Custom File"))
+    }
+
+    ; Every legacy name must land on a sound that is actually selectable, or an old
+    ; settings.ini would resolve to an option no longer in the list
+    TestLegacyAliasesAreSelectable() {
+        for legacy, current in Settings.legacySoundAliases {
+            found := false
+            for name in Settings.alertSounds {
+                if (name == current)
+                    found := true
+            }
+            Assert.True(found, "Legacy sound '" legacy "' maps to '" current "', which is not selectable")
+        }
     }
 
     TestLegacySoundNamesMigrate() {
