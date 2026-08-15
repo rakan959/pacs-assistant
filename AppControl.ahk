@@ -613,7 +613,24 @@ class AppControl {
         )
         if (!length || length >= 32768)
             throw OSError(A_LastError, "GetFullPathNameW")
-        return StrGet(pathBuffer, length, "UTF-16")
+        fullPath := StrGet(pathBuffer, length, "UTF-16")
+
+        ; Directory enumeration commonly returns a long path even when a caller
+        ; supplied the equivalent 8.3 alias (for example RUNNER~1 on CI). Resolve
+        ; existing paths to one spelling before applying the trust comparison.
+        longPathBuffer := Buffer(32768 * 2, 0)
+        longLength := DllCall(
+            "GetLongPathNameW",
+            "WStr", fullPath,
+            "Ptr", longPathBuffer.Ptr,
+            "UInt", 32768,
+            "UInt"
+        )
+        if (longLength >= 32768)
+            throw OSError(A_LastError, "GetLongPathNameW")
+        if (longLength > 0)
+            return StrGet(longPathBuffer, longLength, "UTF-16")
+        return fullPath
     }
 }
 

@@ -52,6 +52,7 @@ class ClinicalAutomationTest {
         "PacsLauncherRejectsNonShortcutMatch",
         "PacsLauncherRejectsRetargetedShortcut",
         "PacsLauncherRejectsUntrustedSameNamedExecutable",
+        "PathsEqualRecognizesShortAndLongWindowsAliases",
         "PacsLauncherAcceptsInstalledShortcut",
         "ReportSelectionUsesOnlyReportShapedText",
         "ReportSelectionRejectsMultipleReportCandidates",
@@ -888,10 +889,26 @@ class ClinicalAutomationTest {
         try {
             Assert.True(AppControl.LaunchVuePacs(root, target))
             Assert.Equal(1, driver.launches.Length)
-            Assert.Equal(shortcut, driver.launches[1])
+            Assert.True(AppControl.PathsEqual(shortcut, driver.launches[1]))
         } finally {
             DirDelete(root, true)
         }
+    }
+
+    PathsEqualRecognizesShortAndLongWindowsAliases() {
+        longPath := A_ProgramFiles
+        shortPathBuffer := Buffer(32768 * 2, 0)
+        length := DllCall(
+            "GetShortPathNameW",
+            "WStr", longPath,
+            "Ptr", shortPathBuffer.Ptr,
+            "UInt", 32768,
+            "UInt"
+        )
+        Assert.True(length > 0 && length < 32768)
+        shortPath := StrGet(shortPathBuffer, length, "UTF-16")
+        Assert.NotEqual(longPath, shortPath)
+        Assert.True(AppControl.PathsEqual(longPath, shortPath))
     }
 
     ReportSelectionUsesOnlyReportShapedText() {
