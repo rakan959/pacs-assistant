@@ -1,8 +1,39 @@
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
 #Include Settings.ahk
-#Include PowerScribe.ahk
+#Include AppControl.ahk
 #Include UIAValue.ahk
+
+class NativeMicrophoneSessionDriver {
+    CaptureResult() {
+        try sessions := AppControl.ResolveExactWindows(
+            AppControl.PowerScribeWindowSpec()
+        )
+        catch as err
+            return {status: "error", session: 0, error: err.Message}
+        if !sessions.Length
+            return {status: "absent", session: 0}
+        if sessions.Length > 1
+            return {status: "ambiguous", session: 0}
+        return {status: "unique", session: sessions[1]}
+    }
+
+    IsLive(session) {
+        return AppControl.ExactSessionIsUniqueAndLive(session)
+    }
+
+    Root(session) {
+        if !this.IsLive(session)
+            return 0
+        try root := UIA.ElementFromHandle(session.target)
+        catch
+            return 0
+        try return root.WinId = session.hwnd && root.ProcessId = session.processId
+            ? root
+            : 0
+        return 0
+    }
+}
 
 /**
  * Selects a microphone on the PowerScribe login screen.
@@ -12,16 +43,11 @@
  * logging in.
  */
 class MicrophoneManager {
-    ; The PowerScribe window is declared once, in PowerScribe, rather than restated
-    ; here where the two copies could drift
-    static winTitle => PowerScribe.windowTitle
+    static sessionDriver := NativeMicrophoneSessionDriver()
 
-    ; The dropdown, by AutomationId, with the positional path as a fallback for when
-    ; the id changes. The fallback is only trusted if the element it lands on has the
-    ; expected AutomationId, so a layout change can never make this poke some other
-    ; control.
+    ; The login dropdown's stable semantic identity. Every candidate is enumerated
+    ; and exactly one same-window enabled ComboBox is required before mutation.
     static comboAutomationId := "cmbMicrophone"
-    static comboPath := "Y3"
 
     static pollTimer := 0
     static pollInterval := 1000
@@ -68,22 +94,42 @@ class MicrophoneManager {
 
     static CheckForLogin() {
         try {
-            hwnd := WinExist(this.winTitle)
-            if !hwnd {
+            resolution := this.sessionDriver.CaptureResult()
+            if (!IsObject(resolution) || !HasProp(resolution, "status"))
+                throw Error("PowerScribe window resolution returned an invalid result")
+
+            if (resolution.status == "absent") {
                 ; PowerScribe closed - allow the next login to be handled
                 this.attemptedWindow := 0
                 this.pickerPresent := false
                 this.ResetAttemptState()
                 return
             }
+            if (resolution.status == "ambiguous" || resolution.status == "error") {
+                this.RecordPickerPresence(false)
+                if (this.attempts >= this.maxAttempts)
+                    return
+                this.attempts++
+                detail := resolution.status == "ambiguous"
+                    ? "multiple exact PowerScribe reporting windows are open"
+                    : "PowerScribe window lookup failed: " (HasProp(resolution, "error") ? resolution.error : "unknown error")
+                this.RecordOperationalError(detail)
+                this.RecordSelectionFailure(Settings.Get("MicrophoneName"))
+                return
+            }
+            if (!(resolution.status == "unique")
+                || !HasProp(resolution, "session")
+                || !resolution.session)
+                throw Error("PowerScribe window resolution returned an invalid unique result")
+            session := resolution.session
 
-            if (hwnd != this.attemptedWindow) {
-                this.attemptedWindow := hwnd
+            if (session.hwnd != this.attemptedWindow) {
+                this.attemptedWindow := session.hwnd
                 this.pickerPresent := false
                 this.ResetAttemptState()
             }
 
-            combo := this.FindMicrophoneCombo(hwnd)
+            combo := this.FindMicrophoneCombo(session)
             this.RecordPickerPresence(combo ? true : false)
             if !combo
                 return  ; Not on the login screen, or the picker has not rendered yet
@@ -93,7 +139,7 @@ class MicrophoneManager {
 
             this.attempts++
             micName := Settings.Get("MicrophoneName")
-            if this.SelectMicrophone(hwnd, combo, micName)
+            if this.SelectMicrophone(session, combo, micName)
                 this.attempts := this.maxAttempts  ; Done with this window
             else
                 this.RecordSelectionFailure(micName)
@@ -148,132 +194,229 @@ class MicrophoneManager {
     /**
      * @returns the microphone dropdown element, or 0 if it isn't present
      */
-    static FindMicrophoneCombo(hwnd) {
-        try {
-            el := UIA.ElementFromHandle("ahk_id " hwnd)
-        } catch {
+    static FindMicrophoneCombo(session) {
+        try root := this.sessionDriver.Root(session)
+        catch
             return 0
-        }
-
-        return this.FindMicrophoneComboInRoot(el)
+        return root ? this.FindMicrophoneComboInRoot(root) : 0
     }
 
     static FindMicrophoneComboInRoot(root) {
-        combo := 0
-        ; CheckForLogin already runs on a one-second timer. A WaitElement here turns
-        ; each absent picker into ~25 full descendant searches, so do one bounded
-        ; tree query per tick and let the timer provide retry behavior.
-        try combo := root.ElementExist({AutomationId: this.comboAutomationId})
-        if combo
-            return combo
-
-        ; Positional fallback, only accepted if it really is the microphone dropdown
-        try {
-            combo := root.ElementFromPath(this.comboPath)
-            if (combo.AutomationId = this.comboAutomationId)
-                return combo
+        matches := []
+        try candidates := root.FindElements({AutomationId: this.comboAutomationId})
+        catch
+            return 0
+        for candidate in candidates {
+            if (this.IsExpectedMicrophoneCombo(root, candidate)
+                && !this.ContainsSameElement(matches, candidate))
+                matches.Push(candidate)
         }
+        return matches.Length = 1 ? matches[1] : 0
+    }
 
-        return 0
+    static IsExpectedMicrophoneCombo(root, candidate) {
+        if !root || !candidate
+            return false
+        try return root.ProcessId > 0
+            && root.WinId > 0
+            && candidate.ProcessId = root.ProcessId
+            && candidate.WinId = root.WinId
+            && candidate.Type = UIA.Type.ComboBox
+            && candidate.AutomationId == this.comboAutomationId
+            && candidate.IsEnabled
+            && candidate.IsExpandCollapsePatternAvailable
+        return false
+    }
+
+    static IsExpectedMicrophoneItem(root, item) {
+        if !root || !item
+            return false
+        try return root.ProcessId > 0
+            && root.WinId > 0
+            && item.ProcessId = root.ProcessId
+            && item.WinId = root.WinId
+            && item.Type = UIA.Type.ListItem
+            && item.IsEnabled
+            && item.IsSelectionItemPatternAvailable
+            && Trim(item.Name) != ""
+        return false
+    }
+
+    static ContainsSameElement(elements, candidate) {
+        for existing in elements {
+            if this.SameElement(existing, candidate)
+                return true
+        }
+        return false
+    }
+
+    static SameElement(left, right) {
+        if !left || !right
+            return false
+        if (ObjPtr(left) = ObjPtr(right))
+            return true
+        try return UIA.CompareElementsEx(left, right)
+        return false
+    }
+
+    static FindMicrophoneItems(root, combo) {
+        items := []
+        try {
+            for item in combo.FindElements({Type: "ListItem"}) {
+                if (this.IsExpectedMicrophoneItem(root, item)
+                    && !this.ContainsSameElement(items, item))
+                    items.Push(item)
+            }
+        }
+        ; Some UI frameworks host the open dropdown beside the ComboBox in the same
+        ; top-level window, so enumerate the exact root as well and deduplicate.
+        try {
+            for item in root.FindElements({Type: "ListItem"}) {
+                if (this.IsExpectedMicrophoneItem(root, item)
+                    && !this.ContainsSameElement(items, item))
+                    items.Push(item)
+            }
+        }
+        return items
+    }
+
+    static ResolveMicrophoneItem(root, combo, configuredName) {
+        configuredName := Trim(configuredName)
+        if (configuredName = ""
+            || !this.IsExpectedMicrophoneCombo(root, combo))
+            return 0
+
+        exact := []
+        partial := []
+        for item in this.FindMicrophoneItems(root, combo) {
+            fullName := Trim(item.Name)
+            if (StrCompare(fullName, configuredName, false) = 0)
+                exact.Push({item: item, name: fullName})
+            else if InStr(fullName, configuredName, false)
+                partial.Push({item: item, name: fullName})
+        }
+        if exact.Length
+            return exact.Length = 1 ? exact[1] : 0
+        return partial.Length = 1 ? partial[1] : 0
+    }
+
+    static RevalidateCombo(session, expectedCombo) {
+        try {
+            if !this.sessionDriver.IsLive(session)
+                return 0
+            root := this.sessionDriver.Root(session)
+        } catch {
+            return 0
+        }
+        if !root
+            return 0
+        combo := this.FindMicrophoneComboInRoot(root)
+        return combo && this.SameElement(combo, expectedCombo)
+            ? {root: root, combo: combo}
+            : 0
+    }
+
+    static CollapseVerifiedCombo(session, expectedCombo) {
+        current := this.RevalidateCombo(session, expectedCombo)
+        if !current
+            return false
+        try {
+            current.combo.ExpandCollapsePattern.Collapse()
+            return true
+        }
+        return false
     }
 
     /**
-     * Selects micName in the dropdown, matching on substring so a stored name like
-     * "PowerMic" matches "PowerMic III".
+     * Selects a real list item. Exact names win; a configured substring is accepted
+     * only when it identifies exactly one full device name.
      * @returns true if the microphone ended up selected
      */
-    static SelectMicrophone(hwnd, combo, micName) {
+    static SelectMicrophone(session, combo, micName) {
         micName := Trim(micName)
         if (micName = "")
             return false
 
-        ; Already on the wanted microphone. Read through UIAValue so a combo box with
-        ; no ValuePattern is handled as an unsupported capability rather than an error.
-        if this.WaitForSelection(combo, micName, 0)
-            return true
-
-        ; Editable combo boxes accept the value directly; gated so an unsupported one
-        ; falls through to the dropdown instead of erroring
-        directWriteError := 0
+        current := this.RevalidateCombo(session, combo)
+        if !current
+            return false
         try {
-            if (UIAValue.Write(combo, micName)
-                && this.WaitForSelection(combo, micName, 300)) {
-                return true
-            }
+            current.combo.ExpandCollapsePattern.Expand()
         } catch as err {
-            directWriteError := err
-            ; A provider may apply the selection and then report an error. Verify the
-            ; postcondition before falling back or reporting the operation as failed.
-            if this.WaitForSelection(combo, micName, 300)
-                return true
-        }
-
-        ; Otherwise open the list and pick the entry
-        expanded := false
-        try {
-            combo.ExpandCollapsePattern.Expand()
-            expanded := true
-        } catch {
-            try {
-                combo.Click()
-                expanded := true
-            }
-        }
-
-        item := 0
-        try {
-            item := combo.WaitElement({Type: "ListItem", Name: micName, mm: "SubString", cs: false}, 1000)
-        }
-        if !item {
-            ; Some frameworks host the dropdown list outside the combo element
-            try {
-                root := UIA.ElementFromHandle("ahk_id " hwnd)
-                item := root.WaitElement({Type: "ListItem", Name: micName, mm: "SubString", cs: false}, 500)
-            }
-        }
-
-        if !item {
-            if expanded {
-                try combo.ExpandCollapsePattern.Collapse()
-            }
-            if directWriteError
-                this.RecordOperationalError(directWriteError)
+            this.RecordOperationalError(err)
             return false
         }
 
-        selected := false
-        try {
-            item.SelectionItemPattern.Select()
-            selected := true
-        } catch {
-            try {
-                item.Click()
-                selected := true
-            }
+        current := this.RevalidateCombo(session, combo)
+        if !current
+            return false
+        resolved := this.ResolveMicrophoneItem(current.root, current.combo, micName)
+        if !resolved {
+            this.CollapseVerifiedCombo(session, combo)
+            return false
         }
 
-        if expanded {
-            try combo.ExpandCollapsePattern.Collapse()
+        if this.WaitForSelection(session, resolved.name, 0, resolved.item) {
+            this.CollapseVerifiedCombo(session, combo)
+            return true
         }
 
-        succeeded := selected && this.WaitForSelection(combo, micName, 1000, item)
-        if (!succeeded && directWriteError)
-            this.RecordOperationalError(directWriteError)
+        ; Reacquire both semantic targets immediately before mutation. A dropdown can
+        ; rerender after expansion; a saved wrapper is not sufficient proof.
+        current := this.RevalidateCombo(session, combo)
+        if !current
+            return false
+        liveResolved := this.ResolveMicrophoneItem(current.root, current.combo, micName)
+        if (!liveResolved
+            || !(liveResolved.name == resolved.name)
+            || !this.SameElement(liveResolved.item, resolved.item)) {
+            this.CollapseVerifiedCombo(session, combo)
+            return false
+        }
+
+        try liveResolved.item.SelectionItemPattern.Select()
+        catch as err {
+            this.RecordOperationalError(err)
+            this.CollapseVerifiedCombo(session, combo)
+            return false
+        }
+
+        succeeded := this.WaitForSelection(
+            session,
+            liveResolved.name,
+            1000,
+            liveResolved.item
+        )
+        this.CollapseVerifiedCombo(session, combo)
         return succeeded
     }
 
-    static WaitForSelection(combo, micName, timeoutMs, item := 0) {
-        started := A_TickCount
+    static WaitForSelection(session, fullName, timeoutMs, item := 0) {
+        started := DllCall("GetTickCount64", "UInt64")
         loop {
-            if InStr(UIAValue.Read(combo), micName, false)
-                return true
-            if item {
-                try {
-                    if item.GetPropertyValue(UIA.Property.SelectionItemIsSelected)
-                        return true
+            current := this.sessionDriver.Root(session)
+            combo := current ? this.FindMicrophoneComboInRoot(current) : 0
+            if combo {
+                try value := UIAValue.TryRead(combo)
+                catch
+                    value := {supported: false, value: ""}
+                if (value.supported
+                    && StrCompare(Trim(value.value), Trim(fullName), false) = 0)
+                    return true
+
+                if item {
+                    for currentItem in this.FindMicrophoneItems(current, combo) {
+                        if (this.SameElement(currentItem, item)
+                            && StrCompare(Trim(currentItem.Name), Trim(fullName), false) = 0) {
+                            try {
+                                if currentItem.GetPropertyValue(UIA.Property.SelectionItemIsSelected)
+                                    return true
+                            }
+                        }
+                    }
                 }
             }
-            if (A_TickCount - started >= timeoutMs)
+            if (DllCall("GetTickCount64", "UInt64") - started >= timeoutMs)
                 return false
             Sleep(50)
         }
@@ -290,19 +433,34 @@ class MicrophoneManager {
             return false
         }
 
-        hwnd := WinExist(this.winTitle)
-        if !hwnd {
+        resolution := this.sessionDriver.CaptureResult()
+        if (!IsObject(resolution) || !HasProp(resolution, "status")) {
+            MsgBox("PowerScribe window identity could not be verified.", "PACS Assistant", "Icon!")
+            return false
+        }
+        if (resolution.status == "absent") {
             MsgBox("PowerScribe is not running.", "PACS Assistant", "Icon!")
             return false
         }
+        if (resolution.status == "ambiguous") {
+            MsgBox("Multiple exact PowerScribe reporting windows are open. Close the extra window before selecting a microphone.", "PACS Assistant", "Icon!")
+            return false
+        }
+        if (!(resolution.status == "unique")
+            || !HasProp(resolution, "session")
+            || !resolution.session) {
+            MsgBox("PowerScribe window identity could not be verified.", "PACS Assistant", "Icon!")
+            return false
+        }
+        session := resolution.session
 
-        combo := this.FindMicrophoneCombo(hwnd)
+        combo := this.FindMicrophoneCombo(session)
         if !combo {
             MsgBox("The microphone selector was not found. It is only available on the PowerScribe login screen.", "PACS Assistant", "Icon!")
             return false
         }
 
-        if this.SelectMicrophone(hwnd, combo, micName)
+        if this.SelectMicrophone(session, combo, micName)
             return true
 
         MsgBox("Could not select microphone '" micName "'. Check that the name matches an entry in the PowerScribe list.", "PACS Assistant", "Icon!")

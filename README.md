@@ -60,8 +60,9 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 ## Settings
 - Auto refresh PACS + interval
 - Convert clipboard line endings (LF→CRLF) for wet reads
-- PowerScribe: set microphone on login, and the name to match (part of the name is
-  enough — `PowerMic` matches `PowerMic III`)
+- PowerScribe: set microphone on login, and the name to match. An exact name is
+  preferred; a partial name such as `PowerMic` is accepted only when exactly one
+  full device name matches.
 - Notifications: sound on/off, message popups, choose alert sound, custom sound file
 - Updates: auto-check toggle, skip betas
 

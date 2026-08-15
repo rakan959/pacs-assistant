@@ -4,12 +4,14 @@
 
 class MicrophoneManagerTest {
     static Tests := [
-        "WaitForSelectionRequiresTheRequestedValue",
+        "WaitForSelectionRequiresTheExactResolvedValue",
         "WaitForSelectionIgnoresDisplayCasing",
-        "FindMicrophoneComboUsesFallbackAfterPrimaryFailure",
-        "FindMicrophoneComboUsesSinglePrimarySearch",
-        "FindMicrophoneComboReturnsZeroWhenLookupsFail",
-        "PostMutationWriteErrorUsesVerifiedSelection",
+        "MicrophoneComboRequiresExactIdentityAndCapability",
+        "MicrophoneComboMustBeUniqueWithinTheExactWindow",
+        "PartialMicrophoneNameMustResolveUniquely",
+        "ExactMicrophoneNameWinsOverPartialMatches",
+        "SelectionUsesOneExactItemWithoutDirectTextWrite",
+        "AmbiguousPartialSelectionDoesNotMutate",
         "FinalSelectionFailureNotifiesOnce",
         "OperationalErrorIsRecorded",
         "PickerReappearanceStartsANewLoginSession"
@@ -17,6 +19,7 @@ class MicrophoneManagerTest {
 
     Setup() {
         this.originalNotifier := MicrophoneManager.notifier
+        this.originalSessionDriver := MicrophoneManager.sessionDriver
         this.notifications := []
         MicrophoneManager.notifier := (text, title, options) => this.notifications.Push({
             text: text,
@@ -29,51 +32,129 @@ class MicrophoneManagerTest {
         MicrophoneManager.pickerPresent := false
     }
 
-    WaitForSelectionRequiresTheRequestedValue() {
-        matching := FakeMicrophoneCombo("PowerMic III")
-        other := FakeMicrophoneCombo("Internal Microphone")
+    WaitForSelectionRequiresTheExactResolvedValue() {
+        fixture := MicrophoneFixture(["PowerMic III"])
+        fixture.combo._value := "PowerMic III"
+        MicrophoneManager.sessionDriver := fixture.driver
 
-        Assert.True(MicrophoneManager.WaitForSelection(matching, "PowerMic", 0))
-        Assert.False(MicrophoneManager.WaitForSelection(other, "PowerMic", 0))
+        Assert.True(MicrophoneManager.WaitForSelection(
+            fixture.session,
+            "PowerMic III",
+            0,
+            fixture.items[1]
+        ))
+        Assert.False(MicrophoneManager.WaitForSelection(
+            fixture.session,
+            "PowerMic",
+            0,
+            fixture.items[1]
+        ))
     }
 
     WaitForSelectionIgnoresDisplayCasing() {
-        combo := FakeMicrophoneCombo("POWERMIC III")
+        fixture := MicrophoneFixture(["PowerMic III"])
+        fixture.combo._value := "POWERMIC III"
+        MicrophoneManager.sessionDriver := fixture.driver
 
-        Assert.True(MicrophoneManager.WaitForSelection(combo, "powermic", 0))
+        Assert.True(MicrophoneManager.WaitForSelection(
+            fixture.session,
+            "powermic iii",
+            0,
+            fixture.items[1]
+        ))
     }
 
-    FindMicrophoneComboUsesFallbackAfterPrimaryFailure() {
-        expected := FakeMicrophoneElement(MicrophoneManager.comboAutomationId)
-        root := FakeMicrophoneRoot(true, expected)
+    MicrophoneComboRequiresExactIdentityAndCapability() {
+        fixture := MicrophoneFixture(["PowerMic III"])
+        root := fixture.root
 
-        actual := MicrophoneManager.FindMicrophoneComboInRoot(root)
-
-        Assert.Equal(expected, actual)
+        Assert.True(MicrophoneManager.IsExpectedMicrophoneCombo(root, fixture.combo))
+        Assert.False(MicrophoneManager.IsExpectedMicrophoneCombo(
+            root,
+            FakeMicrophoneCombo(99, 100, MicrophoneManager.comboAutomationId)
+        ))
+        Assert.False(MicrophoneManager.IsExpectedMicrophoneCombo(
+            root,
+            FakeMicrophoneCombo(42, 200, MicrophoneManager.comboAutomationId)
+        ))
+        Assert.False(MicrophoneManager.IsExpectedMicrophoneCombo(
+            root,
+            FakeMicrophoneCombo(42, 100, "otherCombo")
+        ))
+        Assert.False(MicrophoneManager.IsExpectedMicrophoneCombo(
+            root,
+            FakeMicrophoneCombo(42, 100, MicrophoneManager.comboAutomationId, false)
+        ))
+        noExpand := FakeMicrophoneCombo(42, 100, MicrophoneManager.comboAutomationId)
+        noExpand.IsExpandCollapsePatternAvailable := false
+        Assert.False(MicrophoneManager.IsExpectedMicrophoneCombo(root, noExpand))
+        wrongType := FakeMicrophoneCombo(42, 100, MicrophoneManager.comboAutomationId)
+        wrongType.Type := UIA.Type.Edit
+        Assert.False(MicrophoneManager.IsExpectedMicrophoneCombo(root, wrongType))
     }
 
-    FindMicrophoneComboUsesSinglePrimarySearch() {
-        expected := FakeMicrophoneElement(MicrophoneManager.comboAutomationId)
-        root := FakeMicrophoneRoot(false, expected)
+    MicrophoneComboMustBeUniqueWithinTheExactWindow() {
+        fixture := MicrophoneFixture(["PowerMic III"])
+        duplicate := FakeMicrophoneCombo(42, 100, MicrophoneManager.comboAutomationId)
+        fixture.root.combos.Push(duplicate)
 
-        MicrophoneManager.FindMicrophoneComboInRoot(root)
-
-        Assert.Equal(1, root.findCalls)
-        Assert.Equal(0, root.waitCalls)
+        Assert.Equal(0, MicrophoneManager.FindMicrophoneComboInRoot(fixture.root))
     }
 
-    FindMicrophoneComboReturnsZeroWhenLookupsFail() {
-        root := FakeMicrophoneRoot(true, 0, true)
+    PartialMicrophoneNameMustResolveUniquely() {
+        fixture := MicrophoneFixture(["PowerMic III", "PowerMic Mobile"])
 
-        Assert.Equal(0, MicrophoneManager.FindMicrophoneComboInRoot(root))
+        Assert.Equal(0, MicrophoneManager.ResolveMicrophoneItem(
+            fixture.root,
+            fixture.combo,
+            "PowerMic"
+        ))
     }
 
-    PostMutationWriteErrorUsesVerifiedSelection() {
-        combo := PostMutationMicrophoneCombo("Internal Microphone", "PowerMic III")
+    ExactMicrophoneNameWinsOverPartialMatches() {
+        fixture := MicrophoneFixture(["PowerMic III", "PowerMic III Mobile"])
 
-        Assert.True(MicrophoneManager.SelectMicrophone(1, combo, "PowerMic"))
-        Assert.Equal("PowerMic III", combo.storedValue)
-        Assert.Equal("", MicrophoneManager.lastError)
+        resolved := MicrophoneManager.ResolveMicrophoneItem(
+            fixture.root,
+            fixture.combo,
+            "PowerMic III"
+        )
+
+        Assert.True(IsObject(resolved))
+        Assert.Equal("PowerMic III", resolved.name)
+        Assert.True(resolved.item == fixture.items[1])
+    }
+
+    SelectionUsesOneExactItemWithoutDirectTextWrite() {
+        fixture := MicrophoneFixture(["Internal Microphone", "PowerMic III"])
+        MicrophoneManager.sessionDriver := fixture.driver
+
+        succeeded := MicrophoneManager.SelectMicrophone(
+            fixture.session,
+            fixture.combo,
+            "PowerMic"
+        )
+
+        Assert.True(succeeded)
+        Assert.Equal("PowerMic III", fixture.combo._value)
+        Assert.Equal(1, fixture.items[2].selectCalls)
+        Assert.Equal(0, fixture.combo.writeCalls)
+    }
+
+    AmbiguousPartialSelectionDoesNotMutate() {
+        fixture := MicrophoneFixture(["PowerMic III", "PowerMic Mobile"])
+        MicrophoneManager.sessionDriver := fixture.driver
+
+        succeeded := MicrophoneManager.SelectMicrophone(
+            fixture.session,
+            fixture.combo,
+            "PowerMic"
+        )
+
+        Assert.False(succeeded)
+        Assert.Equal(0, fixture.items[1].selectCalls)
+        Assert.Equal(0, fixture.items[2].selectCalls)
+        Assert.Equal(0, fixture.combo.writeCalls)
     }
 
     FinalSelectionFailureNotifiesOnce() {
@@ -112,6 +193,7 @@ class MicrophoneManagerTest {
 
     Teardown() {
         MicrophoneManager.notifier := this.originalNotifier
+        MicrophoneManager.sessionDriver := this.originalSessionDriver
         MicrophoneManager.attempts := 0
         MicrophoneManager.failureNotified := false
         MicrophoneManager.lastError := ""
@@ -119,33 +201,107 @@ class MicrophoneManagerTest {
     }
 }
 
+class MicrophoneFixture {
+    __New(names) {
+        this.session := {
+            hwnd: 100,
+            target: "ahk_id 100",
+            processId: 42,
+            title: AppControl.powerScribeReportingTitle,
+            exe: AppControl.powerScribeExecutable
+        }
+        this.combo := FakeMicrophoneCombo(
+            this.session.processId,
+            this.session.hwnd,
+            MicrophoneManager.comboAutomationId
+        )
+        this.items := []
+        for name in names
+            this.items.Push(FakeMicrophoneItem(
+                this.session.processId,
+                this.session.hwnd,
+                name,
+                this.combo
+            ))
+        this.combo.items := this.items
+        this.root := FakeMicrophoneRoot(
+            this.session.processId,
+            this.session.hwnd,
+            [this.combo],
+            this.items
+        )
+        this.driver := FakeMicrophoneSessionDriver(this.session, this.root)
+    }
+}
+
+class FakeMicrophoneSessionDriver {
+    __New(session, root) {
+        this.session := session
+        this._root := root
+    }
+
+    IsLive(session) {
+        return IsObject(session)
+            && session.hwnd = this.session.hwnd
+            && session.processId = this.session.processId
+    }
+
+    Root(session) {
+        return this.IsLive(session) ? this._root : 0
+    }
+}
+
+class FakeMicrophoneRoot {
+    __New(processId, windowId, combos, items) {
+        this.ProcessId := processId
+        this.WinId := windowId
+        this.Type := UIA.Type.Window
+        this.combos := combos
+        this.items := items
+    }
+
+    FindElements(criteria) {
+        if HasProp(criteria, "AutomationId")
+            return this.combos.Clone()
+        if HasProp(criteria, "Type") {
+            type := criteria.Type
+            if (type = "ComboBox" || type = UIA.Type.ComboBox)
+                return this.combos.Clone()
+            if (type = "ListItem" || type = UIA.Type.ListItem)
+                return this.items.Clone()
+        }
+        return []
+    }
+
+    ElementExist(*) {
+        return this.combos.Length ? this.combos[1] : 0
+    }
+
+    ElementFromPath(*) {
+        return this.combos.Length ? this.combos[1] : 0
+    }
+}
+
 class FakeMicrophoneCombo {
-    __New(value) {
-        this.value := value
-    }
-
-    GetPropertyValue(propertyId) {
-        if (propertyId = UIA.Property.ValueValue)
-            return this.value
-        return ""
-    }
-}
-
-class FakeMicrophoneElement {
-    __New(automationId) {
+    __New(processId, windowId, automationId, enabled := true) {
+        this.ProcessId := processId
+        this.WinId := windowId
+        this.Type := UIA.Type.ComboBox
         this.AutomationId := automationId
-    }
-}
-
-class PostMutationMicrophoneCombo {
-    __New(value, mutatedValue) {
-        this.storedValue := value
-        this.mutatedValue := mutatedValue
+        this.Name := "Microphone"
+        this.IsEnabled := enabled
+        this.IsExpandCollapsePatternAvailable := true
+        this.IsValuePatternAvailable := true
+        this.IsLegacyIAccessiblePatternAvailable := false
+        this.writeCalls := 0
+        this._value := "Internal Microphone"
+        this.items := []
+        this.ExpandCollapsePattern := FakeMicrophoneExpandPattern(this)
     }
 
     GetPropertyValue(propertyId) {
         switch propertyId {
-            case UIA.Property.ValueValue: return this.storedValue
+            case UIA.Property.ValueValue: return this._value
             case UIA.Property.IsValuePatternAvailable: return true
             case UIA.Property.IsLegacyIAccessiblePatternAvailable: return false
         }
@@ -153,40 +309,67 @@ class PostMutationMicrophoneCombo {
     }
 
     Value {
-        get => this.storedValue
+        get => this._value
         set {
-            this.storedValue := this.mutatedValue
-            throw Error("provider reported failure after selection")
+            this.writeCalls++
+            this._value := value
         }
+    }
+
+    FindElements(*) {
+        return this.items.Clone()
+    }
+
+    Click(*) {
+        this.ExpandCollapsePattern.Expand()
+        return "Expand"
     }
 }
 
-class FakeMicrophoneRoot {
-    __New(waitThrows := false, fallback := 0, fallbackThrows := false) {
-        this.waitThrows := waitThrows
-        this.fallback := fallback
-        this.fallbackThrows := fallbackThrows
-        this.findCalls := 0
-        this.waitCalls := 0
+class FakeMicrophoneExpandPattern {
+    __New(combo) {
+        this.combo := combo
     }
 
-    WaitElement(criteria, timeoutMs) {
-        this.waitCalls++
-        if this.waitThrows
-            throw Error("simulated primary lookup failure")
-        return 0
+    Expand() {
+        this.combo.expanded := true
     }
 
-    ElementExist(criteria) {
-        this.findCalls++
-        if this.waitThrows
-            throw Error("simulated primary lookup failure")
-        return 0
+    Collapse() {
+        this.combo.expanded := false
+    }
+}
+
+class FakeMicrophoneItem {
+    __New(processId, windowId, name, combo) {
+        this.ProcessId := processId
+        this.WinId := windowId
+        this.Type := UIA.Type.ListItem
+        this.Name := name
+        this.AutomationId := ""
+        this.IsEnabled := true
+        this.IsSelectionItemPatternAvailable := true
+        this.selected := false
+        this.selectCalls := 0
+        this.combo := combo
+        this.SelectionItemPattern := FakeMicrophoneSelectionPattern(this)
     }
 
-    ElementFromPath(path) {
-        if this.fallbackThrows
-            throw Error("simulated fallback failure")
-        return this.fallback
+    GetPropertyValue(propertyId) {
+        if (propertyId = UIA.Property.SelectionItemIsSelected)
+            return this.selected
+        return ""
+    }
+}
+
+class FakeMicrophoneSelectionPattern {
+    __New(item) {
+        this.item := item
+    }
+
+    Select() {
+        this.item.selectCalls++
+        this.item.selected := true
+        this.item.combo._value := this.item.Name
     }
 }
