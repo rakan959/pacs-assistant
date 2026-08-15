@@ -381,7 +381,7 @@ class NativeWetReadDriver {
         while (A_TickCount - started < timeoutMs) {
             current := ""
             try current := this.Read(field)
-            if (current = expected)
+            if (current == expected)
                 return true
             Sleep(100)
         }

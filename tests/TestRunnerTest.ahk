@@ -3,6 +3,8 @@
 class TestRunnerTest {
     static Tests := [
         "ThrowsRejectsAFunctionThatReturnsNormally",
+        "EqualRejectsCaseOnlyAndTypeOnlyDifferences",
+        "NotEqualAcceptsCaseOnlyAndTypeOnlyDifferences",
         "SetupFailureIsCountedAndDoesNotStopTheClass",
         "TeardownRunsAfterSetupFailure",
         "TeardownFailureCountsAsTheTestFailure",
@@ -17,6 +19,36 @@ class TestRunnerTest {
         }
 
         Assert.True(didThrow, "Assert.Throws must fail when the callback returns normally")
+    }
+
+    EqualRejectsCaseOnlyAndTypeOnlyDifferences() {
+        caseDifferenceRejected := false
+        try Assert.Equal("PACS", "pacs")
+        catch
+            caseDifferenceRejected := true
+
+        typeDifferenceRejected := false
+        try Assert.Equal(1, "1")
+        catch
+            typeDifferenceRejected := true
+
+        Assert.True(caseDifferenceRejected, "Assert.Equal must compare string case exactly")
+        Assert.True(typeDifferenceRejected, "Assert.Equal must reject values of different types")
+    }
+
+    NotEqualAcceptsCaseOnlyAndTypeOnlyDifferences() {
+        caseDifferenceAccepted := true
+        try Assert.NotEqual("PACS", "pacs")
+        catch
+            caseDifferenceAccepted := false
+
+        typeDifferenceAccepted := true
+        try Assert.NotEqual(1, "1")
+        catch
+            typeDifferenceAccepted := false
+
+        Assert.True(caseDifferenceAccepted, "Assert.NotEqual must distinguish string case")
+        Assert.True(typeDifferenceAccepted, "Assert.NotEqual must distinguish value types")
     }
 
     SetupFailureIsCountedAndDoesNotStopTheClass() {

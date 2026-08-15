@@ -18,7 +18,7 @@ class JsonParser {
     }
 
     __New(text) {
-        if (Type(text) != "String")
+        if !(Type(text) == "String")
             throw TypeError("JSON input must be a string")
         this.text := text
         this.length := StrLen(text)
@@ -35,17 +35,17 @@ class JsonParser {
             case "{": return this.ParseObject()
             case "[": return this.ParseArray()
         }
-        if (char = Chr(34))
+        if (char == Chr(34))
             return this.ParseString()
-        if (SubStr(this.text, this.position, 4) = "true") {
+        if (SubStr(this.text, this.position, 4) == "true") {
             this.position += 4
             return true
         }
-        if (SubStr(this.text, this.position, 5) = "false") {
+        if (SubStr(this.text, this.position, 5) == "false") {
             this.position += 5
             return false
         }
-        if (SubStr(this.text, this.position, 4) = "null") {
+        if (SubStr(this.text, this.position, 4) == "null") {
             this.position += 4
             return JsonParser.nullValue
         }
@@ -56,14 +56,14 @@ class JsonParser {
         result := Map()
         this.Expect("{")
         this.SkipWhitespace()
-        if (this.Peek() = "}") {
+        if (this.Peek() == "}") {
             this.position++
             return result
         }
 
         loop {
             this.SkipWhitespace()
-            if (this.Peek() != Chr(34))
+            if !(this.Peek() == Chr(34))
                 throw ValueError("Expected a JSON object key", , this.position)
             key := this.ParseString()
             this.SkipWhitespace()
@@ -73,9 +73,9 @@ class JsonParser {
             result[key] := this.ParseValue()
             this.SkipWhitespace()
             separator := this.Take()
-            if (separator = "}")
+            if (separator == "}")
                 return result
-            if (separator != ",")
+            if !(separator == ",")
                 throw ValueError("Expected ',' or '}' in JSON object", , this.position - 1)
         }
     }
@@ -84,7 +84,7 @@ class JsonParser {
         result := []
         this.Expect("[")
         this.SkipWhitespace()
-        if (this.Peek() = "]") {
+        if (this.Peek() == "]") {
             this.position++
             return result
         }
@@ -93,9 +93,9 @@ class JsonParser {
             result.Push(this.ParseValue())
             this.SkipWhitespace()
             separator := this.Take()
-            if (separator = "]")
+            if (separator == "]")
                 return result
-            if (separator != ",")
+            if !(separator == ",")
                 throw ValueError("Expected ',' or ']' in JSON array", , this.position - 1)
         }
     }
@@ -108,11 +108,11 @@ class JsonParser {
 
         while (this.position <= this.length) {
             char := this.Take()
-            if (char = quote)
+            if (char == quote)
                 return result
             if (Ord(char) < 0x20)
                 throw ValueError("Unescaped control character in JSON string", , this.position - 1)
-            if (char != slash) {
+            if !(char == slash) {
                 result .= char
                 continue
             }
@@ -120,19 +120,19 @@ class JsonParser {
             if (this.position > this.length)
                 throw ValueError("Unterminated JSON escape sequence")
             escaped := this.Take()
-            if (escaped = quote || escaped = slash || escaped = "/") {
+            if (escaped == quote || escaped == slash || escaped == "/") {
                 result .= escaped
-            } else if (escaped = "b") {
+            } else if (escaped == "b") {
                 result .= Chr(8)
-            } else if (escaped = "f") {
+            } else if (escaped == "f") {
                 result .= Chr(12)
-            } else if (escaped = "n") {
+            } else if (escaped == "n") {
                 result .= "`n"
-            } else if (escaped = "r") {
+            } else if (escaped == "r") {
                 result .= "`r"
-            } else if (escaped = "t") {
+            } else if (escaped == "t") {
                 result .= "`t"
-            } else if (escaped = "u") {
+            } else if (escaped == "u") {
                 result .= this.ParseUnicodeEscape()
             } else {
                 throw ValueError("Invalid JSON escape sequence", , this.position - 1)
@@ -145,7 +145,7 @@ class JsonParser {
     ParseUnicodeEscape() {
         high := this.ParseHexCodeUnit()
         if (high >= 0xD800 && high <= 0xDBFF) {
-            if (SubStr(this.text, this.position, 2) != "\u")
+            if !(SubStr(this.text, this.position, 2) == "\u")
                 throw ValueError("High surrogate is missing its low surrogate", , this.position)
             this.position += 2
             low := this.ParseHexCodeUnit()
@@ -199,7 +199,7 @@ class JsonParser {
 
     Expect(expected) {
         actual := this.Take()
-        if (actual != expected)
+        if !(actual == expected)
             throw ValueError("Expected '" expected "' but found '" actual "'", , this.position - 1)
     }
 }

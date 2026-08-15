@@ -153,8 +153,24 @@ class UpdateCheckerTest {
     }
 
     TestJsonParserRejectsUppercaseTokensAndEscapes() {
-        for invalid in ["TRUE", "False", "NULL", '"\N"', '"\U263A"']
-            Assert.Throws(() => JsonParser.Parse(invalid), "", "Invalid JSON was accepted: " invalid)
+        invalidCases := [
+            {input: "TRUE", error: "Expected a JSON value"},
+            {input: "False", error: "Expected a JSON value"},
+            {input: "NULL", error: "Expected a JSON value"},
+            {input: '"\N"', error: "Invalid JSON escape sequence"},
+            {input: '"\U263A"', error: "Invalid JSON escape sequence"}
+        ]
+        for invalidCase in invalidCases {
+            Assert.Throws(
+                ObjBindMethod(this, "ParseInvalidJson", invalidCase.input),
+                invalidCase.error,
+                "Invalid JSON was accepted: " invalidCase.input
+            )
+        }
+    }
+
+    ParseInvalidJson(input) {
+        return JsonParser.Parse(input)
     }
 
     TestReleaseParserKeepsAssetMetadataTogether() {

@@ -22,7 +22,7 @@ class WetReadTest {
         "StickyRootMustBelongToPacsProcess",
         "StickyOpenerRejectsSameProcessWrongWindowButton",
         "StickyOpenerRejectsAmbiguousSameWindowButtons",
-        "StickyOpenerIgnoresInactivePreexistingSticky",
+        "StickyOpenerRejectsUnactivatedStickyWindow",
         "StickyOpenerPinsNewlyActiveExactWindow",
         "StickyDriverUsesExactValidatedWindowHandle",
         "StickyNoteTargetRequiresExpectedTypeProcessAndCapability",
@@ -31,6 +31,8 @@ class WetReadTest {
         "NativeControlWithoutHandleIsUnsupported",
         "NativeSendRefusesLostFocus",
         "NativeSendRefusesWrongStickyControlFocus",
+        "NativeForwardVerificationRejectsCaseOnlyDifference",
+        "NativeRollbackVerificationRejectsCaseOnlyDifference",
         "RoutingFailureReportsTheActualCause"
     ]
 
@@ -269,7 +271,7 @@ class WetReadTest {
         Assert.Equal(0, driver.invokeCalls)
     }
 
-    StickyOpenerIgnoresInactivePreexistingSticky() {
+    StickyOpenerRejectsUnactivatedStickyWindow() {
         button := FakeStickyTargetElement(
             UIA.Type.Button,
             42,
@@ -384,6 +386,20 @@ class WetReadTest {
         Assert.Equal(0, windowDriver.sent.Length)
     }
 
+    NativeForwardVerificationRejectsCaseOnlyDifference() {
+        driver := FakeNativeWetReadValueDriver("New Wet Read")
+
+        Assert.False(driver.WaitForValue(1, "new wet read", 150))
+        Assert.True(driver.WaitForValue(1, "New Wet Read", 150))
+    }
+
+    NativeRollbackVerificationRejectsCaseOnlyDifference() {
+        driver := FakeNativeWetReadValueDriver("previous note")
+
+        Assert.False(driver.WaitForValue(1, "Previous Note", 150))
+        Assert.True(driver.WaitForValue(1, "previous note", 150))
+    }
+
     RoutingFailureReportsTheActualCause() {
         message := AttendingFailureMessage(
             "EXAMINATION: CT CHEST",
@@ -476,6 +492,16 @@ class FakeWetReadDriver {
 
     WaitForValue(field, expected, timeoutMs) {
         return this.fieldValue = expected
+    }
+}
+
+class FakeNativeWetReadValueDriver extends NativeWetReadDriver {
+    __New(currentValue) {
+        this.currentValue := currentValue
+    }
+
+    Read(*) {
+        return this.currentValue
     }
 }
 

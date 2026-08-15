@@ -89,13 +89,17 @@ class TestRunner {
 
 class Assert {
     static Equal(expected, actual, message := "") {
-        if (expected != actual)
+        if !this.ExactlyEqual(expected, actual)
             throw Error(message ? message : Format("Expected '{1}' but got '{2}'", expected, actual))
     }
     
     static NotEqual(expected, actual, message := "") {
-        if (expected = actual)
+        if this.ExactlyEqual(expected, actual)
             throw Error(message ? message : Format("Expected value different from '{1}'", expected))
+    }
+
+    static ExactlyEqual(expected, actual) {
+        return Type(expected) == Type(actual) && expected == actual
     }
     
     static True(value, message := "") {
