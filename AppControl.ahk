@@ -91,6 +91,7 @@ class AppControl {
     static activationTimeoutSeconds := 2
     static maxMatchingProcesses := 32
     static powerScribeExecutable := "Nuance.PowerScribe360.exe"
+    static powerScribeReportingTitle := "PowerScribe 360 | Reporting"
     static windowDriver := NativeWindowDriver()
     static lifecycleDriver := NativeAppLifecycleDriver()
 
@@ -249,6 +250,10 @@ class AppControl {
         ]
     }
 
+    static PacsGracefulCloseTarget() {
+        return this.powerScribeReportingTitle " ahk_exe " this.powerScribeExecutable
+    }
+
     static StopTargetSpecs(specs) {
         anyStopped := false
         failedTargets := []
@@ -385,8 +390,9 @@ restartPACS() {
 
     ; Close PowerScribe gracefully first so an in-progress report can be saved. The
     ; hard kill below still runs as a fallback if it does not exit in time.
-    if WinExist("PowerScribe") {
-        if closeWithSavePrompt("PowerScribe")
+    powerScribeTarget := AppControl.PacsGracefulCloseTarget()
+    if WinExist(powerScribeTarget) {
+        if closeWithSavePrompt(powerScribeTarget)
             anyClosed := true
     }
 

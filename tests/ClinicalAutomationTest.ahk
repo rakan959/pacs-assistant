@@ -417,6 +417,7 @@ class ClinicalAutomationTest {
             "PowerScribe 360 | Reporting ahk_exe " AppControl.powerScribeExecutable,
             PowerScribe.windowTitle
         )
+        Assert.Equal(PowerScribe.windowTitle, AppControl.PacsGracefulCloseTarget())
     }
 
     PacsLauncherRejectsNonShortcutMatch() {
