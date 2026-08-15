@@ -48,6 +48,7 @@ $issueTemplate = Get-Content -Raw (Join-Path $repoRoot '.github/ISSUE_TEMPLATE/b
 $featureTemplate = Get-Content -Raw (Join-Path $repoRoot '.github/ISSUE_TEMPLATE/feature_request.md')
 $versionGeneratorPath = Join-Path $repoRoot 'scripts/GenerateVersion.ps1'
 $releaseValidatorPath = Join-Path $repoRoot 'scripts/ValidateExistingRelease.ps1'
+$releaseTagCommitValidatorPath = Join-Path $repoRoot 'scripts/AssertReleaseTagCommit.ps1'
 $releaseValidator = if (Test-Path -LiteralPath $releaseValidatorPath -PathType Leaf) {
     Get-Content -Raw -LiteralPath $releaseValidatorPath
 } else {
@@ -102,6 +103,13 @@ Assert-Matches $releaseValidator '\$remoteAsset\.digest' 'Existing releases must
 Assert-Matches $releaseValidator '\$remoteAsset\.size\s+-ne\s+\$localFile\.Length' 'Existing releases must compare asset sizes before becoming a no-op.'
 Assert-Matches $workflow '& scripts/ValidateExistingRelease\.ps1' 'Existing releases must pass the complete release object through the tested validator.'
 Assert-Matches $workflow 'ActualTagCommitSha' 'Existing release validation must bind the release tag to the workflow commit.'
+if ([regex]::Matches($workflow, '& scripts/AssertReleaseTagCommit\.ps1').Count -lt 2) {
+    $failures.Add('Release publication must verify the tag commit both before release handling and immediately before publishing a new draft.')
+}
+Assert-Matches $workflow '(?ms)Resolve-ReleaseTagCommit.*?AssertReleaseTagCommit\.ps1.*?if \(\$releaseExitCode' 'Release handling must reject a moved tag before either the existing- or new-release branch.'
+Assert-Matches $workflow "(?ms)'release',\s*'create'.*?'--draft'.*?'release',\s*'upload'.*?Resolve-ReleaseTagCommit.*?AssertReleaseTagCommit\.ps1.*?'release',\s*'edit'.*?'--draft=false'" 'New releases must remain drafts through asset upload and a second exact tag-commit check.'
+Assert-Matches $readme '(?i)immutable releases' 'Release documentation must require GitHub release immutability.'
+Assert-Matches $readme '(?i)tag ruleset.*restrict.*updates.*deletions' 'Release documentation must require protected release tags because ref comparison and publication are not atomic.'
 
 $actionReferencePattern = '(?m)^\s*uses:\s*(?<reference>\S+?)(?:\s+#.*)?\s*$'
 $usesLineCount = [regex]::Matches($workflow, '(?m)^\s*uses:\s*').Count
@@ -264,6 +272,31 @@ if (-not (Test-Path -LiteralPath $releaseValidatorPath -PathType Leaf)) {
         if (Invoke-ReleaseValidationFixture -Case $invalidCase) {
             $failures.Add("Invalid existing-release fixture was accepted: $invalidCase")
         }
+    }
+}
+
+if (-not (Test-Path -LiteralPath $releaseTagCommitValidatorPath -PathType Leaf)) {
+    $failures.Add('scripts/AssertReleaseTagCommit.ps1 must own the release tag-to-artifact commit assertion.')
+} else {
+    $expectedCommit = '0123456789abcdef0123456789abcdef01234567'
+    try {
+        & $releaseTagCommitValidatorPath `
+            -ExpectedCommitSha $expectedCommit `
+            -ActualTagCommitSha $expectedCommit
+    } catch {
+        $failures.Add('The release tag-commit assertion must accept an exact commit match.')
+    }
+
+    $mismatchAccepted = $true
+    try {
+        & $releaseTagCommitValidatorPath `
+            -ExpectedCommitSha $expectedCommit `
+            -ActualTagCommitSha 'ffffffffffffffffffffffffffffffffffffffff'
+    } catch {
+        $mismatchAccepted = $false
+    }
+    if ($mismatchAccepted) {
+        $failures.Add('The release tag-commit assertion must reject a moved tag before new publication.')
     }
 }
 

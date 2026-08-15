@@ -234,8 +234,18 @@ git tag v2.1.0
 git push origin v2.1.0
 ```
 
-That's the whole process. CI compiles, stamps the EXE's file properties, generates
-release notes from the commits, and publishes `pacs-assistant.exe`.
+Before enabling tag-triggered publication for a repository, protect the release
+boundary in GitHub settings:
+
+- enable immutable releases; and
+- add a tag ruleset for `v*` that restricts updates and deletions.
+
+CI compares the tag's resolved commit with the workflow commit before release handling,
+creates new releases as drafts, uploads their assets, repeats that comparison, and only
+then publishes the draft. The API comparison and publication are separate operations,
+so the tag ruleset closes the remaining ref-movement window. CI then stamps the EXE's
+file properties, generates release notes from the commits, and publishes
+`pacs-assistant.exe`.
 
 **Prereleases.** A tag containing a hyphen (`v2.1.0-beta.1`) is published as a GitHub
 prerelease. The update checker uses that flag rather than reading the tag name:

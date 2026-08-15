@@ -238,17 +238,26 @@ jobs:
             return ($output -join "`n") | ConvertFrom-Json
           }
 
+          function Resolve-ReleaseTagCommit {
+            param([Parameter(Mandatory)][string] $EncodedTag)
+
+            $tagReference = Invoke-GitHubJson "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$EncodedTag"
+            $tagObject = $tagReference.object
+            for ($depth = 0; $tagObject.type -eq 'tag' -and $depth -lt 8; $depth++) {
+              $annotatedTag = Invoke-GitHubJson "repos/$env:GITHUB_REPOSITORY/git/tags/$($tagObject.sha)"
+              $tagObject = $annotatedTag.object
+            }
+            if ($tagObject.type -ne 'commit') {
+              throw "Release tag '$env:RELEASE_TAG' did not resolve to a commit."
+            }
+            return [string] $tagObject.sha
+          }
+
           $encodedTag = [Uri]::EscapeDataString($env:RELEASE_TAG)
-          $tagReference = Invoke-GitHubJson "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$encodedTag"
-          $tagObject = $tagReference.object
-          for ($depth = 0; $tagObject.type -eq 'tag' -and $depth -lt 8; $depth++) {
-            $annotatedTag = Invoke-GitHubJson "repos/$env:GITHUB_REPOSITORY/git/tags/$($tagObject.sha)"
-            $tagObject = $annotatedTag.object
-          }
-          if ($tagObject.type -ne 'commit') {
-            throw "Release tag '$env:RELEASE_TAG' did not resolve to a commit."
-          }
-          $actualTagCommit = [string] $tagObject.sha
+          $actualTagCommit = Resolve-ReleaseTagCommit $encodedTag
+          & scripts/AssertReleaseTagCommit.ps1 `
+            -ExpectedCommitSha $env:EXPECTED_COMMIT `
+            -ActualTagCommitSha $actualTagCommit
 
           $releaseEndpoint = "repos/$env:GITHUB_REPOSITORY/releases/tags/$encodedTag"
           $releaseOutput = @(& gh api `
@@ -257,7 +266,6 @@ jobs:
             --header 'X-GitHub-Api-Version: 2022-11-28' `
             $releaseEndpoint 2>&1)
           $releaseExitCode = $LASTEXITCODE
-          $publish = $true
 
           if ($releaseExitCode -eq 0) {
             $release = ($releaseOutput -join "`n") | ConvertFrom-Json
@@ -270,30 +278,58 @@ jobs:
               -Assets $assets
 
             Write-Host "Release '$env:RELEASE_TAG' already matches the complete release contract; publication is a no-op."
-            $publish = $false
           } elseif (($releaseOutput -join "`n") -notmatch '(?i)HTTP 404|Not Found') {
             throw "Could not determine whether release '$env:RELEASE_TAG' exists: $($releaseOutput -join ' ')"
           } else {
-            $arguments = @(
+            $createArguments = @(
               'release',
               'create',
-              $env:RELEASE_TAG
-            ) + $assets + @(
+              $env:RELEASE_TAG,
               '--repo',
               $env:GITHUB_REPOSITORY,
               '--title',
               $env:RELEASE_TAG,
               '--generate-notes',
-              '--verify-tag'
+              '--verify-tag',
+              '--draft'
             )
             if ($expectedPrerelease) {
-              $arguments += '--prerelease'
+              $createArguments += '--prerelease'
             }
-          }
-
-          if ($publish) {
-            & gh @arguments
+            & gh @createArguments
             if ($LASTEXITCODE -ne 0) {
-              throw "GitHub release command failed (exit $LASTEXITCODE)"
+              throw "GitHub draft release creation failed (exit $LASTEXITCODE)"
+            }
+
+            $uploadArguments = @(
+              'release',
+              'upload',
+              $env:RELEASE_TAG
+            ) + $assets + @(
+              '--repo',
+              $env:GITHUB_REPOSITORY
+            )
+            & gh @uploadArguments
+            if ($LASTEXITCODE -ne 0) {
+              throw "GitHub release asset upload failed (exit $LASTEXITCODE)"
+            }
+
+            $actualTagCommit = Resolve-ReleaseTagCommit $encodedTag
+            & scripts/AssertReleaseTagCommit.ps1 `
+              -ExpectedCommitSha $env:EXPECTED_COMMIT `
+              -ActualTagCommitSha $actualTagCommit
+
+            $publishArguments = @(
+              'release',
+              'edit',
+              $env:RELEASE_TAG,
+              '--repo',
+              $env:GITHUB_REPOSITORY,
+              '--verify-tag',
+              '--draft=false'
+            )
+            & gh @publishArguments
+            if ($LASTEXITCODE -ne 0) {
+              throw "GitHub draft release publication failed (exit $LASTEXITCODE)"
             }
           }
