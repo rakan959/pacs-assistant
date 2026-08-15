@@ -11,7 +11,6 @@ class ProfileManager {
     static loadErrors := []
     static saveSequence := 0
     static profileRevisions := Map()
-    static missingValue := "{PACS-ASSISTANT-MISSING-INI-VALUE}"
 
     static __New() {
         ; Load default profile setting from config file
@@ -84,8 +83,8 @@ class ProfileManager {
         ; Every profile version has written [Functions] Order, including a newly
         ; created empty profile. Its absence distinguishes a malformed .ini from an
         ; intentionally empty profile.
-        functionOrder := IniRead(path, "Functions", "Order", this.missingValue)
-        if (functionOrder = this.missingValue)
+        functionOrder := ""
+        if !this.TryReadIniValue(path, "Functions", "Order", &functionOrder)
             throw Error("Profile is missing [Functions] Order")
 
         ; Read the ordered list of functions
@@ -97,8 +96,8 @@ class ProfileManager {
                 ; Profiles written before scopes existed have no [Scopes] section;
                 ; those binds default to firing in any window, as they always did.
                 ; [KeybindScopes] is the older per-bind format and is migrated.
-                persistedScope := IniRead(path, "Scopes", funcName, this.missingValue)
-                if (persistedScope == this.missingValue) {
+                persistedScope := ""
+                if !this.TryReadIniValue(path, "Scopes", funcName, &persistedScope) {
                     legacy := IniRead(path, "KeybindScopes", funcName, "")
                     profile.scopes[funcName] := this.MigrateLegacyScope(legacy)
                 } else
@@ -226,6 +225,14 @@ class ProfileManager {
                 throw TypeError("Profile is missing Map property: " property)
         }
 
+        ; Win32 INI section keys are case-insensitive even though AutoHotkey Maps
+        ; are case-sensitive. Reject aliases before either save or load can collapse
+        ; two logical commands/modalities into one physical key.
+        this.RequireUniqueIniKeys(profile.binds, "function")
+        this.RequireUniqueIniKeys(profile.customFuncs, "custom function")
+        this.RequireUniqueIniKeys(profile.scopes, "scope function")
+        this.RequireUniqueIniKeys(profile.modalityAttendings, "modality")
+
         bindingOwners := Map()
         for funcName, bind in profile.binds {
             this.RequireSafeIniKey(funcName, "function")
@@ -258,6 +265,47 @@ class ProfileManager {
         }
         for modality, _ in profile.modalityAttendings
             this.RequireSafeIniKey(modality, "modality")
+    }
+
+    static RequireUniqueIniKeys(values, kind) {
+        identities := Map()
+        for name, _ in values {
+            identity := StrLower(name)
+            if identities.Has(identity)
+                throw ValueError(
+                    "Profile contains a case-insensitive INI key collision for " kind
+                    . ": '" identities[identity] "' and '" name "'"
+                )
+            identities[identity] := name
+        }
+    }
+
+    static HasIniKeyIdentity(values, name) {
+        identity := StrLower(name)
+        for existingName, _ in values {
+            if (StrLower(existingName) == identity)
+                return true
+        }
+        return false
+    }
+
+    /**
+     * Read an optional INI value without a collidable persisted sentinel. For a
+     * missing key IniRead returns its caller-provided default, so two distinct
+     * defaults disagree only when the key is actually absent. Any stored string,
+     * including either default token or blank, is returned identically both times.
+     */
+    static TryReadIniValue(path, section, key, &value) {
+        absentA := "{PACS-ASSISTANT-INI-ABSENT-A}"
+        absentB := "{PACS-ASSISTANT-INI-ABSENT-B}"
+        first := IniRead(path, section, key, absentA)
+        second := IniRead(path, section, key, absentB)
+        if !(first == second) {
+            value := ""
+            return false
+        }
+        value := first
+        return true
     }
 
     static RequireSafeIniKey(name, kind) {

@@ -804,7 +804,8 @@ class KeybindGUI {
     }
 
     CustomFunctionNameAvailable(profile, funcName) {
-        return !profile.binds.Has(funcName) && !profile.customFuncs.Has(funcName)
+        return !ProfileManager.HasIniKeyIdentity(profile.binds, funcName)
+            && !ProfileManager.HasIniKeyIdentity(profile.customFuncs, funcName)
     }
 
     AddFunction(funcName, listView, selectorGui) {
@@ -815,11 +816,24 @@ class KeybindGUI {
             MsgBox("Please select a function first.", "Error", "Icon!")
             return
         }
-        
-        ; Add to profile with empty binding, active in any window until scoped
+
         profileName := selectorGui.profileName
-        ProfileManager.profiles[profileName].binds[funcName] := ""
-        ProfileManager.profiles[profileName].scopes[funcName] := "Any"
+        profile := ProfileManager.profiles[profileName]
+        stillAvailable := !ProfileManager.HasIniKeyIdentity(profile.binds, funcName)
+            && (PACSCommands.commands.Has(funcName) || profile.customFuncs.Has(funcName))
+        if !stillAvailable {
+            selectorGui.Destroy()
+            MsgBox(
+                "The selected function changed while this dialog was open. Reopen Add Function before making another change.",
+                "Function List Changed",
+                "Icon!"
+            )
+            return false
+        }
+
+        ; Add to profile with empty binding, active in any window until scoped
+        profile.binds[funcName] := ""
+        profile.scopes[funcName] := "Any"
 
         ; Add to ListView (removed type)
         listView.Add(, funcName, "Unassigned", this.ScopeLabel(funcName))
@@ -829,6 +843,7 @@ class KeybindGUI {
         
         ; Prompt user to set the keybind
         this.PromptKeybind(funcName, listView, profileName)
+        return true
     }
 
     RemoveFunction(listView) {

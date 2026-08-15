@@ -24,6 +24,9 @@ class ProfileManagerTest {
         "TestCreateProfileRejectsUnsafeAndDuplicateNames",
         "TestSaveRejectsUnsafeIniKeys",
         "TestSaveRejectsMalformedCustomCommand",
+        "TestSaveRejectsCaseCollidingCustomCommands",
+        "TestSaveRejectsCaseCollidingModalities",
+        "TestLoadRejectsCaseCollidingPersistedKeys",
         "TestFailedRenamePreservesOriginalProfile",
         "TestMalformedProfileDoesNotBlockValidProfiles",
         "TestDefaultProfileMustExist",
@@ -32,6 +35,7 @@ class ProfileManagerTest {
         "TestEquivalentCustomCombinationBindingsAreRejected",
         "TestUnknownScopeIsRejected",
         "TestExplicitBlankPersistedScopeIsRejected",
+        "TestPersistedMissingSentinelIsRejectedAsAScope",
         "TestNonCanonicalPersistedScopeIsRejected"
     ]
 
@@ -291,6 +295,56 @@ class ProfileManagerTest {
         )
     }
 
+    TestSaveRejectsCaseCollidingCustomCommands() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Custom: Foo"] := "^a"
+        profile.binds["Custom: foo"] := "^b"
+        profile.scopes["Custom: Foo"] := "Any"
+        profile.scopes["Custom: foo"] := "Any"
+        profile.customFuncs["Custom: Foo"] := {keys: "FIRST", window: ""}
+        profile.customFuncs["Custom: foo"] := {keys: "SECOND", window: ""}
+
+        Assert.Throws(
+            () => ProfileManager.SaveProfile("CaseCollision", profile),
+            "case-insensitive INI key"
+        )
+        Assert.False(FileExist(ProfileManager.profilesPath "\CaseCollision.ini"))
+    }
+
+    TestSaveRejectsCaseCollidingModalities() {
+        profile := ProfileManager.NewProfile()
+        profile.modalityAttendings["Neuro"] := "First"
+        profile.modalityAttendings["neuro"] := "Second"
+
+        Assert.Throws(
+            () => ProfileManager.SaveProfile("ModalityCollision", profile),
+            "case-insensitive INI key"
+        )
+        Assert.False(FileExist(ProfileManager.profilesPath "\ModalityCollision.ini"))
+    }
+
+    TestLoadRejectsCaseCollidingPersistedKeys() {
+        path := ProfileManager.profilesPath "\PersistedCollision.ini"
+        FileAppend(
+            "[Functions]`n"
+            . "Order=Custom: Foo|Custom: foo|`n"
+            . "[Keybinds]`n"
+            . "Custom: Foo=^a`n"
+            . "[Scopes]`n"
+            . "Custom: Foo=Any`n"
+            . "[CustomFunctions]`n"
+            . "Order=Custom: Foo|Custom: foo|`n"
+            . "Custom: Foo_keys=FIRST`n"
+            . "Custom: Foo_window=`n",
+            path
+        )
+
+        Assert.Throws(
+            () => ProfileManager.LoadProfile(path),
+            "case-insensitive INI key"
+        )
+    }
+
     TestMalformedLegacyScopeIsRejected() {
         path := ProfileManager.profilesPath "\MalformedLegacyScope.ini"
         IniWrite("Sign Report|", path, "Functions", "Order")
@@ -428,6 +482,17 @@ class ProfileManagerTest {
         path := ProfileManager.profilesPath "\BlankScope.ini"
         ProfileManager.SaveProfile("BlankScope", profile)
         IniWrite("", path, "Scopes", "Sign Report")
+
+        Assert.Throws(() => ProfileManager.LoadProfile(path), "hotkey scope")
+    }
+
+    TestPersistedMissingSentinelIsRejectedAsAScope() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        profile.scopes["Sign Report"] := "PACS"
+        path := ProfileManager.profilesPath "\SentinelScope.ini"
+        ProfileManager.SaveProfile("SentinelScope", profile)
+        IniWrite("{PACS-ASSISTANT-MISSING-INI-VALUE}", path, "Scopes", "Sign Report")
 
         Assert.Throws(() => ProfileManager.LoadProfile(path), "hotkey scope")
     }

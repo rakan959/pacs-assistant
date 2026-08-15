@@ -8,6 +8,8 @@ class KeybindGUITest {
         "TestSelectedFunctionSurvivesMissingCustomList",
         "TestPrettifyHotkey",
         "TestCustomFunctionNameChecksUnboundFunctions",
+        "TestCustomFunctionNamesUsePersistedCaseInsensitiveIdentity",
+        "TestStaleAddFunctionCannotClearANewerBinding",
         "TestProfileBindingOwnerUsesRuntimeIdentity",
         "TestCaptureSuppressesInputToTheForegroundWindow",
         "TestCapturedHotkeyUsesTerminationModifierSnapshot",
@@ -59,6 +61,39 @@ class KeybindGUITest {
 
         Assert.False(this.gui.CustomFunctionNameAvailable(profile, "Custom: Existing"))
         Assert.True(this.gui.CustomFunctionNameAvailable(profile, "Custom: New"))
+    }
+
+    TestCustomFunctionNamesUsePersistedCaseInsensitiveIdentity() {
+        profile := ProfileManager.NewProfile()
+        profile.customFuncs["Custom: Existing"] := {keys: "HELLO", window: ""}
+
+        Assert.False(this.gui.CustomFunctionNameAvailable(profile, "Custom: existing"))
+    }
+
+    TestStaleAddFunctionCannotClearANewerBinding() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        profile.scopes["Sign Report"] := "PACS"
+        dialog := FakeProfileDialog("Test")
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            result := this.gui.AddFunction("Sign Report", RejectingAddListView(), dialog)
+            capturedBind := profile.binds["Sign Report"]
+            capturedScope := profile.scopes["Sign Report"]
+            capturedDestroyed := dialog.destroyed
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.False(result)
+        Assert.Equal("^s", capturedBind)
+        Assert.Equal("PACS", capturedScope)
+        Assert.True(capturedDestroyed)
     }
 
     TestProfileBindingOwnerUsesRuntimeIdentity() {
@@ -459,6 +494,12 @@ class KeybindGUITest {
 class FailingListView {
     GetCount() {
         throw Error("simulated ListView failure")
+    }
+}
+
+class RejectingAddListView {
+    Add(*) {
+        throw Error("a stale dialog must not append a duplicate row")
     }
 }
 
