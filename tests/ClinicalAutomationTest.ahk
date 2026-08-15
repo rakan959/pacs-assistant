@@ -31,8 +31,9 @@ class ClinicalAutomationTest {
         "RestartRecheckUncertaintyFailsClosed",
         "NativeLookupErrorsAreNotAbsence",
         "RestartLookupUncertaintyCancelsStop",
-        "WindowOwnershipUncertaintyCancelsStop",
+        "WindowCloseUncertaintyCancelsStop",
         "SharedHostWindowStopDoesNotTerminateOwner",
+        "ProcessTargetNeverFallsThroughToSameTitleWindow",
         "RestartStopsPowerScribeByExactProcessName",
         "RestartTargetsUseExactClinicalIdentities",
         "PacsLauncherRejectsNonShortcutMatch",
@@ -288,7 +289,7 @@ class ClinicalAutomationTest {
     RestartTreatsAlreadyExitedProcessAsStopped() {
         AppControl.lifecycleDriver := FakeAppLifecycleDriver("already-exited")
 
-        result := AppControl.StopTarget("mp.exe")
+        result := AppControl.StopTarget("mp.exe", "process")
 
         Assert.True(result.found)
         Assert.True(result.stopped)
@@ -297,7 +298,7 @@ class ClinicalAutomationTest {
     RestartDetectsStubbornProcess() {
         AppControl.lifecycleDriver := FakeAppLifecycleDriver("stubborn")
 
-        result := AppControl.StopTarget("mp.exe")
+        result := AppControl.StopTarget("mp.exe", "process")
 
         Assert.True(result.found)
         Assert.False(result.stopped)
@@ -307,7 +308,7 @@ class ClinicalAutomationTest {
         driver := MultipleProcessLifecycleDriver([101, 202])
         AppControl.lifecycleDriver := driver
 
-        result := AppControl.StopTarget("mp.exe")
+        result := AppControl.StopTarget("mp.exe", "process")
 
         Assert.True(result.found)
         Assert.True(result.stopped)
@@ -320,7 +321,7 @@ class ClinicalAutomationTest {
         driver := RespawningProcessLifecycleDriver()
         AppControl.lifecycleDriver := driver
 
-        result := AppControl.StopTarget("mp.exe")
+        result := AppControl.StopTarget("mp.exe", "process")
 
         Assert.True(result.found)
         Assert.False(result.stopped)
@@ -332,7 +333,7 @@ class ClinicalAutomationTest {
         driver := UncertainRecheckLifecycleDriver()
         AppControl.lifecycleDriver := driver
 
-        result := AppControl.StopTarget("mp.exe")
+        result := AppControl.StopTarget("mp.exe", "process")
 
         Assert.True(result.found)
         Assert.False(result.stopped)
@@ -350,22 +351,22 @@ class ClinicalAutomationTest {
     RestartLookupUncertaintyCancelsStop() {
         AppControl.lifecycleDriver := FakeAppLifecycleDriver("lookup-error")
 
-        result := AppControl.StopTarget("mp.exe")
+        result := AppControl.StopTarget("mp.exe", "process")
 
         Assert.False(result.found)
         Assert.False(result.stopped)
         Assert.True(InStr(result.error, "lookup failed") > 0)
     }
 
-    WindowOwnershipUncertaintyCancelsStop() {
-        driver := FakeAppLifecycleDriver("ownership-error")
+    WindowCloseUncertaintyCancelsStop() {
+        driver := FakeAppLifecycleDriver("close-error")
         AppControl.lifecycleDriver := driver
 
-        result := AppControl.StopTarget("Vue PACS")
+        result := AppControl.StopTarget("Vue PACS", "window")
 
         Assert.True(result.found)
         Assert.False(result.stopped)
-        Assert.True(InStr(result.error, "ownership failed") > 0)
+        Assert.True(InStr(result.error, "close failed") > 0)
         Assert.Equal(0, driver.killCalls)
     }
 
@@ -375,13 +376,26 @@ class ClinicalAutomationTest {
 
         result := AppControl.StopTarget(
             "Explorer Portal ahk_exe msedge.exe",
-            true
+            "window"
         )
 
         Assert.True(result.found)
         Assert.True(result.stopped)
         Assert.Equal(0, driver.processLookupCalls)
         Assert.Equal(2, driver.closeCalls)
+        Assert.Equal(0, driver.killCalls)
+        Assert.Equal(0, driver.stopProcessCalls)
+    }
+
+    ProcessTargetNeverFallsThroughToSameTitleWindow() {
+        driver := SameTitleWindowLifecycleDriver()
+        AppControl.lifecycleDriver := driver
+
+        result := AppControl.StopTarget("mp.exe", "process")
+
+        Assert.False(result.found)
+        Assert.True(result.stopped)
+        Assert.Equal(0, driver.windowLookupCalls)
         Assert.Equal(0, driver.killCalls)
         Assert.Equal(0, driver.stopProcessCalls)
     }
@@ -404,10 +418,12 @@ class ClinicalAutomationTest {
         foundPowerScribe := false
 
         for spec in specs {
-            if (HasProp(spec, "windowOnly") && spec.windowOnly) {
+            Assert.True(HasProp(spec, "kind"))
+            if (spec.kind = "window") {
                 Assert.True(InStr(spec.target, " ahk_exe ") > 0)
                 continue
             }
+            Assert.Equal("process", spec.kind)
             Assert.True(RegExMatch(spec.target, "i)^[^\\/:*?`"<>|]+\.exe$") > 0)
             if (spec.target = AppControl.powerScribeExecutable)
                 foundPowerScribe := true
@@ -595,21 +611,25 @@ class FakeAppLifecycleDriver {
     FindProcess(target) {
         if (this.mode = "lookup-error")
             throw Error("lookup failed")
-        if (this.mode = "ownership-error")
+        if (this.mode = "close-error")
             return 0
         return this.processAvailable ? 4242 : 0
     }
 
     FindWindow(target) {
-        if (this.mode = "ownership-error")
+        if (this.mode = "close-error")
             return 31337
         return 0
     }
 
     GetWindowProcessId(hwnd) {
-        if (this.mode = "ownership-error")
-            throw Error("ownership failed")
         return 0
+    }
+
+    CloseWindow(*) {
+        if (this.mode = "close-error")
+            throw Error("close failed")
+        return true
     }
 
     ProcessExists(pid) {
@@ -743,6 +763,41 @@ class SharedHostWindowLifecycleDriver {
 
     KillWindow(*) {
         this.killCalls++
+        return false
+    }
+
+    StopProcess(*) {
+        this.stopProcessCalls++
+        return true
+    }
+}
+
+class SameTitleWindowLifecycleDriver {
+    __New() {
+        this.windowLookupCalls := 0
+        this.killCalls := 0
+        this.stopProcessCalls := 0
+    }
+
+    FindProcess(*) {
+        return 0
+    }
+
+    FindWindow(*) {
+        this.windowLookupCalls++
+        return 31337
+    }
+
+    GetWindowProcessId(*) {
+        return 4242
+    }
+
+    KillWindow(*) {
+        this.killCalls++
+        return true
+    }
+
+    ProcessExists(*) {
         return false
     }
 

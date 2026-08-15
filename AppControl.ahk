@@ -46,10 +46,6 @@ class NativeAppLifecycleDriver {
         return WinExist(target)
     }
 
-    GetWindowProcessId(hwnd) {
-        return WinGetPID("ahk_id " hwnd)
-    }
-
     ProcessExists(pid) {
         return ProcessExist(pid) != 0
     }
@@ -70,14 +66,6 @@ class NativeAppLifecycleDriver {
 
     CloseWindow(hwnd) {
         try WinClose("ahk_id " hwnd, , 2)
-        catch {
-            return !this.WindowExists(hwnd)
-        }
-        return !this.WindowExists(hwnd)
-    }
-
-    KillWindow(hwnd) {
-        try WinKill("ahk_id " hwnd)
         catch {
             return !this.WindowExists(hwnd)
         }
@@ -131,117 +119,94 @@ class AppControl {
     }
 
     /**
-     * Stops a target addressed by process name or window title.
+     * Stops an explicitly typed process or closes an explicitly typed window.
+     * Process names are never reused as title selectors, and window targets never
+     * escalate to terminating a shared owner process.
      * @returns {found, stopped}; stopped is false on lookup uncertainty or when a
-     * target survives termination, allowing restartPACS to fail closed.
+     * target survives, allowing restartPACS to fail closed.
      */
-    static StopTarget(target, windowOnly := false) {
+    static StopTarget(target, targetKind) {
+        if (targetKind = "process")
+            return this.StopProcessTarget(target)
+        if (targetKind = "window")
+            return this.CloseWindowTarget(target)
+        return {found: false, stopped: false, error: "Unsupported restart target kind: " targetKind}
+    }
+
+    static StopProcessTarget(target) {
         driver := this.lifecycleDriver
 
         foundProcess := false
         stoppedProcesses := 0
-        if !windowOnly {
-            loop {
-                try pid := driver.FindProcess(target)
-                catch as err
-                    return {found: foundProcess, stopped: false, error: err.Message}
-                if !pid
-                    break
+        loop {
+            try pid := driver.FindProcess(target)
+            catch as err
+                return {found: foundProcess, stopped: false, error: err.Message}
+            if !pid
+                break
 
-                foundProcess := true
-                if (stoppedProcesses >= this.maxMatchingProcesses) {
-                    return {
-                        found: true,
-                        stopped: false,
-                        error: "Too many matching processes remained after bounded termination"
-                    }
+            foundProcess := true
+            if (stoppedProcesses >= this.maxMatchingProcesses) {
+                return {
+                    found: true,
+                    stopped: false,
+                    error: "Too many matching processes remained after bounded termination"
                 }
-
-                try stopped := driver.StopProcess(pid)
-                catch as err {
-                    ; A process may exit between discovery and termination. Verify the
-                    ; postcondition before reporting that race as a restart failure.
-                    try alreadyStopped := !driver.ProcessExists(pid)
-                    catch
-                        alreadyStopped := false
-                    if !alreadyStopped
-                        return {found: true, stopped: false, error: err.Message}
-                    stoppedProcesses++
-                    continue
-                }
-                if !stopped
-                    return {found: true, stopped: false}
-                stoppedProcesses++
             }
 
-            if foundProcess
-                return {found: true, stopped: true}
+            try stopped := driver.StopProcess(pid)
+            catch as err {
+                ; A process may exit between discovery and termination. Verify the
+                ; postcondition before reporting that race as a restart failure.
+                try alreadyStopped := !driver.ProcessExists(pid)
+                catch
+                    alreadyStopped := false
+                if !alreadyStopped
+                    return {found: true, stopped: false, error: err.Message}
+                stoppedProcesses++
+                continue
+            }
+            if !stopped
+                return {found: true, stopped: false}
+            stoppedProcesses++
         }
 
+        return {found: foundProcess, stopped: true}
+    }
+
+    static CloseWindowTarget(target) {
+        driver := this.lifecycleDriver
         try hwnd := driver.FindWindow(target)
         catch as err
             return {found: false, stopped: false, error: err.Message}
         if !hwnd
             return {found: false, stopped: true}
 
-        ; Shared-host windows (currently Explorer Portal in Edge) must be closed and
-        ; verified by HWND only. Escalating a surviving owner would terminate every
-        ; unrelated window hosted by that browser process. Keep resolving the exact
-        ; title/executable until every matching window is gone, bounded against a
-        ; respawning or dishonest window provider.
-        if windowOnly {
-            stoppedWindows := 0
-            loop {
-                if (stoppedWindows >= this.maxMatchingProcesses) {
-                    return {
-                        found: true,
-                        stopped: false,
-                        error: "Too many matching windows remained after bounded closure"
-                    }
+        ; Shared-host windows (currently Explorer Portal in Edge) are closed and
+        ; verified by HWND only. Keep resolving the exact title/executable until
+        ; every matching window is gone, bounded against a respawning provider.
+        stoppedWindows := 0
+        loop {
+            if (stoppedWindows >= this.maxMatchingProcesses) {
+                return {
+                    found: true,
+                    stopped: false,
+                    error: "Too many matching windows remained after bounded closure"
                 }
-                ; WinKill may terminate a hung window's owning process. Shared-host
-                ; targets must use the non-escalating close primitive exclusively.
-                try windowStopped := driver.CloseWindow(hwnd)
-                catch as err
-                    return {found: true, stopped: false, error: err.Message}
-                if !windowStopped
-                    return {found: true, stopped: false}
-                stoppedWindows++
-
-                try hwnd := driver.FindWindow(target)
-                catch as err
-                    return {found: true, stopped: false, error: err.Message}
-                if !hwnd
-                    return {found: true, stopped: true}
             }
-        }
-
-        ; Capture ownership before killing the window: afterwards the handle may be
-        ; invalid even though its process is still alive.
-        try pid := driver.GetWindowProcessId(hwnd)
-        catch as err
-            return {found: true, stopped: false, error: err.Message}
-        if !pid
-            return {found: true, stopped: false, error: "Window process ownership could not be confirmed"}
-
-        try windowStopped := driver.KillWindow(hwnd)
-        catch as err
-            return {found: true, stopped: false, error: err.Message}
-
-        if pid {
-            try processAlive := driver.ProcessExists(pid)
+            try windowStopped := driver.CloseWindow(hwnd)
             catch as err
                 return {found: true, stopped: false, error: err.Message}
-            if processAlive {
-                try processStopped := driver.StopProcess(pid)
-                catch as err
-                    return {found: true, stopped: false, error: err.Message}
-                return {found: true, stopped: processStopped ? true : false}
-            }
-            return {found: true, stopped: true}
-        }
+            if !windowStopped
+                return {found: true, stopped: false}
+            stoppedWindows++
 
-        return {found: true, stopped: windowStopped ? true : false}
+            try hwnd := driver.FindWindow(target)
+            catch as err
+                return {found: true, stopped: false, error: err.Message}
+            if !hwnd
+                return {found: true, stopped: true}
+        }
     }
 
     static PacsRestartTargetSpecs() {
@@ -249,14 +214,14 @@ class AppControl {
             {
                 target: "Explorer Portal ahk_exe msedge.exe",
                 label: "Explorer Portal",
-                windowOnly: true
+                kind: "window"
             },
             ; closeWithSavePrompt handles the report dialog first. The hard-stop
             ; fallback must address the known executable because the window can
             ; disappear while its background process remains alive.
-            {target: this.powerScribeExecutable, label: "PowerScribe"},
-            {target: "mp.exe"},
-            {target: "NativeBridge.exe"}
+            {target: this.powerScribeExecutable, label: "PowerScribe", kind: "process"},
+            {target: "mp.exe", kind: "process"},
+            {target: "NativeBridge.exe", kind: "process"}
         ]
     }
 
@@ -273,10 +238,11 @@ class AppControl {
         failedTargets := []
         for spec in specs {
             target := spec.target
-            result := this.StopTarget(
-                target,
-                HasProp(spec, "windowOnly") && spec.windowOnly
-            )
+            if !HasProp(spec, "kind") {
+                failedTargets.Push(HasProp(spec, "label") ? spec.label : target)
+                continue
+            }
+            result := this.StopTarget(target, spec.kind)
             if result.found
                 anyStopped := true
             if !result.stopped
