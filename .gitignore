@@ -15,5 +15,11 @@ settings.ini
 tests/settings.ini
 tests/last_results.txt
 
+# Generated release and updater artifacts
+/pacs-assistant.exe
+/pacs-assistant.new.exe
+/pacs-assistant.backup.exe
+/AutoHotkey-v*-source.zip
+
 # Isolated development worktrees
 /.worktrees/

@@ -120,6 +120,18 @@ Assert-Matches $issueTemplate '\bPACS\b' 'The bug template must request PACS con
 Assert-Matches $featureTemplate '(?i)protected health information|\bPHI\b' 'The feature template must prohibit protected health information.'
 Assert-Matches $featureTemplate '(?i)redact.+screenshots|screenshots.+redact' 'The feature template must tell reporters to redact screenshots.'
 
+foreach ($generatedArtifact in @(
+    'pacs-assistant.exe',
+    'pacs-assistant.new.exe',
+    'pacs-assistant.backup.exe',
+    'AutoHotkey-v2.0.26-source.zip'
+)) {
+    & git -C $repoRoot check-ignore --quiet -- $generatedArtifact
+    if ($LASTEXITCODE -ne 0) {
+        $failures.Add("Generated root artifact is not ignored: $generatedArtifact")
+    }
+}
+
 if (-not (Test-Path -LiteralPath $versionGeneratorPath -PathType Leaf)) {
     $failures.Add('scripts/GenerateVersion.ps1 must own and validate release version generation.')
 } else {
