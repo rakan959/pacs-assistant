@@ -306,11 +306,6 @@ class MicrophoneManager {
         return UIAValue.TryRead(candidate).supported
     }
 
-    static IsExpectedMicrophoneItem(root, combo, item) {
-        try return this.InspectMicrophoneItem(root, combo, item)
-        return false
-    }
-
     static InspectMicrophoneItem(root, combo, item) {
         if (!root
             || !combo

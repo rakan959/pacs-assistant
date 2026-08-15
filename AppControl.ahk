@@ -228,22 +228,6 @@ class AppControl {
         }
     }
 
-    /**
-     * Emits keys only while the intended target is still active. Activation and a
-     * later send are separate OS operations; a popup or user focus change can occur
-     * between them, so every focus-sensitive emission rechecks the postcondition.
-     */
-    static SendKeysToActiveWindow(winTitle, keys) {
-        try {
-            if !this.windowDriver.IsActive(winTitle)
-                return false
-            this.windowDriver.SendKeys(keys)
-            return true
-        } catch {
-            return false
-        }
-    }
-
     static ExactWindowSpec(title, executable) {
         if !(Type(title) == "String") || title = ""
             throw ValueError("Exact window title is required")
