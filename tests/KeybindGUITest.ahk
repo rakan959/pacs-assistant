@@ -16,6 +16,8 @@ class KeybindGUITest {
         "TestProfileSwitchPreparationStopsActiveCapture",
         "TestProfileSwitchAbortsWhenCaptureCannotStop",
         "TestCaptureStartFailureWarnsWhenRuntimeCannotBeRestored",
+        "TestActiveCaptureBlocksSaveAndFunctionRemoval",
+        "TestStaleRealCaptureRestoresCurrentProfileNotSnapshot",
         "TestCancelCaptureWarnsWhenPriorRuntimeCannotBeRestored",
         "TestModifierRestartFailureWarnsWhenPriorRuntimeCannotBeRestored",
         "TestCaptureFailureRestoresBindingAndHookState",
@@ -56,11 +58,17 @@ class KeybindGUITest {
         ; for updates and load profiles
         this.gui := {base: KeybindGUI.Prototype, gui: ""}
         this.originalCaptureRuntimeProfile := KeybindGUI.captureRuntimeProfile
+        this.originalCaptureTransactionActive := KeybindGUI.captureTransactionActive
+        this.originalCaptureOwnerGui := KeybindGUI.captureOwnerGui
         KeybindGUI.captureRuntimeProfile := 0
+        KeybindGUI.captureTransactionActive := false
+        KeybindGUI.captureOwnerGui := 0
     }
 
     Teardown() {
         KeybindGUI.captureRuntimeProfile := this.originalCaptureRuntimeProfile
+        KeybindGUI.captureTransactionActive := this.originalCaptureTransactionActive
+        KeybindGUI.captureOwnerGui := this.originalCaptureOwnerGui
     }
 
     TestSelectedFunctionPrefersBuiltIn() {
@@ -263,6 +271,138 @@ class KeybindGUITest {
         Assert.Equal(1, gui.restoreCalls)
         Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
         Assert.True(InStr(notifications.message, "simulated capture restore failure") > 0)
+    }
+
+    TestActiveCaptureBlocksSaveAndFunctionRemoval() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        originalRevisions := ProfileManager.profileRevisions
+        originalActive := HotkeyManager.activeHotkeys
+        tempRoot := A_Temp "\pacs_capture_mutation_gate_" A_TickCount
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        profile.customFuncs["Custom: Keep"] := {keys: "HELLO", window: ""}
+        profile.binds["Custom: Keep"] := ""
+        profile.scopes["Custom: Keep"] := "Any"
+        listView := RemovableListView("Sign Report", "Ctrl + F13", "Any window")
+        prompt := FakeProfileDialog("Test")
+        customDialog := FakeProfileDialog("Test")
+        gui := {base: CaptureMutationGuardGUI.Prototype}
+        gui.confirmationDriver := AlwaysConfirmDriver()
+        gui.notifications := []
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profileRevisions := Map()
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            ProfileManager.SaveProfile("Test", profile)
+            Assert.True(gui.CaptureFunctionDialogState(
+                prompt,
+                "Sign Report",
+                listView,
+                1
+            ))
+            Assert.True(gui.BeginListening("Sign Report", listView, prompt))
+
+            profile.binds["Sign Report"] := "^F14"
+            saveResult := gui.SaveCurrentProfile()
+            removeResult := gui.RemoveFunction(listView)
+            scopeResult := gui.ApplyScope(
+                "Sign Report",
+                true,
+                false,
+                listView,
+                1,
+                prompt
+            )
+            renameResult := gui.PromptRenameProfile("Test")
+            customDeleteResult := gui.DeleteCustomFunction(
+                "Custom: Keep",
+                customDialog
+            )
+            stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath("Test"))
+            storedBind := stored.binds["Sign Report"]
+            stillBound := profile.binds.Has("Sign Report")
+            customStillExists := profile.customFuncs.Has("Custom: Keep")
+            rowCount := listView.GetCount()
+        } finally {
+            try gui.CancelKeybindPrompt(prompt)
+            KeybindGUI.captureRuntimeProfile := 0
+            KeybindGUI.isListening := false
+            KeybindGUI.activeInputHook := 0
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profilesPath := originalProfilesPath
+            ProfileManager.profileRevisions := originalRevisions
+            HotkeyManager.activeHotkeys := originalActive
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.False(saveResult)
+        Assert.False(removeResult)
+        Assert.False(scopeResult)
+        Assert.False(renameResult)
+        Assert.False(customDeleteResult)
+        Assert.Equal("^F13", storedBind)
+        Assert.True(stillBound)
+        Assert.True(customStillExists)
+        Assert.Equal("Any", profile.scopes["Sign Report"])
+        Assert.Equal(1, rowCount)
+    }
+
+    TestStaleRealCaptureRestoresCurrentProfileNotSnapshot() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalActive := HotkeyManager.activeHotkeys
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        listView := RemovableListView("Sign Report", "Ctrl + F13", "Any window")
+        prompt := FakeProfileDialog("Test")
+        gui := {base: CaptureMutationGuardGUI.Prototype}
+        gui.notifications := []
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            HotkeyManager.activeHotkeys := Map()
+            Assert.True(gui.CaptureFunctionDialogState(
+                prompt,
+                "Sign Report",
+                listView,
+                1
+            ))
+            Assert.True(gui.BeginListening("Sign Report", listView, prompt))
+            hook := KeybindGUI.activeInputHook
+
+            ; Simulate a later committed mutation despite the UI gate. Stale capture
+            ; recovery must honor this current profile, not resurrect its snapshot.
+            profile.binds.Delete("Sign Report")
+            profile.scopes.Delete("Sign Report")
+            listView.Delete(1)
+            result := gui.OnInputEnd("Sign Report", listView, prompt, hook)
+
+            runtimeAbsent := !HotkeyManager.activeHotkeys.Has("Sign Report")
+            profileAbsent := !profile.binds.Has("Sign Report")
+        } finally {
+            try gui.StopListening()
+            KeybindGUI.captureRuntimeProfile := 0
+            KeybindGUI.isListening := false
+            KeybindGUI.activeInputHook := 0
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            HotkeyManager.activeHotkeys := originalActive
+        }
+
+        Assert.False(result)
+        Assert.True(profileAbsent)
+        Assert.True(runtimeAbsent)
+        Assert.True(prompt.destroyed)
     }
 
     TestCancelCaptureWarnsWhenPriorRuntimeCannotBeRestored() {
@@ -1750,6 +1890,43 @@ class CaptureStartRestoreFailingKeybindGUI extends KeybindGUI {
         this.restoreCalls++
         errorText := "simulated capture restore failure"
         return false
+    }
+}
+
+class CaptureMutationGuardGUI extends KeybindGUI {
+    StartInputHook(*) {
+        KeybindGUI.activeInputHook := FakeCaptureHook("F14")
+    }
+
+    HasMainWindow() {
+        return false
+    }
+
+    ApplyProfileBinds(*) {
+        return true
+    }
+
+    RestoreRuntimeProfile(profile, &errorText) {
+        errorText := ""
+        HotkeyManager.activeHotkeys := Map()
+        for funcName, bind in profile.binds {
+            if (bind != "")
+                HotkeyManager.activeHotkeys[funcName] := {
+                    hotkey: bind,
+                    scope: profile.scopes.Has(funcName)
+                        ? profile.scopes[funcName]
+                        : "Any"
+                }
+        }
+        return true
+    }
+
+    NotifyUser(message, title, options := "") {
+        this.notifications.Push({
+            message: message,
+            title: title,
+            options: options
+        })
     }
 }
 

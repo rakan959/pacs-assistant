@@ -12,6 +12,8 @@ class KeybindGUI {
     static listeningControl := ""
     static activeInputHook := 0
     static captureRuntimeProfile := 0
+    static captureTransactionActive := false
+    static captureOwnerGui := 0
     ; The V option would pass the selected key through to the foreground application.
     ; Capture is intentionally suppressing: the key is configuration data only.
     static inputHookOptions := ""
@@ -91,6 +93,8 @@ class KeybindGUI {
     }
 
     OpenProfileSelector() {
+        if !this.ProfileMutationAllowed("switch profiles")
+            return false
         if !this.ResolveDirtyProfileBeforeLeaving()
             return false
         ; A selector has no active profile. Suspend the old profile before exposing any
@@ -103,6 +107,8 @@ class KeybindGUI {
     }
 
     CloseMainWindow() {
+        if !this.ProfileMutationAllowed("close PACS Assistant")
+            return false
         if !this.ResolveDirtyProfileBeforeLeaving()
             return false
         this.RequestExit()
@@ -155,13 +161,12 @@ class KeybindGUI {
         ; An owned dialog normally disappears with its main window. This explicit
         ; identity gate is the data-integrity backstop for queued callbacks or any
         ; dialog that outlives a profile switch.
+        message := "The active profile changed while this dialog was open. Reopen it before saving changes."
+        if KeybindGUI.captureTransactionActive
+            return this.AbortStaleCapture(dialog, message, "Profile Changed")
         this.StopListening()
         try dialog.Destroy()
-        MsgBox(
-            "The active profile changed while this dialog was open. Reopen it before saving changes.",
-            "Profile Changed",
-            "Icon!"
-        )
+        MsgBox(message, "Profile Changed", "Icon!")
         return false
     }
 
@@ -237,6 +242,13 @@ class KeybindGUI {
         if valid
             return true
 
+        if KeybindGUI.captureTransactionActive {
+            return this.AbortStaleCapture(
+                dialog,
+                "The selected function changed while this dialog was open. Reopen it before applying changes.",
+                "Function Changed"
+            )
+        }
         try this.StopListening()
         catch as err {
             MsgBox(
@@ -347,6 +359,8 @@ class KeybindGUI {
     }
 
     CreateProfile(name, inputGui) {
+        if !this.ProfileMutationAllowed("create a profile")
+            return false
         name := Trim(name)
         if ProfileManager.CreateProfile(name) {
             ProfileManager.currentProfile := name
@@ -366,6 +380,8 @@ class KeybindGUI {
     }
 
     SelectProfile(name, selectorGui) {
+        if !this.ProfileMutationAllowed("select a profile")
+            return false
         if name != "" {
             ProfileManager.currentProfile := name
             selectorGui.Destroy()
@@ -374,6 +390,8 @@ class KeybindGUI {
     }
 
     SetDefaultProfile(name, selectorGui) {
+        if !this.ProfileMutationAllowed("change the default profile")
+            return false
         if (name = "") {
             MsgBox("Please select a profile first.", "Error", "Icon!")
             return
@@ -392,6 +410,8 @@ class KeybindGUI {
     }
 
     DeleteProfile(name, selectorGui) {
+        if !this.ProfileMutationAllowed("delete a profile")
+            return false
         if (name = "") {
             MsgBox("Please select a profile first.", "Error", "Icon!")
             return
@@ -470,7 +490,7 @@ class KeybindGUI {
      * @returns true if capture started
      */
     BeginListening(funcName, control, promptGui) {
-        if KeybindGUI.isListening
+        if (KeybindGUI.isListening || KeybindGUI.captureTransactionActive)
             return false
 
         ; Capture the runtime contract before disabling anything. A failed hook start
@@ -479,6 +499,7 @@ class KeybindGUI {
             ProfileManager.profiles[ProfileManager.currentProfile]
         )
         KeybindGUI.captureRuntimeProfile := originalProfile
+        this.BeginCaptureTransaction()
 
         KeybindGUI.isListening := true
         KeybindGUI.listeningControl := control
@@ -495,6 +516,7 @@ class KeybindGUI {
             catch as cleanupError
                 stopError := cleanupError.Message
 
+            restored := false
             if (stopError != "") {
                 this.NotifyUser(
                     "Input capture failed to start, and its hook could not be safely stopped: " stopError
@@ -503,13 +525,15 @@ class KeybindGUI {
                     "Icon!"
                 )
             } else {
-                this.RestoreCapturedRuntimeAndNotify(
+                restored := this.RestoreCapturedRuntimeAndNotify(
                     originalProfile,
                     "Input capture failed to start. No keybind was changed.",
                     "Capture Recovery Failed",
                     false
                 )
             }
+            if restored
+                this.ReleaseCaptureTransaction()
             throw err
         }
         return true
@@ -614,15 +638,18 @@ class KeybindGUI {
                 ; The failed candidate has already been reported. Restore the prior
                 ; runtime set quietly when possible, but surface uncertainty when
                 ; native teardown/re-registration cannot prove that restoration.
-                this.RestoreCapturedRuntimeAndNotify(
+                restored := this.RestoreCapturedRuntimeAndNotify(
                     currentProfile,
                     "The new keybind was rejected and the previous profile value was retained.",
                     "Keybind Recovery Failed",
                     false
                 )
+                if restored
+                    this.ReleaseCaptureTransaction()
                 return false
             }
             KeybindGUI.captureRuntimeProfile := 0
+            this.ReleaseCaptureTransaction()
             this.MarkProfileDirty(promptGui.profileName)
             return true
         } catch as err {
@@ -638,12 +665,14 @@ class KeybindGUI {
             try promptGui.Destroy()
             ; Preserve the original control/apply exception, but never hide an
             ; uncertain live shortcut state behind the restored profile value.
-            try this.RestoreCapturedRuntimeAndNotify(
+            restored := this.RestoreCapturedRuntimeAndNotify(
                 currentProfile,
                 "The keybind change failed and the previous profile value was retained.",
                 "Keybind Recovery Failed",
                 false
             )
+            if restored
+                this.ReleaseCaptureTransaction()
             throw err
         }
     }
@@ -695,10 +724,14 @@ class KeybindGUI {
             false
         )
         try promptGui.Destroy()
+        if restored
+            this.ReleaseCaptureTransaction()
         return restored
     }
 
     SaveCurrentProfile() {
+        if !this.ProfileMutationAllowed("save the profile")
+            return false
         profileName := ProfileManager.currentProfile
         try {
             ; One immutable snapshot is both the persisted value and the runtime
@@ -901,6 +934,76 @@ class KeybindGUI {
         return MsgBox(message, title, options)
     }
 
+    ProfileMutationAllowed(action) {
+        if !KeybindGUI.captureTransactionActive
+            return true
+        this.NotifyUser(
+            "Finish or cancel the active key capture before you " action ".",
+            "Keybind In Progress",
+            "Icon!"
+        )
+        return false
+    }
+
+    BeginCaptureTransaction() {
+        KeybindGUI.captureTransactionActive := true
+        KeybindGUI.captureOwnerGui := 0
+        hasMainWindow := false
+        try hasMainWindow := this.HasMainWindow()
+        if hasMainWindow {
+            KeybindGUI.captureOwnerGui := this.gui
+            try this.gui.Opt("+Disabled")
+        }
+    }
+
+    ReleaseCaptureTransaction() {
+        ownerGui := KeybindGUI.captureOwnerGui
+        KeybindGUI.captureOwnerGui := 0
+        KeybindGUI.captureTransactionActive := false
+        if IsObject(ownerGui)
+            try ownerGui.Opt("-Disabled")
+    }
+
+    AbortStaleCapture(dialog, message, title) {
+        try this.StopListening()
+        catch as err {
+            this.NotifyUser(
+                message "`n`nThe input hook could not be stopped: " err.Message
+                    . ". Restart PACS Assistant before pressing another shortcut.",
+                title,
+                "Icon!"
+            )
+            return false
+        }
+
+        currentProfile := 0
+        currentName := ProfileManager.currentProfile
+        if (currentName != "" && ProfileManager.profiles.Has(currentName))
+            currentProfile := ProfileManager.CloneProfile(ProfileManager.profiles[currentName])
+        ; A stale callback must never restore the pre-capture snapshot over a newer
+        ; committed profile mutation. The current profile is now authoritative.
+        KeybindGUI.captureRuntimeProfile := 0
+        restored := false
+        if currentProfile {
+            restored := this.RestoreRuntimeAndNotify(
+                currentProfile,
+                message,
+                title,
+                true
+            )
+        } else {
+            this.NotifyUser(
+                message "`n`nNo current profile could be verified. Restart PACS Assistant before relying on its shortcuts.",
+                title,
+                "Icon!"
+            )
+        }
+        try dialog.Destroy()
+        if restored
+            this.ReleaseCaptureTransaction()
+        return false
+    }
+
     RestoreRuntimeAndNotify(originalProfile, message, title, notifyOnSuccess := true) {
         restoreError := ""
         restored := this.RestoreRuntimeProfile(originalProfile, &restoreError)
@@ -1089,6 +1192,8 @@ class KeybindGUI {
     }
 
     PromptRenameProfile(name, parentGui := 0) {
+        if !this.ProfileMutationAllowed("rename a profile")
+            return false
         if (name = "") {
             MsgBox("Please select a profile first.", "Error", "Icon!")
             return false
@@ -1128,6 +1233,8 @@ class KeybindGUI {
     }
 
     RenameProfile(oldName, newName, renameGui, parentGui := 0) {
+        if !this.ProfileMutationAllowed("rename a profile")
+            return false
         if !this.RenameDialogIsCurrent(oldName, renameGui, parentGui)
             return false
 
@@ -1264,6 +1371,8 @@ class KeybindGUI {
     }
 
     DeleteCustomFunction(funcName, selectorGui) {
+        if !this.ProfileMutationAllowed("delete a custom function")
+            return false
         if !this.DialogProfileIsCurrent(selectorGui)
             return false
 
@@ -1382,6 +1491,8 @@ class KeybindGUI {
     }
 
     AddCustomKeybind(name, keys, window, listView, customGui) {
+        if !this.ProfileMutationAllowed("create a custom keybind")
+            return false
         if !this.DialogProfileIsCurrent(customGui)
             return false
         profileName := customGui.profileName
@@ -1435,6 +1546,8 @@ class KeybindGUI {
     }
 
     AddFunction(funcName, listView, selectorGui) {
+        if !this.ProfileMutationAllowed("add a function")
+            return false
         if !this.DialogProfileIsCurrent(selectorGui)
             return false
 
@@ -1474,6 +1587,8 @@ class KeybindGUI {
     }
 
     RemoveFunction(listView) {
+        if !this.ProfileMutationAllowed("remove a function")
+            return false
         removalState := this.CaptureFunctionRemovalState(listView)
         if !removalState {
             MsgBox("Please select a function to remove.", "Error", "Icon!")
@@ -1619,6 +1734,8 @@ class KeybindGUI {
     }
 
     ApplyScope(funcName, requirePACS, requirePowerScribe, listView, rowIndex, scopeGui) {
+        if !this.ProfileMutationAllowed("change a keybind scope")
+            return false
         if !this.FunctionDialogIsCurrent(scopeGui, funcName, listView)
             return false
 
@@ -1687,6 +1804,8 @@ class KeybindGUI {
     }
 
     SaveModalityAttendings(edits, modGui) {
+        if !this.ProfileMutationAllowed("save attending assignments")
+            return false
         if !this.DialogProfileIsCurrent(modGui)
             return false
         profileName := modGui.profileName
