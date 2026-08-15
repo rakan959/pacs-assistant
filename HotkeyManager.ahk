@@ -14,6 +14,9 @@ class NativeHotkeyDriver {
 
 class HotkeyManager {
     static activeHotkeys := Map()  ; funcName -> {hotkey: "^j", scope: "PACS"}
+    ; Registrations whose rollback could not be verified remain separately tracked.
+    ; Losing either possibly-live variant would make later teardown fail open.
+    static additionalActiveHotkeys := Map()
     static hotkeyFunctions := Map()
     static hotkeyDriver := NativeHotkeyDriver()
 
@@ -106,6 +109,11 @@ class HotkeyManager {
             return false
         }
 
+        if this.additionalActiveHotkeys.Count {
+            this.lastError := "a previous hotkey rollback is still active; disable all hotkeys or restart before registering another bind"
+            return false
+        }
+
         owner := this.FindBindingOwner(hotkeyStr, funcName)
         if owner {
             this.lastError := "the hotkey is already registered to '" owner "'"
@@ -138,23 +146,24 @@ class HotkeyManager {
 
         if previous && !sameVariant {
             try {
-                this.EnterScope(previous.scope)
-                this.hotkeyDriver.Disable(previous.hotkey)
+                this.DisableEntry(previous)
             } catch as err {
                 ; The replacement is live but the old variant could not be retired.
                 ; Roll it back and keep the prior map entry rather than claiming an
                 ; ambiguous two-registration state succeeded.
                 try {
-                    this.ExitScope()
-                    this.EnterScope(scope)
-                    this.hotkeyDriver.Disable(hotkeyStr)
-                } catch {
-                    ; Preserve the original retirement error as the actionable cause.
+                    this.DisableEntry({hotkey: hotkeyStr, scope: scope})
+                } catch as rollbackErr {
+                    ; Both variants may now be live. Keep the replacement reachable
+                    ; so DisableAllHotkeys can retry it and block new registrations
+                    ; until native teardown is proven.
+                    this.TrackAdditionalActiveHotkey(funcName, hotkeyStr, scope)
+                    this.lastError := "the previous hotkey could not be disabled: " err.Message
+                        . "; the replacement rollback also failed: " rollbackErr.Message
+                    return false
                 }
                 this.lastError := "the previous hotkey could not be disabled: " err.Message
                 return false
-            } finally {
-                this.ExitScope()
             }
         }
 
@@ -172,7 +181,27 @@ class HotkeyManager {
             if (funcName != exceptFuncName && this.HotkeyIdentity(entry.hotkey) = identity)
                 return funcName
         }
+        for _, entry in this.additionalActiveHotkeys {
+            if (!(entry.funcName == exceptFuncName)
+                && this.HotkeyIdentity(entry.hotkey) = identity)
+                return entry.funcName
+        }
         return ""
+    }
+
+    static TrackAdditionalActiveHotkey(funcName, hotkeyStr, scope) {
+        entry := {funcName: funcName, hotkey: hotkeyStr, scope: scope}
+        key := funcName Chr(31) scope Chr(31) this.HotkeyIdentity(hotkeyStr)
+        this.additionalActiveHotkeys[key] := entry
+    }
+
+    static DisableEntry(entry) {
+        try {
+            this.EnterScope(entry.scope)
+            this.hotkeyDriver.Disable(entry.hotkey)
+        } finally {
+            this.ExitScope()
+        }
     }
 
     ; Turn off a single registration, re-entering the context it was created in.
@@ -180,31 +209,53 @@ class HotkeyManager {
     ; the scope has to be restored before the hotkey can be turned off.
     static Unregister(funcName) {
         this.lastError := ""
-        if !this.activeHotkeys.Has(funcName)
-            return true
+        failures := []
 
-        entry := this.activeHotkeys[funcName]
-
-        try {
-            this.EnterScope(entry.scope)
-            this.hotkeyDriver.Disable(entry.hotkey)
-        } catch as err {
-            ; Keep the registration tracked until the native provider proves it is
-            ; disabled. Losing the registry entry here can leave a live clinical
-            ; action enabled with no way for later profile operations to retire it.
-            this.lastError := "the hotkey could not be disabled: " err.Message
-            return false
-        } finally {
-            this.ExitScope()
+        if this.activeHotkeys.Has(funcName) {
+            entry := this.activeHotkeys[funcName]
+            try {
+                this.DisableEntry(entry)
+                this.activeHotkeys.Delete(funcName)
+            } catch as err {
+                ; Keep the registration tracked until the native provider proves it
+                ; is disabled. Losing the registry entry here can leave a live clinical
+                ; action enabled with no way for later profile operations to retire it.
+                failures.Push(entry.hotkey ": " err.Message)
+            }
         }
-        this.activeHotkeys.Delete(funcName)
+
+        for trackingKey, entry in this.additionalActiveHotkeys.Clone() {
+            if !(entry.funcName == funcName)
+                continue
+            try {
+                this.DisableEntry(entry)
+                this.additionalActiveHotkeys.Delete(trackingKey)
+            } catch as err {
+                failures.Push(entry.hotkey ": " err.Message)
+            }
+        }
+
+        if failures.Length {
+            detail := ""
+            for failure in failures
+                detail .= (detail = "" ? "" : "; ") failure
+            this.lastError := "the hotkey could not be disabled: " detail
+            return false
+        }
         return true
     }
 
     static DisableAllHotkeys() {
-        ; Iterate a snapshot: Unregister mutates activeHotkeys
+        ; Build one function-name set across both registries. Unregister mutates both
+        ; maps but retains every entry whose native Off call could not be proven.
+        functionNames := Map()
+        for funcName, _ in this.activeHotkeys
+            functionNames[funcName] := true
+        for _, entry in this.additionalActiveHotkeys
+            functionNames[entry.funcName] := true
+
         failed := []
-        for funcName, _ in this.activeHotkeys.Clone() {
+        for funcName, _ in functionNames {
             if !this.Unregister(funcName)
                 failed.Push(funcName)
         }

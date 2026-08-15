@@ -60,6 +60,27 @@ class HotkeyContract {
         hotkeyStr := Trim(hotkeyStr)
         if (hotkeyStr = "")
             return ""
+
+        ; AutoHotkey applies ~ and $ to an existing variant's behavior. They do
+        ; not create a separate custom-combination identity, and $ has no effect
+        ; on a custom combination at all. Normalize those behavior prefixes before
+        ; the early custom-combination return while preserving wildcard identity.
+        wildcardPrefix := false
+        prefixPosition := 1
+        while (prefixPosition <= StrLen(hotkeyStr)) {
+            prefixChar := SubStr(hotkeyStr, prefixPosition, 1)
+            if (prefixChar = "~" || prefixChar = "$") {
+                prefixPosition++
+                continue
+            }
+            if (prefixChar = "*") {
+                wildcardPrefix := true
+                prefixPosition++
+                continue
+            }
+            break
+        }
+        hotkeyStr := (wildcardPrefix ? "*" : "") Trim(SubStr(hotkeyStr, prefixPosition))
         if InStr(hotkeyStr, "&")
             return StrLower(RegExReplace(hotkeyStr, "\s+", " "))
 

@@ -29,6 +29,7 @@ class ProfileManagerTest {
         "TestDefaultProfileMustExist",
         "TestDuplicateBindingsAreRejected",
         "TestEquivalentModifierBindingsAreRejected",
+        "TestEquivalentCustomCombinationBindingsAreRejected",
         "TestUnknownScopeIsRejected",
         "TestExplicitBlankPersistedScopeIsRejected",
         "TestNonCanonicalPersistedScopeIsRejected"
@@ -394,6 +395,18 @@ class ProfileManagerTest {
             "duplicate hotkey"
         )
         Assert.False(FileExist(ProfileManager.profilesPath "\EquivalentDuplicates.ini"))
+    }
+
+    TestEquivalentCustomCombinationBindingsAreRejected() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "a & b"
+        profile.binds["Draft Report"] := "~a & b"
+
+        Assert.Throws(
+            () => ProfileManager.SaveProfile("CombinationDuplicates", profile),
+            "duplicate hotkey"
+        )
+        Assert.False(FileExist(ProfileManager.profilesPath "\CombinationDuplicates.ini"))
     }
 
     TestUnknownScopeIsRejected() {
