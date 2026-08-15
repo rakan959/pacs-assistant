@@ -15,6 +15,7 @@ class KeybindGUITest {
         "TestCapturedHotkeyUsesTerminationModifierSnapshot",
         "TestProfileSwitchPreparationStopsActiveCapture",
         "TestProfileSwitchAbortsWhenCaptureCannotStop",
+        "TestCaptureStartFailureWarnsWhenRuntimeCannotBeRestored",
         "TestCaptureFailureRestoresBindingAndHookState",
         "TestStaleKeyCaptureCannotReinsertRemovedFunction",
         "TestRejectedCapturedKeyRestoresPriorBinding",
@@ -32,6 +33,7 @@ class KeybindGUITest {
         "TestRowDeleteAndRuntimeRestoreFailureRequiresRestartWarning",
         "TestRejectedKeybindWarnsWhenPriorRuntimeCannotBeRestored",
         "TestRejectedScopeWarnsWhenPriorRuntimeCannotBeRestored",
+        "TestSavedProfileFailsWhenRuntimeCannotBeVerified",
         "TestStaleProfileDeleteCannotDeleteRecreatedProfile"
     ]
 
@@ -185,6 +187,62 @@ class KeybindGUITest {
         Assert.True(capturedListening)
         Assert.True(capturedControl == control)
         Assert.True(capturedHook == hook)
+    }
+
+    TestCaptureStartFailureWarnsWhenRuntimeCannotBeRestored() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalFunctions := HotkeyManager.hotkeyFunctions
+        originalActive := HotkeyManager.activeHotkeys
+        originalAdditional := HotkeyManager.additionalActiveHotkeys
+        originalListening := KeybindGUI.isListening
+        originalControl := KeybindGUI.listeningControl
+        originalHook := KeybindGUI.activeInputHook
+        profile := ProfileManager.NewProfile()
+        notifications := CapturingNotificationDriver()
+        gui := {
+            base: CaptureStartRestoreFailingKeybindGUI.Prototype,
+            restoreCalls: 0,
+            notificationDriver: notifications
+        }
+        threw := false
+        caughtMessage := ""
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            HotkeyManager.hotkeyFunctions := Map()
+            HotkeyManager.activeHotkeys := Map()
+            HotkeyManager.additionalActiveHotkeys := Map()
+            KeybindGUI.isListening := false
+            KeybindGUI.listeningControl := ""
+            KeybindGUI.activeInputHook := 0
+
+            try gui.BeginListening("Sign Report", {}, {})
+            catch as err {
+                threw := true
+                caughtMessage := err.Message
+            }
+            capturedListening := KeybindGUI.isListening
+            capturedHook := KeybindGUI.activeInputHook
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            HotkeyManager.hotkeyFunctions := originalFunctions
+            HotkeyManager.activeHotkeys := originalActive
+            HotkeyManager.additionalActiveHotkeys := originalAdditional
+            KeybindGUI.isListening := originalListening
+            KeybindGUI.listeningControl := originalControl
+            KeybindGUI.activeInputHook := originalHook
+        }
+
+        Assert.True(threw)
+        Assert.True(InStr(caughtMessage, "simulated hook start failure") > 0)
+        Assert.False(capturedListening)
+        Assert.Equal(0, capturedHook)
+        Assert.Equal(1, gui.restoreCalls)
+        Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
+        Assert.True(InStr(notifications.message, "simulated capture restore failure") > 0)
     }
 
     TestCaptureFailureRestoresBindingAndHookState() {
@@ -909,6 +967,51 @@ class KeybindGUITest {
         Assert.True(InStr(notifications.message, "simulated restore failure") > 0)
     }
 
+    TestSavedProfileFailsWhenRuntimeCannotBeVerified() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        originalRevisions := ProfileManager.profileRevisions
+        tempRoot := A_Temp "\pacs_saved_runtime_failure_" DllCall("GetTickCount64", "UInt64")
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        notifications := CapturingNotificationDriver()
+        gui := {
+            base: SaveRuntimeFailingKeybindGUI.Prototype,
+            applyCalls: 0,
+            restoreCalls: 0,
+            notificationDriver: notifications
+        }
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profileRevisions := Map("Test", 0)
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+
+            result := gui.SaveCurrentProfile()
+            stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath("Test"))
+            storedBind := stored.binds["Sign Report"]
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profilesPath := originalProfilesPath
+            ProfileManager.profileRevisions := originalRevisions
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.False(result)
+        Assert.Equal("^F13", storedBind)
+        Assert.Equal(1, gui.applyCalls)
+        Assert.Equal(1, gui.restoreCalls)
+        Assert.True(InStr(notifications.message, "profile was saved") > 0)
+        Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
+        Assert.True(InStr(notifications.message, "simulated saved-profile restore failure") > 0)
+    }
+
     TestStaleProfileDeleteCannotDeleteRecreatedProfile() {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
@@ -1061,6 +1164,31 @@ class RollbackFailingKeybindGUI extends KeybindGUI {
     }
 
     ResizeColumns(*) {
+    }
+}
+
+class CaptureStartRestoreFailingKeybindGUI extends KeybindGUI {
+    StartInputHook(*) {
+        throw Error("simulated hook start failure")
+    }
+
+    RestoreRuntimeProfile(profile, &errorText) {
+        this.restoreCalls++
+        errorText := "simulated capture restore failure"
+        return false
+    }
+}
+
+class SaveRuntimeFailingKeybindGUI extends KeybindGUI {
+    ApplyProfileBinds(*) {
+        this.applyCalls++
+        return false
+    }
+
+    RestoreRuntimeProfile(profile, &errorText) {
+        this.restoreCalls++
+        errorText := "simulated saved-profile restore failure"
+        return false
     }
 }
 

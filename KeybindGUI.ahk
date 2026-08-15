@@ -425,6 +425,12 @@ class KeybindGUI {
         if KeybindGUI.isListening
             return false
 
+        ; Capture the runtime contract before disabling anything. A failed hook start
+        ; must either restore this exact set or visibly require an application restart.
+        originalProfile := ProfileManager.CloneProfile(
+            ProfileManager.profiles[ProfileManager.currentProfile]
+        )
+
         KeybindGUI.isListening := true
         KeybindGUI.listeningControl := control
         try {
@@ -435,8 +441,26 @@ class KeybindGUI {
             this.StartInputHook(funcName, control, promptGui)
         }
         catch as err {
-            this.StopListening()
-            try this.ApplyBinds()
+            stopError := ""
+            try this.StopListening()
+            catch as cleanupError
+                stopError := cleanupError.Message
+
+            if (stopError != "") {
+                this.NotifyUser(
+                    "Input capture failed to start, and its hook could not be safely stopped: " stopError
+                        . ". Restart PACS Assistant before using its shortcuts.",
+                    "Capture Recovery Failed",
+                    "Icon!"
+                )
+            } else {
+                this.RestoreRuntimeAndNotify(
+                    originalProfile,
+                    "Input capture failed to start. No keybind was changed.",
+                    "Capture Recovery Failed",
+                    false
+                )
+            }
             throw err
         }
         return true
@@ -615,17 +639,40 @@ class KeybindGUI {
     }
 
     SaveCurrentProfile() {
+        profileName := ProfileManager.currentProfile
         try {
-            ProfileManager.SaveProfile(
-                ProfileManager.currentProfile,
-                ProfileManager.profiles[ProfileManager.currentProfile]
+            ; One immutable snapshot is both the persisted value and the runtime
+            ; contract. Success is not published until that same snapshot is live.
+            savedProfile := ProfileManager.CloneProfile(
+                ProfileManager.profiles[profileName]
             )
+            ProfileManager.SaveProfile(profileName, savedProfile)
         } catch as err {
             MsgBox("The profile could not be saved. The previous file was left unchanged.`n`n" err.Message, "Save Failed", "Icon!")
             return false
         }
+
+        applyError := ""
+        runtimeApplied := false
+        try runtimeApplied := this.ApplyProfileBinds(savedProfile, false)
+        catch as err
+            applyError := err.Message
+
+        if !runtimeApplied {
+            if (applyError = "")
+                applyError := "one or more saved keybinds could not be registered"
+            restoreError := ""
+            if !this.RestoreRuntimeProfile(savedProfile, &restoreError) {
+                message := "The profile was saved, but its runtime shortcuts could not be verified."
+                    . "`n`n" applyError
+                    . "`n`nThe saved runtime bindings also could not be fully restored: " restoreError
+                    . ". Restart PACS Assistant before relying on its shortcuts."
+                this.NotifyUser(message, "Profile Saved - Restart Required", "Icon!")
+                return false
+            }
+        }
+
         MsgBox("Profile saved successfully!", "Success")
-        this.ApplyBinds()
         return true
     }
 
