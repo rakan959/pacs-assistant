@@ -12,6 +12,7 @@ class HotkeyManagerTest {
         "TestDisableAllHotkeys",
         "TestRegistersWithScope",
         "TestUnknownScopeIsRejectedWithoutReplacingRegistration",
+        "TestNonCanonicalScopeCasingIsRejected",
         "TestScopeFlagsRoundTrip",
         "TestScopeFromFlagsMatrix",
         "TestHotkeyIdentityMatchesAutoHotkeySemantics",
@@ -111,6 +112,14 @@ class HotkeyManagerTest {
 
         Assert.Throws(() => HotkeyManager.NormalizeScope(""), "Unknown hotkey scope")
         Assert.Equal("PACS", HotkeyManager.NormalizeScope("PACS"))
+    }
+
+    TestNonCanonicalScopeCasingIsRejected() {
+        Assert.False(HotkeyContract.IsValidScope("pacs"))
+        Assert.False(HotkeyContract.IsValidScope("Powerscribe"))
+        Assert.Throws(() => HotkeyManager.NormalizeScope("pacs"), "Unknown hotkey scope")
+        Assert.False(HotkeyManager.RegisterHotkey("ActionOne", "^F22", "pacs"))
+        Assert.False(HotkeyManager.activeHotkeys.Has("ActionOne"))
     }
 
     TestHotkeyIdentityMatchesAutoHotkeySemantics() {

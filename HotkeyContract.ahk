@@ -17,7 +17,7 @@ class HotkeyContract {
         if (Type(scope) != "String")
             return false
         for name in this.scopes {
-            if (name = scope)
+            if (name == scope)
                 return true
         }
         return false
@@ -42,8 +42,8 @@ class HotkeyContract {
     static FlagsFromScope(scope) {
         this.RequireScope(scope)
         return {
-            requirePACS: (scope = "PACS" || scope = "PACS or PowerScribe"),
-            requirePowerScribe: (scope = "PowerScribe" || scope = "PACS or PowerScribe")
+            requirePACS: (scope == "PACS" || scope == "PACS or PowerScribe"),
+            requirePowerScribe: (scope == "PowerScribe" || scope == "PACS or PowerScribe")
         }
     }
 

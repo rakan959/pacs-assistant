@@ -58,8 +58,10 @@ class HotkeyManager {
         scope := this.NormalizeScope(scope)
         if this.scopePredicates.Has(scope)
             HotIf(this.scopePredicates[scope])
-        else
+        else if (scope == "Any")
             HotIf()  ; Global context
+        else
+            throw ValueError("No restricted predicate is defined for hotkey scope: " scope)
     }
 
     static ExitScope() {
