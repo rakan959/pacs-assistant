@@ -314,10 +314,16 @@ class WinHttpTextRequest {
 
     static DispatchStatus(handle, context, status, information, length) {
         Critical
+        ; CallbackCreate receives machine-word integers. WinHTTP supplies these two
+        ; fields as DWORDs, so ignore undefined upper bits on x64 before dispatch.
+        status &= 0xFFFFFFFF
+        length &= 0xFFFFFFFF
         operation := 0
-        if (context && this.operationsByContext.Has(context))
+        if context {
+            if !this.operationsByContext.Has(context)
+                return
             operation := this.operationsByContext[context]
-        else if (handle && this.operationsByHandle.Has(handle))
+        } else if (handle && this.operationsByHandle.Has(handle))
             operation := this.operationsByHandle[handle]
         if !operation
             return
@@ -1213,7 +1219,7 @@ class UpdateChecker {
     
     /**
      * Shows the update dialog.
-     * @param updateInfo Result of an earlier CheckForUpdates call. Callers that
+     * @param updateInfo Result of an earlier asynchronous release check. Callers that
      * already checked pass theirs; asking again cost a second HTTP round trip against
      * an unauthenticated 60/hour GitHub limit, and could return a different answer -
      * the rate-limit and remind-later gates would suppress a dialog the first call had

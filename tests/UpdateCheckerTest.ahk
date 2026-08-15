@@ -20,6 +20,8 @@ class UpdateCheckerTest {
         "TestSkippedCachedVersionCannotReopen",
         "TestManualCompletionDefersDialogDuringClinicalCommand",
         "TestAsyncRequestDisconnectBreaksCallbackOwnership",
+        "TestStaleCallbackContextNeverFallsBackToReusedHandle",
+        "TestNativeCallbackMasksThirtyTwoBitParameters",
         "TestMetadataResponsesAreStreamBoundedBeforeParsing",
         "TestSettingsChangeCancelsInFlightAutomaticCheck",
         "TestClinicalCommandBlocksUpdateExit",
@@ -558,6 +560,31 @@ class UpdateCheckerTest {
         Assert.Equal(0, operation.onError)
     }
 
+    TestStaleCallbackContextNeverFallsBackToReusedHandle() {
+        operation := FakeWinHttpStatusOperation()
+        WinHttpTextRequest.operationsByHandle[42] := operation
+        try WinHttpTextRequest.DispatchStatus(42, 999, 0x00400000, 0, 0)
+        finally WinHttpTextRequest.operationsByHandle.Delete(42)
+
+        Assert.Equal(0, operation.statusCalls)
+    }
+
+    TestNativeCallbackMasksThirtyTwoBitParameters() {
+        operation := FakeWinHttpStatusOperation()
+        WinHttpTextRequest.operationsByHandle[42] := operation
+        try WinHttpTextRequest.DispatchStatus(
+            42,
+            0,
+            0x100000000 + 0x00400000,
+            0,
+            0x100000000
+        )
+        finally WinHttpTextRequest.operationsByHandle.Delete(42)
+
+        Assert.Equal(0x00400000, operation.lastStatus)
+        Assert.Equal(0, operation.lastLength)
+    }
+
     TestMetadataResponsesAreStreamBoundedBeforeParsing() {
         operation := WinHttpTextRequest(
             "https://api.github.com/test",
@@ -677,6 +704,23 @@ class FakeShutdownCoordinator {
 
     CancelShutdown(*) {
         this.cancelCalls++
+    }
+}
+
+class FakeWinHttpStatusOperation {
+    __New() {
+        this.statusCalls := 0
+        this.lastStatus := 0
+        this.lastLength := 0
+    }
+
+    HandleNativeStatus(handle, status, information, length) {
+        this.statusCalls++
+        this.lastStatus := status
+        this.lastLength := length
+    }
+
+    Schedule(*) {
     }
 }
 
