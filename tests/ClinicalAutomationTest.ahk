@@ -8,6 +8,7 @@ class ClinicalAutomationTest {
         "ActivationFailureDoesNotSend",
         "ActivationCanSucceedButFocusCheckStopsSend",
         "TargetedSendActivatesBeforeSending",
+        "AmbiguousTargetedSendDoesNotActivateOrSend",
         "ExactWindowResolverRejectsSubstringAndDuplicateMatches",
         "PacsSeriesCommandsUseExactHwndTarget",
         "BuiltInClinicalCommandUsesConfirmedTarget",
@@ -76,8 +77,9 @@ class ClinicalAutomationTest {
         AppControl.windowDriver := driver
 
         Assert.False(AppControl.SendKeysToWindow("PowerScribe", "{F12}"))
-        Assert.Equal(1, driver.calls.Length)
-        Assert.Equal("activate", driver.calls[1].kind)
+        Assert.Equal(3, driver.calls.Length)
+        Assert.Equal("activate", driver.calls[3].kind)
+        Assert.Equal("ahk_id 501", driver.calls[3].value)
     }
 
     ActivationCanSucceedButFocusCheckStopsSend() {
@@ -85,9 +87,9 @@ class ClinicalAutomationTest {
         AppControl.windowDriver := driver
 
         Assert.False(AppControl.SendKeysToWindow("PowerScribe", "{F12}"))
-        Assert.Equal(2, driver.calls.Length)
-        Assert.Equal("activate", driver.calls[1].kind)
-        Assert.Equal("active", driver.calls[2].kind)
+        Assert.Equal(6, driver.calls.Length)
+        Assert.Equal("activate", driver.calls[3].kind)
+        Assert.Equal("active", driver.calls[6].kind)
     }
 
     TargetedSendActivatesBeforeSending() {
@@ -95,13 +97,25 @@ class ClinicalAutomationTest {
         AppControl.windowDriver := driver
 
         Assert.True(AppControl.SendKeysToWindow("Vue PACS Client", "{Right}"))
-        Assert.Equal(3, driver.calls.Length)
-        Assert.Equal("activate", driver.calls[1].kind)
-        Assert.Equal("Vue PACS Client", driver.calls[1].value)
-        Assert.Equal("active", driver.calls[2].kind)
-        Assert.Equal("Vue PACS Client", driver.calls[2].value)
-        Assert.Equal("keys", driver.calls[3].kind)
-        Assert.Equal("{Right}", driver.calls[3].value)
+        Assert.Equal(7, driver.calls.Length)
+        Assert.Equal("activate", driver.calls[3].kind)
+        Assert.Equal("ahk_id 501", driver.calls[3].value)
+        Assert.Equal("active", driver.calls[6].kind)
+        Assert.Equal("ahk_id 501", driver.calls[6].value)
+        Assert.Equal("keys", driver.calls[7].kind)
+        Assert.Equal("{Right}", driver.calls[7].value)
+    }
+
+    AmbiguousTargetedSendDoesNotActivateOrSend() {
+        driver := FakeWindowDriver(true, true, [
+            {hwnd: 501, pid: 42},
+            {hwnd: 502, pid: 43}
+        ])
+        AppControl.windowDriver := driver
+
+        Assert.False(AppControl.SendKeysToWindow("Clinical Window", "^d"))
+        Assert.Equal(1, driver.calls.Length)
+        Assert.Equal("list", driver.calls[1].kind)
     }
 
     ExactWindowResolverRejectsSubstringAndDuplicateMatches() {
@@ -195,10 +209,10 @@ class ClinicalAutomationTest {
 
         command.Call()
 
-        Assert.Equal("activate", driver.calls[1].kind)
-        Assert.Equal("Custom Clinical Window", driver.calls[1].value)
-        Assert.Equal("active", driver.calls[2].kind)
-        Assert.Equal("^d", driver.calls[3].value)
+        Assert.Equal("activate", driver.calls[3].kind)
+        Assert.Equal("ahk_id 501", driver.calls[3].value)
+        Assert.Equal("active", driver.calls[6].kind)
+        Assert.Equal("^d", driver.calls[7].value)
     }
 
     AttendingTargetRequiresSemanticControlIdentity() {
@@ -726,10 +740,30 @@ class ClinicalAutomationTest {
 }
 
 class FakeWindowDriver {
-    __New(activationResult := true, activeResults := true) {
+    __New(activationResult := true, activeResults := true, selectorWindows := 0) {
         this.activationResult := activationResult
         this.activeResults := activeResults is Array ? activeResults.Clone() : [activeResults]
+        this.selectorWindows := IsObject(selectorWindows)
+            ? selectorWindows.Clone()
+            : [{hwnd: 501, pid: 42}]
         this.calls := []
+    }
+
+    ListWindows(selector) {
+        this.calls.Push({kind: "list", value: selector})
+        handles := []
+        for window in this.selectorWindows
+            handles.Push(window.hwnd)
+        return handles
+    }
+
+    GetProcessId(hwnd) {
+        this.calls.Push({kind: "pid", value: hwnd})
+        for window in this.selectorWindows {
+            if (window.hwnd = hwnd)
+                return window.pid
+        }
+        return 0
     }
 
     Activate(title, timeoutSeconds) {

@@ -31,6 +31,10 @@ class NativeWindowDriver {
         Sleep(milliseconds)
     }
 
+    ListWindows(selector) {
+        return WinGetList(selector)
+    }
+
     ListWindowsByExecutable(executable) {
         return WinGetList("ahk_exe " executable)
     }
@@ -115,10 +119,74 @@ class AppControl {
     }
 
     static SendKeysToWindow(winTitle, keys) {
-        if !this.ActivateWindow(winTitle)
+        try session := this.ResolveUniqueWindowSelector(winTitle)
+        catch
             return false
+        if (!session
+            || !this.windowDriver.Activate(
+                session.target,
+                this.activationTimeoutSeconds
+            ))
+            return false
+        return this.SendKeysToActiveSelectorWindow(session, keys)
+    }
 
-        return this.SendKeysToActiveWindow(winTitle, keys)
+    static ResolveUniqueWindowSelector(selector) {
+        if (Type(selector) != "String" || Trim(selector) = "")
+            throw ValueError("A nonblank window selector is required")
+        selector := Trim(selector)
+        handles := this.windowDriver.ListWindows(selector)
+        if !IsObject(handles)
+            throw Error("Window lookup returned an invalid collection")
+
+        unique := []
+        seen := Map()
+        for hwnd in handles {
+            if (hwnd <= 0 || seen.Has(hwnd))
+                continue
+            seen[hwnd] := true
+            unique.Push(hwnd)
+        }
+        if (unique.Length != 1)
+            return 0
+        hwnd := unique[1]
+        processId := this.windowDriver.GetProcessId(hwnd)
+        if (processId <= 0)
+            return 0
+        return {
+            hwnd: hwnd,
+            target: "ahk_id " hwnd,
+            processId: processId,
+            selector: selector
+        }
+    }
+
+    static SelectorSessionIsUniqueAndLive(session) {
+        if (!session
+            || !HasProp(session, "hwnd")
+            || !HasProp(session, "processId")
+            || !HasProp(session, "selector")
+            || session.hwnd <= 0
+            || session.processId <= 0)
+            return false
+        try current := this.ResolveUniqueWindowSelector(session.selector)
+        catch
+            return false
+        return current
+            && current.hwnd = session.hwnd
+            && current.processId = session.processId
+    }
+
+    static SendKeysToActiveSelectorWindow(session, keys) {
+        try {
+            if (!this.SelectorSessionIsUniqueAndLive(session)
+                || !this.windowDriver.IsActive(session.target))
+                return false
+            this.windowDriver.SendKeys(keys)
+            return true
+        } catch {
+            return false
+        }
     }
 
     /**

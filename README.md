@@ -14,7 +14,9 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 
 ### Profiles & custom binds
 - Multiple profiles with default selection
-- Custom keybind creator (send keys to any window)
+- Custom keybind creator (send keys to one uniquely matched window). Targets use
+  AutoHotkey v2 WinTitle selector syntax (for example, a title plus `ahk_exe app.exe`);
+  the command does nothing when the selector is absent, ambiguous, or changes before send.
 - GUI to add/change/remove binds and set a default profile
 - Per-bind scope: limit a shortcut to PACS, PowerScribe, or both. Outside its scope the
   key is passed through to whatever app is focused rather than being swallowed
