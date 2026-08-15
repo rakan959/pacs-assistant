@@ -1325,6 +1325,12 @@ class KeybindGUI {
     }
 
     ShowAddFunctionDialog(listView) {
+        if !this.ProfileMutationAllowed("edit profile functions")
+            return false
+        ; Custom deletion persists the whole profile. Resolve any pending keybind
+        ; edits before opening a dialog that can reach that persistence boundary.
+        if !this.ResolveDirtyProfileBeforeLeaving(true)
+            return false
         selectorGui := this.NewProfileDialog("PACS Assistant - Add Function")
         
         ; Get list of unbound functions, separated by type
@@ -1392,6 +1398,16 @@ class KeybindGUI {
             return false
         if !this.DialogProfileIsCurrent(selectorGui)
             return false
+
+        if this.IsProfileDirty(selectorGui.profileName) {
+            try selectorGui.Destroy()
+            this.NotifyUser(
+                "The profile changed while Add Function was open. Save or discard those keybind edits, then reopen it before deleting a custom function.",
+                "Unsaved Profile Changes",
+                "Icon!"
+            )
+            return false
+        }
 
         if (funcName = "") {
             MsgBox("Please select a custom function to delete.", "Error", "Icon!")
@@ -1799,10 +1815,16 @@ class KeybindGUI {
     }
 
     ShowModalityAttendingsDialog() {
+        if !this.ProfileMutationAllowed("edit attending assignments")
+            return false
         if (ProfileManager.GetCurrentProfile() = 0) {
             MsgBox("Load a profile first.", "Error", "Icon!")
             return
         }
+        ; This dialog saves a complete profile snapshot. Force an explicit decision
+        ; on pending keybind edits before capturing that snapshot.
+        if !this.ResolveDirtyProfileBeforeLeaving(true)
+            return false
 
         modGui := this.NewProfileDialog("PACS Assistant - Modality Attendings")
         modGui.profileRevision := ProfileManager.GetProfileRevision(modGui.profileName)
@@ -1829,6 +1851,15 @@ class KeybindGUI {
         if !this.DialogProfileIsCurrent(modGui)
             return false
         profileName := modGui.profileName
+        if this.IsProfileDirty(profileName) {
+            try modGui.Destroy()
+            this.NotifyUser(
+                "The profile has unsaved keybind changes. Save or discard them before saving attending assignments.",
+                "Unsaved Profile Changes",
+                "Icon!"
+            )
+            return false
+        }
         if (!HasProp(modGui, "profileRevision")
             || modGui.profileRevision != ProfileManager.GetProfileRevision(profileName)
             || !HasProp(modGui, "profileMutationRevision")
