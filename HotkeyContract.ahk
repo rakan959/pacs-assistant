@@ -152,11 +152,27 @@ class HotkeyContract {
 
     static NormalizeCombinationKey(key) {
         key := Trim(key)
+        wildcard := false
+        position := 1
+        while (position <= StrLen(key)) {
+            char := SubStr(key, position, 1)
+            if (char = "~" || char = "$") {
+                position++
+                continue
+            }
+            if (char = "*") {
+                wildcard := true
+                position++
+                continue
+            }
+            break
+        }
+        key := Trim(SubStr(key, position))
         try {
             normalizedKey := GetKeyName(key)
             if (normalizedKey != "")
                 key := normalizedKey
         }
-        return StrLower(key)
+        return (wildcard ? "*" : "") StrLower(key)
     }
 }

@@ -202,6 +202,14 @@ class HotkeyManagerTest {
         Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "a & b"))
 
         Assert.False(HotkeyManager.RegisterHotkey("ActionTwo", "~a & b"))
+        Assert.Equal(
+            HotkeyContract.BindingIdentity("a & b"),
+            HotkeyContract.BindingIdentity("a & ~b")
+        )
+        Assert.Equal(
+            HotkeyContract.BindingIdentity("a & b"),
+            HotkeyContract.BindingIdentity("a & $b")
+        )
         Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
         Assert.False(HotkeyManager.activeHotkeys.Has("ActionTwo"))
         Assert.True(InStr(HotkeyManager.lastError, "ActionOne") > 0)

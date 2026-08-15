@@ -1,13 +1,19 @@
 #Requires AutoHotkey v2.0
+#Include AppStorage.ahk
 
 class Settings {
-    static settingsFile := A_ScriptDir "\settings.ini"
+    static settingsFile := AppStorage.DataRoot() "\settings.ini"
     static changeListeners := []
+    static mutationGuard := (*) => true
+    static dialogGuard := (*) => true
+    static writeTransactionActive := false
     static revision := 0
     static minRefreshIntervalSeconds := 10
     ; One day is a deliberate product bound as well as protection from AutoHotkey's
     ; DWORD-backed timer period wrapping after seconds are multiplied by 1000.
     static maxRefreshIntervalSeconds := 86400
+    static dialogLogicalWidth := 400
+    static dialogLogicalHeight := 420
     static defaultSettings := Map(
         "AutoUpdate", true,
         "SkipBetaVersions", true,
@@ -93,9 +99,19 @@ class Settings {
                 this.soundFiles[entry.name] := entry.file
         }
 
-        ; Create settings file if it doesn't exist
-        if !FileExist(this.settingsFile) {
-            this.SaveAllSettings()
+        try {
+            AppStorage.Ensure()
+            ; Create settings file if it doesn't exist
+            if !FileExist(this.settingsFile)
+                this.SaveAllSettings()
+        } catch as err {
+            MsgBox(
+                "PACS Assistant could not initialize its writable data folder:`n"
+                    . AppStorage.DataRoot() "`n`n" err.Message,
+                "PACS Assistant Storage Error",
+                "Icon!"
+            )
+            ExitApp(1)
         }
     }
 
@@ -153,12 +169,16 @@ class Settings {
     ; Save one setting value. Multi-value GUI changes use SaveValues so callers never
     ; observe a partially written settings form.
     static Set(settingName, value) {
-        this.WriteSetting(this.settingsFile, settingName, value)
-        this.revision++
+        this.BeginWriteTransaction()
+        try {
+            this.WriteSetting(this.settingsFile, settingName, value)
+            this.revision++
+        } finally this.EndWriteTransaction()
     }
 
     static NewTemporarySettingsPath() {
-        stem := this.settingsFile ".tmp-" DllCall("GetCurrentProcessId") "-" A_TickCount
+        stem := this.settingsFile ".tmp-" DllCall("GetCurrentProcessId") "-"
+            . DllCall("GetTickCount64", "UInt64")
         path := stem
         suffix := 0
         while FileExist(path) {
@@ -174,6 +194,24 @@ class Settings {
      * other dialogs are retained.
      */
     static SaveValues(values, replacer?) {
+        this.BeginWriteTransaction()
+        try {
+            if IsSet(replacer)
+                return this.CommitValues(values, replacer)
+            return this.CommitValues(values)
+        } finally this.EndWriteTransaction()
+    }
+
+    static SaveValuesAtRevision(values, expectedRevision) {
+        this.BeginWriteTransaction()
+        try {
+            if (this.revision != expectedRevision)
+                throw Error("Settings changed while this dialog was open")
+            return this.CommitValues(values)
+        } finally this.EndWriteTransaction()
+    }
+
+    static CommitValues(values, replacer?) {
         temporaryPath := this.NewTemporarySettingsPath()
         try {
             if FileExist(this.settingsFile)
@@ -190,6 +228,30 @@ class Settings {
             try FileDelete(temporaryPath)
         }
         this.revision++
+        return true
+    }
+
+    static RequireMutationAllowed() {
+        if !this.mutationGuard.Call()
+            throw Error("Settings cannot be changed while a clinical command or shutdown transaction is active")
+    }
+
+    static BeginWriteTransaction() {
+        Critical("On")
+        try {
+            ; Recheck the composition-root guard inside the same non-interruptible
+            ; boundary that publishes the settings transaction.
+            this.RequireMutationAllowed()
+            if this.writeTransactionActive
+                throw Error("Another settings write is already in progress")
+            this.writeTransactionActive := true
+        } finally Critical("Off")
+    }
+
+    static EndWriteTransaction() {
+        Critical("On")
+        try this.writeTransactionActive := false
+        finally Critical("Off")
     }
 
     static AddChangeListener(listener) {
@@ -218,99 +280,59 @@ class Settings {
     
     ; Show settings dialog
     static ShowDialog() {
-        ; Create GUI with proper margins
-        settingsGui := Gui("+AlwaysOnTop +MinSize320", "PACS Assistant - Settings")
+        if !this.dialogGuard.Call() {
+            MsgBox(
+                "Wait for the active clinical or configuration operation to finish before opening Settings.",
+                "Settings Unavailable",
+                "Icon!"
+            )
+            return false
+        }
+        settingsGui := Gui(, "PACS Assistant - Settings")
         settingsGui.settingsRevision := this.revision
         settingsGui.SetFont("s10", "Segoe UI")
-        
-        ; Constants for layout
-        margin := 20  ; Margin from window edge
-        width := 320  ; Total window width
-        contentWidth := width - (margin * 2)  ; Width of content area
-        
-        ; Create checkboxes for each setting
-        y := margin
         checkboxes := Map()
-        
-        ; Updates section
-        settingsGui.Add("GroupBox", "x" margin " y" y " w" contentWidth " h80", "Updates")
-        checkboxes["AutoUpdate"] := settingsGui.Add("Checkbox", "x" margin+10 " y" y+25, "Automatically check for updates")
-        checkboxes["SkipBetaVersions"] := settingsGui.Add("Checkbox", "x" margin+10 " y+10", "Skip beta versions")
-        
-        ; PACS section
-        y += 100  ; Consistent spacing between sections
-        settingsGui.Add("GroupBox", "x" margin " y" y " w" contentWidth " h140", "PACS")
-        pacsY := y + 25
-        checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x" margin+10 " y" pacsY, "Auto refresh PACS")
-        pacsY += 28
-        settingsGui.Add("Text", "x" margin+10 " y" pacsY, "Refresh interval (seconds):")
-        ; The edit sits below its label, not 5px under it - at the old offset the two
-        ; drew on top of each other
-        refreshIntervalEdit := settingsGui.Add("Edit", "x" margin+10 " y" pacsY+22 " w60 Number", this.Get("RefreshInterval"))
-        pacsY += 52
-        checkboxes["AutoConvertWetReadLineEndings"] := settingsGui.Add("Checkbox", "x" margin+10 " y" pacsY, "Convert clipboard line endings")
+        tab := settingsGui.Add(
+            "Tab3",
+            "x20 y15 w360 h330",
+            ["General", "PowerScribe", "Notifications"]
+        )
 
-        ; Hotkey scope is set per keybind now (main window > Set Scope), so there is no
-        ; global restrict checkbox here any more.
+        tab.UseTab(1)
+        settingsGui.Add("GroupBox", "x35 y55 w330 h75", "Updates")
+        checkboxes["AutoUpdate"] := settingsGui.Add("Checkbox", "x50 y78", "Automatically check for updates")
+        checkboxes["SkipBetaVersions"] := settingsGui.Add("Checkbox", "x50 y103", "Skip beta versions")
+        settingsGui.Add("GroupBox", "x35 y140 w330 h175", "PACS and wet reads")
+        checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x50 y165", "Auto refresh PACS")
+        settingsGui.Add("Text", "x50 y195", "Refresh interval (seconds):")
+        refreshIntervalEdit := settingsGui.Add("Edit", "x50 y218 w75 Number", this.Get("RefreshInterval"))
+        checkboxes["AutoConvertWetReadLineEndings"] := settingsGui.Add("Checkbox", "x50 y258", "Convert clipboard line endings")
 
-        ; PowerScribe section
-        y += 160
-        settingsGui.Add("GroupBox", "x" margin " y" y " w" contentWidth " h120", "PowerScribe")
-        checkboxes["SwapMicrophoneOnLogin"] := settingsGui.Add("Checkbox", "x" margin+10 " y" y+25, "Set microphone on login")
-        settingsGui.Add("Text", "x" margin+10 " y+15", "Microphone (blank = leave unchanged):")
-        micNameEdit := settingsGui.Add("Edit", "x" margin+10 " y+5 w" contentWidth-20, this.Get("MicrophoneName"))
+        tab.UseTab(2)
+        settingsGui.Add("GroupBox", "x35 y55 w330 h140", "PowerScribe login")
+        checkboxes["SwapMicrophoneOnLogin"] := settingsGui.Add("Checkbox", "x50 y82", "Set microphone on login")
+        settingsGui.Add("Text", "x50 y115", "Microphone (blank = leave unchanged):")
+        micNameEdit := settingsGui.Add("Edit", "x50 y140 w300", this.Get("MicrophoneName"))
 
-        ; Notifications section
-        y += 140  ; Increased spacing between sections
-        notificationsY := y
-        
-        ; Calculate height for notifications section based on its contents:
-        ; - 25px top padding
-        ; - 2 checkboxes (25px each + 10px spacing) = 60px
-        ; - Alert Sound (20px label + 5px + 25px dropdown) = 50px
-        ; - Custom Sound (20px label + 5px + 25px edit/browse) = 50px
-        ; - 15px spacing
-        ; - Test button (25px)
-        ; - 25px bottom padding
-        notificationsHeight := 250  ; Total height needed
-        
-        ; Add the notifications groupbox first
-        settingsGui.Add("GroupBox", "x" margin " y" notificationsY " w" contentWidth " h" notificationsHeight, "Notifications")
-        
-        ; Add all notification controls with consistent spacing
-        y := notificationsY  ; Reset y to start of notifications section
-        checkboxes["AudioAlertNewCase"] := settingsGui.Add("Checkbox", "x" margin+10 " y" y+25, "Play sound on new case")
-        checkboxes["MessageBoxNewCase"] := settingsGui.Add("Checkbox", "x" margin+10 " y+10", "Show message box on new case")
-        
-        ; Sound selection
-        settingsGui.Add("Text", "x" margin+10 " y+15", "Alert Sound:")
-        soundDropDown := settingsGui.Add("DropDownList", "x" margin+10 " y+5 w" contentWidth-20, this.alertSounds)
+        tab.UseTab(3)
+        settingsGui.Add("GroupBox", "x35 y55 w330 h260", "New-study notifications")
+        checkboxes["AudioAlertNewCase"] := settingsGui.Add("Checkbox", "x50 y80", "Play sound on new case")
+        checkboxes["MessageBoxNewCase"] := settingsGui.Add("Checkbox", "x50 y106", "Show Windows notification on new case")
+        settingsGui.Add("Text", "x50 y140", "Alert sound:")
+        soundDropDown := settingsGui.Add("DropDownList", "x50 y163 w300", this.alertSounds)
         soundDropDown.Value := this.FindSoundIndex(this.Get("AlertSound"))
-        
-        ; Custom sound file section
-        settingsGui.Add("Text", "x" margin+10 " y+15", "Custom Sound File:")
-        customSoundEdit := settingsGui.Add("Edit", "x" margin+10 " y+5 w" contentWidth-90 " ReadOnly", this.Get("CustomSoundFile"))
-        settingsGui.Add("Button", "x+5 yp w60", "Browse").OnEvent("Click", (*) => this.BrowseSound(customSoundEdit))
-        
-        ; Test button with adjusted spacing
-        settingsGui.Add("Button", "x" margin+10 " y+10 w60", "Test")  ; Changed from y+15 to y+10
+        settingsGui.Add("Text", "x50 y200", "Custom sound file:")
+        customSoundEdit := settingsGui.Add("Edit", "x50 y223 w225 ReadOnly", this.Get("CustomSoundFile"))
+        settingsGui.Add("Button", "x285 y221 w65", "Browse")
+            .OnEvent("Click", (*) => this.BrowseSound(customSoundEdit))
+        settingsGui.Add("Button", "x50 y263 w65", "Test")
             .OnEvent("Click", (*) => this.TestSound(soundDropDown.Text, customSoundEdit.Text))
-        
-        ; Set current values
+
         for setting, checkbox in checkboxes {
             checkbox.Value := this.Get(setting)
         }
-        
-        ; Add Save and Cancel buttons below the notifications section
-        y := notificationsY + notificationsHeight + 20  ; Consistent 20px spacing after section
-        
-        ; Add Save and Cancel buttons in a centered position
-        buttonWidth := 80
-        spacing := 10
-        totalButtonWidth := (buttonWidth * 2) + spacing
-        startX := margin + (contentWidth - totalButtonWidth) // 2
-        
-        ; Add buttons with proper alignment
+
+        tab.UseTab()
         controls := {
             checkboxes: checkboxes,
             refreshInterval: refreshIntervalEdit,
@@ -318,16 +340,13 @@ class Settings {
             soundDropDown: soundDropDown,
             customSound: customSoundEdit
         }
-        settingsGui.Add("Button", "x" startX " y" y " w" buttonWidth, "Save")
+        settingsGui.Add("Button", "x110 y365 w80 Default", "Save")
             .OnEvent("Click", (*) => this.SaveSettings(controls, settingsGui))
-        settingsGui.Add("Button", "x+" spacing " yp w" buttonWidth, "Cancel")
+        settingsGui.Add("Button", "x210 y365 w80", "Cancel")
             .OnEvent("Click", (*) => settingsGui.Destroy())
-        
-        ; Add bottom margin
-        y += margin * 2
-        settingsGui.Add("Text", "x" margin " y" y " w0 h0")  ; Invisible control to enforce bottom margin
-        
-        settingsGui.Show()
+
+        settingsGui.Show("w" this.dialogLogicalWidth " h" this.dialogLogicalHeight)
+        return settingsGui
     }
     
     ; Find index of sound in alertSounds array
@@ -460,8 +479,17 @@ class Settings {
         values["AlertSound"] := controls.soundDropDown.Text
         values["CustomSoundFile"] := controls.customSound.Text
 
-        try this.SaveValues(values)
+        try this.SaveValuesAtRevision(values, settingsGui.settingsRevision)
         catch as err {
+            if (settingsGui.settingsRevision != this.revision) {
+                try settingsGui.Destroy()
+                MsgBox(
+                    "Settings changed while this dialog was being saved. Reopen it before saving.",
+                    "Settings Changed",
+                    "Icon!"
+                )
+                return false
+            }
             MsgBox(
                 "The settings could not be saved. The previous file was left unchanged.`n`n" err.Message,
                 "Save Failed",

@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include ../PACSMonitor.ahk
+#Include ../PACSCommands.ahk
 #Include ../Settings.ahk
 #Include TestRunner.ahk
 
@@ -8,8 +9,12 @@ class PACSMonitorTest {
         "TestHasAccession",
         "TestProcessRowsFindsNewStudies",
         "TestProcessRowsPreservesLongModalityPrefix",
+        "TestStudyNotificationDropsPatientNamePrefix",
+        "TestAmbiguousFlattenedRowDoesNotNotify",
         "TestProcessRowsRequiresAnExactEightDigitAccession",
+        "TestAmbiguousNumericColumnsDoNotBecomeAccessions",
         "TestRepeatedAccessionAlertsOnce",
+        "TestDisabledAlertsDoNotConsumeFutureStudyNotification",
         "TestInterruptedScanDoesNotConsumeUnalertedAccessions",
         "TestMonitoringUsesTestMode",
         "TestRefreshButtonRequiresSemanticIdentity",
@@ -17,6 +22,7 @@ class PACSMonitorTest {
         "TestRefreshButtonEnumerationErrorFailsClosed",
         "TestDuplicateRefreshAppearingBeforeClickDoesNotInvoke",
         "TestPortalActivationBeforeClickDoesNotInvokeRefresh",
+        "TestActiveClinicalLeaseSkipsBackgroundMonitor",
         "TestRefreshAndScanUseOneCapturedPortalSession",
         "TestAmbiguousPortalWindowsAreReportedAsScanFailure",
         "TestStudyListFallbackRequiresExpectedTypeAndProcess",
@@ -31,6 +37,9 @@ class PACSMonitorTest {
     Setup() {
         this.originalSettings := Settings.settingsFile
         this.originalNotifier := PACSMonitor.notifier
+        this.originalApprovedRefreshIds := PACSMonitor.approvedRefreshAutomationIds
+        this.originalAutomationAcquire := PACSMonitor.automationAcquire
+        this.originalAutomationRelease := PACSMonitor.automationRelease
         this.tempSettings := A_Temp "\pacs_monitor_settings_" A_TickCount ".ini"
         Settings.settingsFile := this.tempSettings
         Settings.SaveAllSettings()
@@ -52,6 +61,11 @@ class PACSMonitorTest {
             title: title,
             options: options
         })
+        PACSMonitor.approvedRefreshAutomationIds := [
+            "refreshButton",
+            "refreshPrimary",
+            "refreshSecondary"
+        ]
     }
     
     TestHasAccession() {
@@ -62,7 +76,8 @@ class PACSMonitorTest {
     
     TestProcessRowsFindsNewStudies() {
         PACSMonitor.testStudyRows := [
-            {Name: "CT HEAD WITHOUT CONTRAST 12345678 87654321"},
+            {Name: "CT HEAD WITHOUT CONTRAST 12345678"},
+            {Name: "CT ABDOMEN 87654321"},
             {Name: "XR CHEST 2 VIEW 99887766"}
         ]
         
@@ -80,8 +95,36 @@ class PACSMonitorTest {
             {Name: "CTA HEAD AND NECK 87654321"}
         ], true)
 
-        Assert.Equal("MRI BRAIN WITHOUT CONTRAST", PACSMonitor.testLastNewStudies[1].studyType)
-        Assert.Equal("CTA HEAD AND NECK", PACSMonitor.testLastNewStudies[2].studyType)
+        Assert.Equal("MRI", PACSMonitor.testLastNewStudies[1].studyType)
+        Assert.Equal("CTA", PACSMonitor.testLastNewStudies[2].studyType)
+    }
+
+    TestStudyNotificationDropsPatientNamePrefix() {
+        studies := PACSMonitor.ProcessRows([
+            {Name: "DOE JOHN CT CHEST 12345678"}
+        ], true)
+
+        Assert.Equal(1, studies.Length)
+        Assert.Equal("CT", studies[1].studyType)
+        Assert.False(InStr(studies[1].studyType, "DOE") > 0)
+        Assert.False(InStr(studies[1].studyType, "JOHN") > 0)
+
+        PACSMonitor.knownAccessions := Map()
+        studies := PACSMonitor.ProcessRows([
+            {Name: "CT CHEST DOE JOHN 87654321"}
+        ], true)
+        Assert.Equal("CT", studies[1].studyType)
+        Assert.False(InStr(studies[1].studyType, "DOE") > 0)
+    }
+
+    TestAmbiguousFlattenedRowDoesNotNotify() {
+        studies := PACSMonitor.ProcessRows([
+            {Name: "DOE CT JOHN MRI BRAIN 12345678"},
+            {Name: "12345678 DOE JOHN CT CHEST"}
+        ], true)
+
+        Assert.Equal(0, studies.Length)
+        Assert.False(PACSMonitor.HasAccession("12345678"))
     }
 
     TestProcessRowsRequiresAnExactEightDigitAccession() {
@@ -94,6 +137,18 @@ class PACSMonitorTest {
         Assert.Equal(1, PACSMonitor.testLastNewStudies.Length)
         Assert.Equal("87654321", PACSMonitor.testLastNewStudies[1].accession)
         Assert.False(PACSMonitor.HasAccession("12345678"))
+    }
+
+    TestAmbiguousNumericColumnsDoNotBecomeAccessions() {
+        studies := PACSMonitor.ProcessRows([
+            {Name: "DOE JOHN 19800101 CT CHEST 12345678"},
+            {Name: "CT CHEST 20260815"}
+        ], true)
+
+        Assert.Equal(0, studies.Length)
+        Assert.False(PACSMonitor.HasAccession("19800101"))
+        Assert.False(PACSMonitor.HasAccession("12345678"))
+        Assert.False(PACSMonitor.HasAccession("20260815"))
     }
     
     ; An accession can appear in more than one row of a single refresh. It must be
@@ -117,17 +172,37 @@ class PACSMonitorTest {
         Assert.Equal(0, PACSMonitor.testLastNewStudies.Length)
     }
 
+    TestDisabledAlertsDoNotConsumeFutureStudyNotification() {
+        PACSMonitor.testMode := false
+        Settings.Set("AudioAlertNewCase", false)
+        Settings.Set("MessageBoxNewCase", false)
+        rows := [{Name: "CT CHEST 12345678"}]
+
+        PACSMonitor.ProcessRows(rows)
+        unseenWhileDisabled := !PACSMonitor.HasAccession("12345678")
+
+        Settings.Set("MessageBoxNewCase", true)
+        PACSMonitor.ProcessRows(rows)
+
+        Assert.True(unseenWhileDisabled)
+        Assert.True(PACSMonitor.HasAccession("12345678"))
+        Assert.Equal(1, this.notifications.Length)
+        Assert.Equal("CT", this.notifications[1].text)
+    }
+
     TestRefreshButtonRequiresSemanticIdentity() {
         root := FakePACSTargetElement(UIA.Type.Window, 42)
         valid := FakePACSTargetElement(UIA.Type.Button, 42, "Refresh studies", "refreshButton", true)
         wrongType := FakePACSTargetElement(UIA.Type.Edit, 42, "Refresh", "refreshButton", true)
         wrongMeaning := FakePACSTargetElement(UIA.Type.Button, 42, "Delete", "deleteButton", true)
+        wrongRefreshMeaning := FakePACSTargetElement(UIA.Type.Button, 42, "Auto Refresh", "autoRefresh", true)
         wrongProcess := FakePACSTargetElement(UIA.Type.Button, 99, "Refresh", "refreshButton", true)
         wrongWindow := FakePACSTargetElement(UIA.Type.Button, 42, "Refresh", "refreshButton", true, 200)
 
         Assert.True(PACSMonitor.IsExpectedRefreshButton(root, valid))
         Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongType))
         Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongMeaning))
+        Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongRefreshMeaning))
         Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongProcess))
         Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongWindow))
     }
@@ -213,6 +288,39 @@ class PACSMonitorTest {
         Assert.Equal(0, button.clickCalls)
     }
 
+    TestActiveClinicalLeaseSkipsBackgroundMonitor() {
+        originalTestMode := PACSMonitor.testMode
+        originalDriver := PACSMonitor.driver
+        originalClinicalActive := PACSCommands.clinicalCommandActive
+        originalClinicalName := PACSCommands.activeClinicalCommand
+        driver := CountingPortalResolutionDriver()
+
+        try {
+            PACSMonitor.testMode := false
+            PACSMonitor.driver := driver
+            PACSMonitor.automationAcquire := ObjBindMethod(
+                PACSCommands,
+                "AcquireClinicalAutomation"
+            )
+            PACSMonitor.automationRelease := ObjBindMethod(
+                PACSCommands,
+                "ReleaseClinicalAutomation"
+            )
+            PACSCommands.clinicalCommandActive := true
+            PACSCommands.activeClinicalCommand := "Paste Wet Read"
+
+            result := PACSMonitor.RefreshAndCheck()
+        } finally {
+            PACSCommands.clinicalCommandActive := originalClinicalActive
+            PACSCommands.activeClinicalCommand := originalClinicalName
+            PACSMonitor.driver := originalDriver
+            PACSMonitor.testMode := originalTestMode
+        }
+
+        Assert.False(result)
+        Assert.Equal(0, driver.resolveCalls)
+    }
+
     TestRefreshAndScanUseOneCapturedPortalSession() {
         originalTestMode := PACSMonitor.testMode
         originalDriver := PACSMonitor.driver
@@ -235,6 +343,7 @@ class PACSMonitorTest {
             PACSMonitor.testMode := false
             PACSMonitor.driver := driver
             PACSMonitor.knownAccessions := Map()
+            Settings.Set("MessageBoxNewCase", true)
             PACSMonitor.RefreshAndCheck()
             marked := PACSMonitor.HasAccession("12345678")
         } finally {
@@ -345,7 +454,8 @@ class PACSMonitorTest {
             PACSMonitor.RecordRefreshResult(false)
 
         Assert.Equal(1, this.notifications.Length)
-        Assert.True(InStr(this.notifications[1].text, "refresh button") > 0)
+        Assert.True(InStr(this.notifications[1].text, "Monitoring may be stale") > 0)
+        Assert.True(InStr(this.notifications[1].text, "manually") > 0)
         Assert.Equal("PACS auto-refresh is not working", this.notifications[1].title)
     }
 
@@ -395,6 +505,9 @@ class PACSMonitorTest {
         PACSMonitor.testLastNewStudies := []
         PACSMonitor.knownAccessions := Map()
         PACSMonitor.notifier := this.originalNotifier
+        PACSMonitor.approvedRefreshAutomationIds := this.originalApprovedRefreshIds
+        PACSMonitor.automationAcquire := this.originalAutomationAcquire
+        PACSMonitor.automationRelease := this.originalAutomationRelease
         PACSMonitor.consecutiveScanFailures := 0
         PACSMonitor.scanFailureNotified := false
         PACSMonitor.lastError := ""
@@ -573,6 +686,17 @@ class FixedPortalSessionDriver {
 class AmbiguousPortalMonitorDriver {
     ResolvePortalSession() {
         return {status: "ambiguous", session: 0}
+    }
+}
+
+class CountingPortalResolutionDriver {
+    __New() {
+        this.resolveCalls := 0
+    }
+
+    ResolvePortalSession() {
+        this.resolveCalls++
+        return {status: "absent", session: 0}
     }
 }
 

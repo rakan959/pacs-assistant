@@ -80,9 +80,20 @@ class NativeAttendingControlDriver {
     ; the attending picker. Keep the native mutation path closed until an exact ID
     ; can be recorded and regression-tested; a name substring is not an identity.
     static approvedAutomationIds := []
+    ; Confirmation is a separate semantic capability. Enabling a picker selector
+    ; without an approved confirm-control identity would allow a write that can never
+    ; be safely committed or dismissed.
+    static approvedConfirmationAutomationIds := []
 
     __New(focusVerifier := 0) {
         this.focusVerifier := focusVerifier
+    }
+
+    CanAutomateAttendingTransaction() {
+        ; Placeholder identities do not constitute an implementation. Keep this
+        ; false until ConfirmExpectedAttending resolves, invokes, and verifies the
+        ; exact approved semantic confirmation control.
+        return false
     }
 
     FindExpectedControl(windowTitle) {
@@ -385,6 +396,15 @@ class PowerScribe {
     }
 
     static SetAttending(attending, session := 0, expectedReportText := "") {
+        ; Capability is checked before report capture because native capture activates
+        ; the reporting window. With no approved picker+confirmation contract, even
+        ; opening the workflow would be an unverified clinical UI side effect.
+        try automationAvailable :=
+            this.attendingControlDriver.CanAutomateAttendingTransaction()
+        catch
+            automationAvailable := false
+        if !automationAvailable
+            return false
         if !session {
             capture := this.CaptureReport()
             session := capture.session

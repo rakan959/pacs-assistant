@@ -68,6 +68,22 @@ PressAliasCombo() {
     }
 }
 
+PressBehaviorCombo() {
+    global AliasFirstFired, AliasSecondFired
+    firstBefore := AliasFirstFired
+    secondBefore := AliasSecondFired
+    SendEvent("{F23 down}{F24}{F23 up}")
+    Loop 40 {
+        Sleep(25)
+        if (AliasFirstFired != firstBefore || AliasSecondFired != secondBefore)
+            break
+    }
+    return {
+        first: AliasFirstFired - firstBefore,
+        second: AliasSecondFired - secondBefore
+    }
+}
+
 ; Sends Ctrl+F13 and reports how many times the bound action ran
 Press() {
     global Fired
@@ -153,6 +169,23 @@ Main() {
     aliasResult := PressAliasCombo()
     AssertEqual(aliasResult.first, 1, "the original aliased custom combination remains live")
     AssertEqual(aliasResult.second, 0, "the rejected alias callback never replaces it")
+
+    ; Tilde/dollar on either side of a custom combination update the same native
+    ; behavior variant; they cannot create a second logical owner.
+    HotkeyManager.DisableAllHotkeys()
+    AssertEqual(
+        HotkeyManager.Register("BehaviorOne", "F23 & F24", BumpAliasFirst),
+        true,
+        "a custom combination registers before suffix behavior normalization"
+    )
+    AssertEqual(
+        HotkeyManager.Register("BehaviorTwo", "F23 & ~F24", BumpAliasSecond),
+        false,
+        "a suffix-tilde equivalent combination is rejected"
+    )
+    behaviorResult := PressBehaviorCombo()
+    AssertEqual(behaviorResult.first, 1, "the original behavior combination remains live")
+    AssertEqual(behaviorResult.second, 0, "suffix tilde cannot replace its callback")
 
     HotkeyManager.DisableAllHotkeys()
 

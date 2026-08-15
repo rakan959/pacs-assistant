@@ -571,8 +571,8 @@ class ProfileManagerTest {
 
     TestEquivalentCustomCombinationBindingsAreRejected() {
         profile := ProfileManager.NewProfile()
-        profile.binds["Sign Report"] := "a & b"
-        profile.binds["Draft Report"] := "~a & b"
+        profile.binds["Sign Report"] := "F23 & F24"
+        profile.binds["Draft Report"] := "F23 & ~F24"
 
         Assert.Throws(
             () => ProfileManager.SaveProfile("CombinationDuplicates", profile),

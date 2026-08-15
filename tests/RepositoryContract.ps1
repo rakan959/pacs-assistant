@@ -130,11 +130,15 @@ Assert-NotMatches $workflow 'Ahk2Exe-SetCopyright\s+MIT' 'Executable copyright m
 Assert-NotMatches $profileManager '(?m)^#Include\s+PACSCommands\.ahk\s*$' 'Profile persistence must not depend on the clinical command graph.'
 Assert-NotMatches $powerScribe '\bProfileManager\b' 'PowerScribe automation must not reach profile state through an implicit global.'
 Assert-Matches $wetRead '(?m)^#Include\s+ProfileManager\.ahk\s*$' 'The wet-read composition layer must declare its profile dependency.'
+Assert-Matches $main '(?m)^#SingleInstance\s+Ignore\s*$' 'A second launch must never force-terminate a dirty or in-flight clinical instance.'
+Assert-NotMatches $main '(?m)^#SingleInstance\s+Force\s*$' 'Force replacement bypasses shutdown and clinical transaction gates.'
+Assert-Matches $main 'OnExit\(\(exitReason, exitCode\) => kbGUI\.HandleProcessExit\(exitReason, exitCode\)\)' 'Tray and external exits must use the authoritative shutdown coordinator.'
+Assert-Matches $main 'UpdateChecker\.shutdownCoordinator\s*:=\s*kbGUI' 'Self-update must use the same shutdown coordinator as normal exit.'
 foreach ($subscriber in @('UpdateChecker', 'PACSMonitor', 'MicrophoneManager')) {
     Assert-Matches $main ("Settings\.AddChangeListener\(ObjBindMethod\(" + $subscriber) ("main.ahk must explicitly subscribe " + $subscriber + " to settings changes.")
 }
 Assert-Matches $updateChecker 'CreateRequest\(url,\s*true\)' 'Automatic update metadata requests must use WinHTTP asynchronous mode.'
-Assert-Matches $main '(?s)PACSMonitor\.Start\(\).*MicrophoneManager\.Start\(\).*kbGUI\s*:=\s*KeybindGUI\(\).*UpdateChecker\.Start\(\)' 'Clinical services, GUI, and hotkeys must initialize before automatic network checks start.'
+Assert-Matches $main '(?s)kbGUI\s*:=\s*KeybindGUI\(\).*PACSMonitor\.automationAcquire\s*:=.*MicrophoneManager\.automationAcquire\s*:=.*PACSMonitor\.Start\(\).*MicrophoneManager\.Start\(\).*UpdateChecker\.Start\(\)' 'The GUI and shared automation gates must initialize before clinical timers, and clinical timers before automatic network checks.'
 
 Assert-Matches $readme 'git clone --recurse-submodules' 'README must document cloning with submodules.'
 Assert-Matches $readme 'AutoHotkey v2\.0\.26' 'README must state the AutoHotkey version used by CI.'

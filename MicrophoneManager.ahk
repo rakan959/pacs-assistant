@@ -44,6 +44,8 @@ class NativeMicrophoneSessionDriver {
  */
 class MicrophoneManager {
     static sessionDriver := NativeMicrophoneSessionDriver()
+    static automationAcquire := (*) => {status: "acquired", busyCommand: ""}
+    static automationRelease := (*) => 0
 
     ; The login dropdown's stable semantic identity. Every candidate is enumerated
     ; and exactly one same-window enabled ComboBox is required before mutation.
@@ -95,6 +97,16 @@ class MicrophoneManager {
     }
 
     static CheckForLogin() {
+        lease := this.automationAcquire.Call("PowerScribe microphone check")
+        if (!IsObject(lease)
+            || !HasProp(lease, "status")
+            || lease.status != "acquired")
+            return false
+        try return this.CheckForLoginWithinLease()
+        finally this.automationRelease.Call()
+    }
+
+    static CheckForLoginWithinLease() {
         try {
             resolution := this.sessionDriver.CaptureResult()
             if (!IsObject(resolution) || !HasProp(resolution, "status"))

@@ -10,7 +10,8 @@ class PACSCommandsTest {
         "TestModalityClassification",
         "TestModalityNamesCoverEveryRule",
         "TestLooksLikeReport",
-        "TestPowerScribeToggleUsesExactSpec"
+        "TestPowerScribeToggleUsesExactSpec",
+        "TestEpicToggleFailsClosedWithoutCapturedIdentity"
     ]
 
     TestBuiltInCommandsExist() {
@@ -97,5 +98,21 @@ class PACSCommandsTest {
         spec := PACSCommands.PowerScribeToggleTarget()
         Assert.Equal(AppControl.powerScribeReportingTitle, spec.title)
         Assert.Equal(AppControl.powerScribeExecutable, spec.exe)
+    }
+
+    TestEpicToggleFailsClosedWithoutCapturedIdentity() {
+        originalNotifier := PACSCommands.unavailableNotifier
+        notifications := []
+        PACSCommands.unavailableNotifier := (text, title, options) => notifications.Push({
+            text: text,
+            title: title,
+            options: options
+        })
+        try result := PACSCommands.ToggleEpicWindow()
+        finally PACSCommands.unavailableNotifier := originalNotifier
+
+        Assert.False(result)
+        Assert.Equal(1, notifications.Length)
+        Assert.True(InStr(notifications[1].text, "manually") > 0)
     }
 }

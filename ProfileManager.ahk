@@ -16,8 +16,8 @@ class ProfileManager {
     static profiles := Map()
     static currentProfile := ""
     static defaultProfile := ""
-    static configPath := A_ScriptDir "\config.ini"
-    static profilesPath := A_ScriptDir "\profiles"
+    static configPath := AppStorage.DataRoot() "\config.ini"
+    static profilesPath := AppStorage.DataRoot() "\profiles"
     static loadErrors := []
     static saveSequence := 0
     static profileRevisions := Map()

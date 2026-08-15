@@ -36,6 +36,12 @@ class NativePACSMonitorDriver {
 }
 
 class PACSMonitor {
+    ; Only these leading modality tokens may enter a desktop notification. Parsing
+    ; arbitrary uppercase row text risks treating a patient-name column as the study.
+    static studyModalityPattern := "\b(?:CTA|MRA|MRI|PET|CT|MR|XR|US|NM|DX|MG|FL)\b"
+    ; No stable live Explorer Portal refresh AutomationId has been captured yet.
+    ; Keep the click path closed instead of accepting any label containing "refresh".
+    static approvedRefreshAutomationIds := []
     ; Accessions already alerted on, held as a set. This was an Array scanned
     ; linearly on every accession of every row, over a list that only ever grows.
     ; Measured, 400 lookups (10 refresh passes over 40 rows): 0 ms at 50 known,
@@ -50,10 +56,12 @@ class PACSMonitor {
     static testLastNewStudies := []   ; Captured new studies in test mode
 
     static driver := NativePACSMonitorDriver()
+    static automationAcquire := (*) => {status: "acquired", busyCommand: ""}
+    static automationRelease := (*) => 0
 
     ; The list has no recorded stable semantic identity, so its exact positional
-    ; path is retained behind same-window/type validation. Refresh controls do have
-    ; semantic labels and are required to be unique instead of using a path fallback.
+    ; path is retained behind same-window/type validation. Refresh controls require
+    ; a live-approved exact AutomationId and uniqueness; none is approved by default.
     static studyListPath := "Y/YYY/YqYYYVRxrTR"
 
     ; Refresh failures used to be swallowed entirely: the portal kept being scraped,
@@ -169,8 +177,8 @@ class PACSMonitor {
 
     /**
      * A positional path is only a locator hint, never proof of target identity.
-     * Require a refresh-labelled, actionable button in the same process before a
-     * caller is allowed to click it.
+     * Require an exact approved AutomationId and an actionable same-window button
+     * before a caller is allowed to click it.
      */
     static IsExpectedRefreshButton(root, candidate) {
         try return this.InspectRefreshButton(root, candidate)
@@ -190,8 +198,15 @@ class PACSMonitor {
         if (candidate.Type != UIA.Type.Button)
             return false
 
-        label := candidate.Name " " candidate.AutomationId
-        if !InStr(StrLower(label), "refresh")
+        automationId := candidate.AutomationId
+        approved := false
+        for expectedId in this.approvedRefreshAutomationIds {
+            if (automationId == expectedId) {
+                approved := true
+                break
+            }
+        }
+        if !approved
             return false
         return candidate.IsInvokePatternAvailable
             || candidate.IsLegacyIAccessiblePatternAvailable
@@ -305,7 +320,7 @@ class PACSMonitor {
         if (this.consecutiveRefreshFailures >= this.refreshFailureThreshold && !this.refreshFailureNotified) {
             this.refreshFailureNotified := true
             this.Notify(
-                "The refresh button could not be found in Explorer Portal. New study alerts still work, but the list is not being refreshed.",
+                "Explorer Portal could not be refreshed safely. Monitoring may be stale; refresh and check the worklist manually until this warning clears.",
                 "PACS auto-refresh is not working",
                 "Icon!"
             )
@@ -350,6 +365,12 @@ class PACSMonitor {
             this.testRefreshCalls++
             return this.ProcessRows(this.testStudyRows, true)
         }
+
+        lease := this.automationAcquire.Call("PACS worklist refresh")
+        if (!IsObject(lease)
+            || !HasProp(lease, "status")
+            || lease.status != "acquired")
+            return false
 
         try {
             ; Resolve one exact portal session once. Every later root/action/read is
@@ -417,7 +438,7 @@ class PACSMonitor {
 
         } catch as err {
             this.RecordScanFailure(err)
-        }
+        } finally this.automationRelease.Call()
     }
 
     static HasAccession(accession) {
@@ -436,17 +457,21 @@ class PACSMonitor {
             rowText := row.Name
             ; Find any accession numbers
             accessions := []
+            firstAccessionPosition := 0
             pos := 1
             while (pos := RegExMatch(rowText, "(?<!\d)\d{8}(?!\d)", &accMatch, pos)) {
+                if !firstAccessionPosition
+                    firstAccessionPosition := pos
                 accessions.Push(accMatch[0])
                 pos += StrLen(accMatch[0])
             }
 
-            ; Start at a complete 2+-letter modality token. Without the word
-            ; boundary, the engine could start on the second character of MRI/CTA
-            ; and label alerts as "RI ..." or "TA ...".
-            if RegExMatch(rowText, "\b[A-Z]{2,}\s[A-Z\s]+?(?=\s+\d|$)", &studyMatch) {
-                studyType := Trim(studyMatch[0])
+            ; A flattened row gives no accession-column identity. Multiple numeric
+            ; tokens are ambiguous, and compact calendar dates are never accessions.
+            if (accessions.Length = 1 && !this.LooksLikeCompactDate(accessions[1])) {
+                studyType := this.ExtractStudyType(rowText, firstAccessionPosition)
+                if (studyType = "")
+                    continue
 
                 for acc in accessions {
                     ; Deduplicate within this pass without mutating durable scan state.
@@ -465,34 +490,77 @@ class PACSMonitor {
         }
 
         ; Alert if new studies found
+        delivered := false
         if newStudies.Length > 0 {
             if (isTest || this.testMode) {
                 this.testLastNewStudies := newStudies
+                delivered := true
             } else {
-                this.AlertNewCases(newStudies)
+                delivered := this.AlertNewCases(newStudies)
             }
         }
 
         ; Commit only after the complete traversal and alert path succeed. Retrying a
         ; failed pass may duplicate a notification; committing early can lose it
         ; forever, which is the unsafe direction for a clinical worklist alert.
-        for accession, _ in pendingAccessions
-            this.MarkAccessionSeen(accession)
+        if delivered {
+            for accession, _ in pendingAccessions
+                this.MarkAccessionSeen(accession)
+        }
 
         return newStudies
+    }
+
+    static ExtractStudyType(rowText, firstAccessionPosition) {
+        if (firstAccessionPosition <= 1)
+            return ""
+        prefix := SubStr(rowText, 1, firstAccessionPosition - 1)
+        matches := []
+        pos := 1
+        while (pos := RegExMatch(prefix, this.studyModalityPattern, &modality, pos)) {
+            matches.Push({position: pos, value: modality[0]})
+            pos += StrLen(modality[0])
+        }
+        ; More than one modality-shaped token means the flattened multi-column row
+        ; cannot be attributed safely. Missing an alert is preferable to disclosing
+        ; a patient-name prefix or announcing the wrong study.
+        if matches.Length != 1
+            return ""
+
+        ; The flattened row provides no verified column boundary after the modality.
+        ; Notify only the approved token; later uppercase words may be patient PHI.
+        return matches[1].value
+    }
+
+    static LooksLikeCompactDate(value) {
+        if !RegExMatch(value, "^(19|20)\d{6}$")
+            return false
+        year := Integer(SubStr(value, 1, 4))
+        month := Integer(SubStr(value, 5, 2))
+        day := Integer(SubStr(value, 7, 2))
+        if (month < 1 || month > 12 || day < 1)
+            return false
+        days := [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        if (month = 2 && (Mod(year, 400) = 0 || (Mod(year, 4) = 0 && Mod(year, 100) != 0)))
+            days[2] := 29
+        return day <= days[month]
     }
 
     static AlertNewCases(newStudies) {
         if (this.testMode) {
             this.testLastNewStudies := newStudies
-            return
+            return true
         }
-        if Settings.Get("AudioAlertNewCase") {
+        audioEnabled := Settings.Get("AudioAlertNewCase")
+        notificationEnabled := Settings.Get("MessageBoxNewCase")
+        if (!audioEnabled && !notificationEnabled)
+            return false
+        if audioEnabled {
             Settings.PlayAlertSound(Settings.Get("AlertSound"))
         }
 
         deliveryFailed := false
-        if Settings.Get("MessageBoxNewCase") {
+        if notificationEnabled {
             ; Create a TrayTip for each new study
             for study in newStudies {
                 if !this.Notify(study.studyType, "New Study Available", "Iconi")
@@ -516,5 +584,6 @@ class PACSMonitor {
         ; permanently treating an unseen clinical alert as consumed.
         if deliveryFailed
             throw Error("One or more new-study notifications could not be delivered")
+        return true
     }
 }

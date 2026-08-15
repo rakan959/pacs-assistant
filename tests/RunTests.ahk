@@ -1,6 +1,7 @@
 #Requires AutoHotkey v2.0
 #Include TestRunner.ahk
 #Include TestRunnerTest.ahk
+#Include AppStorageTest.ahk
 #Include UpdateCheckerTest.ahk
 #Include SettingsTest.ahk
 #Include PACSMonitorTest.ahk
@@ -14,6 +15,7 @@
 #Include UIAValueTest.ahk
 
 TestRunner.AddTest(TestRunnerTest)
+TestRunner.AddTest(AppStorageTest)
 TestRunner.AddTest(UpdateCheckerTest)
 TestRunner.AddTest(SettingsTest)
 TestRunner.AddTest(PACSMonitorTest)

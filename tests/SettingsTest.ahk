@@ -6,6 +6,8 @@ class SettingsTest {
     static Tests := [
         "TestDefaultSettingsLoaded",
         "TestSetAndGetValues",
+        "TestMutationGuardRejectsSettingsWrite",
+        "TestDialogGuardRejectsSettingsWindowBeforeCreation",
         "TestMalformedPersistedSettingsUseDefaults",
         "TestExcessivePersistedRefreshIntervalUsesDefault",
         "TestSavingRejectsExcessiveRefreshInterval",
@@ -14,21 +16,30 @@ class SettingsTest {
         "TestLegacySoundNamesMigrate",
         "TestFindSoundIndexFallback",
         "TestFailedBatchPreservesOriginalFile",
+        "TestConcurrentSettingsWriteCannotBeLostByBatchReplace",
         "TestBatchPreservesUnmanagedSettings",
         "TestSavingSettingsNotifiesListeners",
         "TestStaleSettingsDialogCannotOverwriteNewerSave",
+        "TestSettingsDialogCannotOverwriteAWriteDuringValidation",
         "TestSavingSettingsReportsListenerFailures",
         "TestChangeListenersAllRun",
-        "TestChangeListenerFailureDoesNotBlockLaterListeners"
+        "TestChangeListenerFailureDoesNotBlockLaterListeners",
+        "TestSettingsLayoutFitsScaled768p"
     ]
 
     Setup() {
         this.originalFile := Settings.settingsFile
         this.originalListeners := Settings.changeListeners
         this.originalRevision := Settings.revision
+        this.originalMutationGuard := Settings.mutationGuard
+        this.originalDialogGuard := Settings.dialogGuard
+        this.originalWriteTransactionActive := Settings.writeTransactionActive
         this.tempFile := A_Temp "\settings_test_" A_TickCount ".ini"
         Settings.settingsFile := this.tempFile
         Settings.changeListeners := []
+        Settings.mutationGuard := (*) => true
+        Settings.dialogGuard := (*) => true
+        Settings.writeTransactionActive := false
         Settings.SaveAllSettings()
     }
     
@@ -63,6 +74,22 @@ class SettingsTest {
         
         Settings.Set("AlertSound", "Asterisk")
         Assert.Equal("Asterisk", Settings.Get("AlertSound"))
+    }
+
+    TestMutationGuardRejectsSettingsWrite() {
+        Settings.mutationGuard := (*) => false
+
+        Assert.Throws(
+            (*) => Settings.Set("AutoUpdate", false),
+            "Settings cannot be changed"
+        )
+        Assert.True(Settings.Get("AutoUpdate"))
+    }
+
+    TestDialogGuardRejectsSettingsWindowBeforeCreation() {
+        Settings.dialogGuard := (*) => false
+
+        Assert.False(Settings.ShowDialog())
     }
 
     TestMalformedPersistedSettingsUseDefaults() {
@@ -164,6 +191,23 @@ class SettingsTest {
         Assert.Equal(60, Settings.Get("RefreshInterval"))
     }
 
+    TestConcurrentSettingsWriteCannotBeLostByBatchReplace() {
+        originalRevision := Settings.revision
+
+        Assert.Throws(
+            (*) => Settings.SaveValues(
+                Map("AutoUpdate", false),
+                ReentrantSettingsReplace
+            ),
+            "Another settings write is already in progress"
+        )
+
+        Assert.True(Settings.Get("AutoUpdate"))
+        Assert.Equal("", Settings.Get("SkippedUpdateVersion"))
+        Assert.Equal(originalRevision, Settings.revision)
+        Assert.False(Settings.writeTransactionActive)
+    }
+
     TestBatchPreservesUnmanagedSettings() {
         Settings.Set("SkippedUpdateVersion", "v9.9.9")
         IniWrite("keep me", Settings.settingsFile, "Extension", "UnknownKey")
@@ -211,6 +255,22 @@ class SettingsTest {
         Assert.False(Settings.Get("AutoUpdate"))
         Assert.Equal(45, Settings.Get("RefreshInterval"))
         Assert.True(staleDialog.destroyed)
+    }
+
+    TestSettingsDialogCannotOverwriteAWriteDuringValidation() {
+        controls := this.SettingsControls(true, 90)
+        controls.micName := ReentrantSettingsValueControl(
+            "PowerMic",
+            (*) => Settings.Set("SkippedUpdateVersion", "v9.9.9")
+        )
+        dialog := FakeSettingsDialog()
+
+        result := Settings.SaveSettings(controls, dialog)
+
+        Assert.False(result)
+        Assert.True(dialog.destroyed)
+        Assert.Equal("v9.9.9", Settings.Get("SkippedUpdateVersion"))
+        Assert.Equal(60, Settings.Get("RefreshInterval"))
     }
 
     SettingsControls(autoUpdate, interval) {
@@ -280,12 +340,21 @@ class SettingsTest {
         Assert.Equal(1, errors.Length)
         Assert.True(InStr(errors[1], "listener failed") > 0)
     }
+
+    TestSettingsLayoutFitsScaled768p() {
+        ; Allow 60 physical pixels for title bar/borders at 150% scaling.
+        Assert.True(Settings.dialogLogicalWidth * 1.5 <= 1366)
+        Assert.True(Settings.dialogLogicalHeight * 1.5 + 60 <= 768)
+    }
     
     Teardown() {
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalFile
         Settings.changeListeners := this.originalListeners
         Settings.revision := this.originalRevision
+        Settings.mutationGuard := this.originalMutationGuard
+        Settings.dialogGuard := this.originalDialogGuard
+        Settings.writeTransactionActive := this.originalWriteTransactionActive
     }
 }
 
@@ -297,6 +366,10 @@ FailSettingsReplace(*) {
     throw Error("simulated settings replace failure")
 }
 
+ReentrantSettingsReplace(*) {
+    Settings.Set("SkippedUpdateVersion", "v9.9.9")
+}
+
 class FakeSettingsDialog {
     __New() {
         this.destroyed := false
@@ -305,5 +378,23 @@ class FakeSettingsDialog {
 
     Destroy() {
         this.destroyed := true
+    }
+}
+
+class ReentrantSettingsValueControl {
+    __New(value, callback) {
+        this.storedValue := value
+        this.callback := callback
+        this.triggered := false
+    }
+
+    Value {
+        get {
+            if !this.triggered {
+                this.triggered := true
+                this.callback.Call()
+            }
+            return this.storedValue
+        }
     }
 }

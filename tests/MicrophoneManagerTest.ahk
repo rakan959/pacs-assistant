@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include ../MicrophoneManager.ahk
+#Include ../PACSCommands.ahk
 #Include TestRunner.ahk
 
 class MicrophoneManagerTest {
@@ -21,12 +22,15 @@ class MicrophoneManagerTest {
         "OperationalErrorIsRecorded",
         "PickerReappearanceStartsANewLoginSession",
         "PickerUncertaintyConsumesOneBoundedSessionBudget",
+        "ActiveClinicalLeaseSkipsBackgroundMicrophoneCheck",
         "RecycledWindowHandleWithNewProcessStartsANewLoginSession"
     ]
 
     Setup() {
         this.originalNotifier := MicrophoneManager.notifier
         this.originalSessionDriver := MicrophoneManager.sessionDriver
+        this.originalAutomationAcquire := MicrophoneManager.automationAcquire
+        this.originalAutomationRelease := MicrophoneManager.automationRelease
         this.notifications := []
         MicrophoneManager.notifier := (text, title, options) => this.notifications.Push({
             text: text,
@@ -299,6 +303,33 @@ class MicrophoneManagerTest {
         Assert.Equal(1, this.notifications.Length)
     }
 
+    ActiveClinicalLeaseSkipsBackgroundMicrophoneCheck() {
+        fixture := MicrophoneFixture(["PowerMic III"])
+        originalClinicalActive := PACSCommands.clinicalCommandActive
+        originalClinicalName := PACSCommands.activeClinicalCommand
+        MicrophoneManager.sessionDriver := fixture.driver
+        MicrophoneManager.automationAcquire := ObjBindMethod(
+            PACSCommands,
+            "AcquireClinicalAutomation"
+        )
+        MicrophoneManager.automationRelease := ObjBindMethod(
+            PACSCommands,
+            "ReleaseClinicalAutomation"
+        )
+
+        try {
+            PACSCommands.clinicalCommandActive := true
+            PACSCommands.activeClinicalCommand := "Sign Report"
+            result := MicrophoneManager.CheckForLogin()
+        } finally {
+            PACSCommands.clinicalCommandActive := originalClinicalActive
+            PACSCommands.activeClinicalCommand := originalClinicalName
+        }
+
+        Assert.False(result)
+        Assert.Equal(0, fixture.driver.captureCalls)
+    }
+
     RecycledWindowHandleWithNewProcessStartsANewLoginSession() {
         MicrophoneManager.attemptedWindow := 100
         MicrophoneManager.attemptedProcessId := 41
@@ -322,6 +353,8 @@ class MicrophoneManagerTest {
     Teardown() {
         MicrophoneManager.notifier := this.originalNotifier
         MicrophoneManager.sessionDriver := this.originalSessionDriver
+        MicrophoneManager.automationAcquire := this.originalAutomationAcquire
+        MicrophoneManager.automationRelease := this.originalAutomationRelease
         MicrophoneManager.attempts := 0
         MicrophoneManager.failureNotified := false
         MicrophoneManager.lastError := ""
@@ -369,9 +402,11 @@ class FakeMicrophoneSessionDriver {
         this.session := session
         this._root := root
         this.rootError := ""
+        this.captureCalls := 0
     }
 
     CaptureResult() {
+        this.captureCalls++
         return {status: "unique", session: this.session}
     }
 

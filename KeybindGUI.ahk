@@ -15,6 +15,11 @@ class KeybindGUI {
     static captureTransactionActive := false
     static captureOwnerGui := 0
     static profileMutationRevisions := Map()
+    static profileMutationTransactionActive := false
+    static profileMutationTransactionAction := ""
+    static shutdownTransactionActive := false
+    static shutdownAuthorized := false
+    static shutdownAction := ""
     ; The V option would pass the selected key through to the foreground application.
     ; Capture is intentionally suppressing: the key is configuration data only.
     static inputHookOptions := ""
@@ -98,26 +103,89 @@ class KeybindGUI {
             return false
         if !this.ResolveDirtyProfileBeforeLeaving()
             return false
-        ; A selector has no active profile. Suspend the old profile before exposing any
-        ; operation which can rename or delete it.
-        this.PrepareForProfileSwitch()
-        if this.HasMainWindow()
-            this.gui.Destroy()
-        this.gui := ""
-        return this.ShowProfileSelector()
+        if !this.BeginProfileMutationTransaction("switch profiles")
+            return false
+        try {
+            ; A selector has no active profile. Suspend the old profile before exposing
+            ; any operation which can rename or delete it.
+            this.PrepareForProfileSwitch()
+            if this.HasMainWindow()
+                this.gui.Destroy()
+            this.gui := ""
+            return this.ShowProfileSelector()
+        } finally this.EndProfileMutationTransaction()
     }
 
     CloseMainWindow() {
         if !this.ProfileMutationAllowed("close PACS Assistant")
             return false
-        if !this.ResolveDirtyProfileBeforeLeaving()
+        return this.RequestExit()
+    }
+
+    RequestExit(exitCode := 0) {
+        if !this.BeginShutdown("close PACS Assistant")
             return false
-        this.RequestExit()
+        return this.CompleteShutdown(exitCode)
+    }
+
+    BeginShutdown(action) {
+        if !this.ProfileMutationAllowed(action)
+            return false
+
+        acquired := false
+        Critical("On")
+        try {
+            if (!PACSCommands.clinicalCommandActive
+                && !KeybindGUI.captureTransactionActive
+                && !KeybindGUI.profileMutationTransactionActive
+                && !Settings.writeTransactionActive
+                && !KeybindGUI.shutdownTransactionActive) {
+                KeybindGUI.shutdownTransactionActive := true
+                KeybindGUI.shutdownAction := action
+                acquired := true
+            }
+        } finally Critical("Off")
+        if !acquired {
+            this.ProfileMutationAllowed(action)
+            return false
+        }
+
+        try {
+            if !this.ResolveDirtyProfileBeforeLeaving(false, true) {
+                this.CancelShutdown()
+                return false
+            }
+        } catch {
+            this.CancelShutdown()
+            throw
+        }
         return true
     }
 
-    RequestExit() {
-        ExitApp()
+    CancelShutdown() {
+        Critical("On")
+        try {
+            KeybindGUI.shutdownAuthorized := false
+            KeybindGUI.shutdownAction := ""
+            KeybindGUI.shutdownTransactionActive := false
+        } finally Critical("Off")
+    }
+
+    CompleteShutdown(exitCode := 0) {
+        if !KeybindGUI.shutdownTransactionActive
+            return false
+        KeybindGUI.shutdownAuthorized := true
+        ExitApp(exitCode)
+        return true
+    }
+
+    HandleProcessExit(exitReason, exitCode) {
+        if KeybindGUI.shutdownAuthorized
+            return 0
+        if !this.BeginShutdown("exit PACS Assistant")
+            return 1
+        KeybindGUI.shutdownAuthorized := true
+        return 0
     }
 
     PrepareForProfileSwitch() {
@@ -332,7 +400,7 @@ class KeybindGUI {
             this.CreateMainGUI()
             return
         }
-        ExitApp()
+        this.RequestExit()
     }
 
     OpenNewProfilePrompt(selectorGui) {
@@ -356,19 +424,20 @@ class KeybindGUI {
             this.ShowProfileSelector()
             return
         }
-        ExitApp()
+        this.RequestExit()
     }
 
     CreateProfile(name, inputGui) {
-        if !this.ProfileMutationAllowed("create a profile")
-            return false
         name := Trim(name)
-        if ProfileManager.CreateProfile(name) {
-            ProfileManager.currentProfile := name
-            inputGui.Destroy()
-            this.CreateMainGUI()
-            return true
-        } else {
+        if !this.BeginProfileMutationTransaction("create a profile")
+            return false
+        try {
+            if ProfileManager.CreateProfile(name) {
+                ProfileManager.currentProfile := name
+                inputGui.Destroy()
+                this.CreateMainGUI()
+                return true
+            }
             this.NotifyUser(
                 this.ProfileStorageFailureText(
                     "Enter a unique profile name without file-system characters or reserved Windows device names."
@@ -377,37 +446,43 @@ class KeybindGUI {
                 "Icon!"
             )
             return false
-        }
+        } finally this.EndProfileMutationTransaction()
     }
 
     SelectProfile(name, selectorGui) {
-        if !this.ProfileMutationAllowed("select a profile")
+        if (name = "" || !ProfileManager.profiles.Has(name))
             return false
-        if name != "" {
+        if !this.BeginProfileMutationTransaction("select a profile")
+            return false
+        try {
             ProfileManager.currentProfile := name
             selectorGui.Destroy()
             this.CreateMainGUI()
-        }
+            return true
+        } finally this.EndProfileMutationTransaction()
     }
 
     SetDefaultProfile(name, selectorGui) {
-        if !this.ProfileMutationAllowed("change the default profile")
-            return false
         if (name = "") {
             MsgBox("Please select a profile first.", "Error", "Icon!")
             return
         }
 
-        if (ProfileManager.SetDefaultProfile(name)) {
-            selectorGui.Destroy()
-            this.ShowProfileSelector()  ; Refresh the selector to show updated default
-        } else {
+        if !this.BeginProfileMutationTransaction("change the default profile")
+            return false
+        try {
+            if (ProfileManager.SetDefaultProfile(name)) {
+                selectorGui.Destroy()
+                this.ShowProfileSelector()  ; Refresh the selector to show updated default
+                return true
+            }
             MsgBox(
                 this.ProfileStorageFailureText("Failed to set default profile."),
                 "Profile Update Failed",
                 "Icon!"
             )
-        }
+            return false
+        } finally this.EndProfileMutationTransaction()
     }
 
     DeleteProfile(name, selectorGui) {
@@ -428,34 +503,37 @@ class KeybindGUI {
             "Are you sure you want to delete profile '" name "'?",
             "Confirm Delete"
         ) {
-            if !this.ProfileDeletionStateIsCurrent(deletionState) {
-                this.NotifyUser(
-                    "The selected profile changed while confirmation was open. Reopen the profile selector before deleting it.",
-                    "Profile Changed",
-                    "Icon!"
-                )
+            if !this.BeginProfileMutationTransaction("delete a profile")
                 return false
-            }
-            if (ProfileManager.DeleteProfile(name)) {
-                if (name = ProfileManager.currentProfile) {
-                    ; If we deleted the current profile, switch to another one
-                    for newName, _ in ProfileManager.profiles {
-                        if (newName != name) {
-                            ProfileManager.currentProfile := newName
-                            break
+            try {
+                if !this.ProfileDeletionStateIsCurrent(deletionState) {
+                    this.NotifyUser(
+                        "The selected profile changed while confirmation was open. Reopen the profile selector before deleting it.",
+                        "Profile Changed",
+                        "Icon!"
+                    )
+                    return false
+                }
+                if (ProfileManager.DeleteProfile(name)) {
+                    if (name = ProfileManager.currentProfile) {
+                        ; If we deleted the current profile, switch to another one
+                        for newName, _ in ProfileManager.profiles {
+                            if (newName != name) {
+                                ProfileManager.currentProfile := newName
+                                break
+                            }
                         }
                     }
+                    selectorGui.Destroy()
+                    this.ShowProfileSelector()  ; Refresh the selector
+                    return true
                 }
-                selectorGui.Destroy()
-                this.ShowProfileSelector()  ; Refresh the selector
-                return true
-            } else {
-                MsgBox(
+                this.NotifyUser(
                     this.ProfileStorageFailureText("Cannot delete the last remaining profile."),
                     "Profile Delete Failed",
                     "Icon!"
                 )
-            }
+            } finally this.EndProfileMutationTransaction()
         }
         return false
     }
@@ -491,16 +569,24 @@ class KeybindGUI {
      * @returns true if capture started
      */
     BeginListening(funcName, control, promptGui) {
-        if (KeybindGUI.isListening || KeybindGUI.captureTransactionActive)
+        if !this.BeginCaptureTransaction("start key capture")
+            return false
+
+        ; The dialog snapshot was captured before acquisition. Revalidate it while the
+        ; capture lease excludes every profile mutation and clinical callback.
+        if !this.FunctionDialogIsCurrent(promptGui, funcName, control)
             return false
 
         ; Capture the runtime contract before disabling anything. A failed hook start
         ; must either restore this exact set or visibly require an application restart.
-        originalProfile := ProfileManager.CloneProfile(
-            ProfileManager.profiles[ProfileManager.currentProfile]
-        )
+        try originalProfile := ProfileManager.CloneProfile(
+                ProfileManager.profiles[ProfileManager.currentProfile]
+            )
+        catch as err {
+            this.ReleaseCaptureTransaction()
+            throw err
+        }
         KeybindGUI.captureRuntimeProfile := originalProfile
-        this.BeginCaptureTransaction()
 
         KeybindGUI.isListening := true
         KeybindGUI.listeningControl := control
@@ -664,7 +750,19 @@ class KeybindGUI {
             }
             if modifiedRow
                 try control.Modify(modifiedRow,, funcName, this.PrettifyHotkey(oldBind))
-            this.StopListening()
+            try this.StopListening()
+            catch as stopError {
+                ; The hook may still be live. Do not restore, destroy, or release the
+                ; capture boundary: any of those would publish an unprovable state.
+                this.NotifyUser(
+                    "The keybind change failed, and input capture could not be stopped. Keep this dialog open and restart PACS Assistant before relying on its shortcuts."
+                        . "`n`nOriginal error: " err.Message
+                        . "`n`nCapture stop error: " stopError.Message,
+                    "Capture Recovery Failed - Restart Required",
+                    "Icon!"
+                )
+                throw err
+            }
             try promptGui.Destroy()
             ; Preserve the original control/apply exception, but never hide an
             ; uncertain live shortcut state behind the restored profile value.
@@ -716,7 +814,18 @@ class KeybindGUI {
     }
 
     CancelKeybindPrompt(promptGui) {
-        this.StopListening()
+        try this.StopListening()
+        catch as err {
+            ; The hook may still be live. Retain the capture snapshot, disabled owner,
+            ; dialog, and listening state; restoring/publishing anything would let an
+            ; untracked callback cross the profile boundary.
+            this.NotifyUser(
+                "Key capture could not be stopped and may still be active. Keep this dialog open and restart PACS Assistant before relying on its shortcuts.`n`n" err.Message,
+                "Capture Stop Failed - Restart Required",
+                "Icon!"
+            )
+            return false
+        }
         fallbackProfile := ProfileManager.CloneProfile(
             ProfileManager.profiles[ProfileManager.currentProfile]
         )
@@ -732,45 +841,105 @@ class KeybindGUI {
         return restored
     }
 
-    SaveCurrentProfile() {
-        if !this.ProfileMutationAllowed("save the profile")
+    SaveCurrentProfile(allowDuringShutdown := false) {
+        if !this.BeginProfileMutationTransaction("save the profile", allowDuringShutdown)
             return false
-        profileName := ProfileManager.currentProfile
         try {
-            ; One immutable snapshot is both the persisted value and the runtime
-            ; contract. Success is not published until that same snapshot is live.
-            savedProfile := ProfileManager.CloneProfile(
-                ProfileManager.profiles[profileName]
-            )
-            ProfileManager.SaveProfile(profileName, savedProfile)
-        } catch as err {
-            MsgBox("The profile could not be saved. The previous file was left unchanged.`n`n" err.Message, "Save Failed", "Icon!")
-            return false
-        }
-
-        applyError := ""
-        runtimeApplied := false
-        try runtimeApplied := this.ApplyProfileBinds(savedProfile, false)
-        catch as err
-            applyError := err.Message
-
-        if !runtimeApplied {
-            if (applyError = "")
-                applyError := "one or more saved keybinds could not be registered"
-            restoreError := ""
-            if !this.RestoreRuntimeProfile(savedProfile, &restoreError) {
-                message := "The profile was saved, but its runtime shortcuts could not be verified."
-                    . "`n`n" applyError
-                    . "`n`nThe saved runtime bindings also could not be fully restored: " restoreError
-                    . ". Restart PACS Assistant before relying on its shortcuts."
-                this.NotifyUser(message, "Profile Saved - Restart Required", "Icon!")
+            profileName := ProfileManager.currentProfile
+            mutationState := this.CaptureProfileMutationState(profileName)
+            try {
+                ; One immutable snapshot is both the persisted value and the runtime
+                ; contract. Success is not published until that same snapshot is live.
+                savedProfile := ProfileManager.CloneProfile(
+                    ProfileManager.profiles[profileName]
+                )
+                ProfileManager.SaveProfile(profileName, savedProfile)
+            } catch as err {
+                MsgBox("The profile could not be saved. The previous file was left unchanged.`n`n" err.Message, "Save Failed", "Icon!")
                 return false
             }
-        }
 
-        MsgBox("Profile saved successfully!", "Success")
-        this.ClearProfileDirty(profileName)
-        return true
+            if !this.ProfileMutationStateIsCurrent(mutationState) {
+                return this.RecoverConcurrentProfileSave(
+                    profileName,
+                    "The profile changed while it was being saved. The saved snapshot is intact, but the newer edits remain unsaved."
+                )
+            }
+
+            applyError := ""
+            runtimeApplied := false
+            try runtimeApplied := this.ApplyProfileBinds(savedProfile, false)
+            catch as err
+                applyError := err.Message
+
+            if !runtimeApplied {
+                if (applyError = "")
+                    applyError := "one or more saved keybinds could not be registered"
+                restoreError := ""
+                if !this.RestoreRuntimeProfile(savedProfile, &restoreError) {
+                    message := "The profile was saved, but its runtime shortcuts could not be verified."
+                        . "`n`n" applyError
+                        . "`n`nThe saved runtime bindings also could not be fully restored: " restoreError
+                        . ". Restart PACS Assistant before relying on its shortcuts."
+                    this.NotifyUser(message, "Profile Saved - Restart Required", "Icon!")
+                    return false
+                }
+            }
+
+            if !this.ProfileMutationStateIsCurrent(mutationState) {
+                return this.RecoverConcurrentProfileSave(
+                    profileName,
+                    "The profile changed while its saved shortcuts were being applied. The newer edits remain unsaved."
+                )
+            }
+
+            MsgBox("Profile saved successfully!", "Success")
+            this.ClearProfileDirty(profileName)
+            return true
+        } finally this.EndProfileMutationTransaction()
+    }
+
+    CaptureProfileMutationState(profileName) {
+        if (profileName = "" || !ProfileManager.profiles.Has(profileName))
+            return 0
+        profile := ProfileManager.profiles[profileName]
+        return {
+            profileName: profileName,
+            profilePtr: ObjPtr(profile),
+            mutationRevision: KeybindGUI.GetProfileMutationRevision(profileName)
+        }
+    }
+
+    ProfileMutationStateIsCurrent(state) {
+        return IsObject(state)
+            && ProfileManager.currentProfile == state.profileName
+            && ProfileManager.profiles.Has(state.profileName)
+            && ObjPtr(ProfileManager.profiles[state.profileName]) = state.profilePtr
+            && KeybindGUI.GetProfileMutationRevision(state.profileName) = state.mutationRevision
+    }
+
+    RecoverConcurrentProfileSave(profileName, message) {
+        restoreError := ""
+        currentProfile := ProfileManager.profiles.Has(profileName)
+            ? ProfileManager.CloneProfile(ProfileManager.profiles[profileName])
+            : 0
+        if !IsObject(currentProfile) || !this.RestoreRuntimeProfile(currentProfile, &restoreError) {
+            if (restoreError = "")
+                restoreError := "the current profile is no longer available"
+            this.NotifyUser(
+                message "`n`nThe newer runtime shortcuts could not be verified: " restoreError
+                    . ". Restart PACS Assistant before relying on its shortcuts.",
+                "Profile Changed - Restart Required",
+                "Icon!"
+            )
+            return false
+        }
+        this.NotifyUser(
+            message " Save again after reviewing them.",
+            "Profile Changed During Save",
+            "Icon!"
+        )
+        return false
     }
 
     EnsureDirtyProfiles() {
@@ -823,67 +992,94 @@ class KeybindGUI {
         )
     }
 
-    ResolveDirtyProfileBeforeLeaving(refreshMainWindow := false) {
+    ResolveDirtyProfileBeforeLeaving(refreshMainWindow := false, allowDuringShutdown := false) {
         profileName := ProfileManager.currentProfile
         if !this.IsProfileDirty(profileName)
             return true
+        mutationState := this.CaptureProfileMutationState(profileName)
 
         choice := this.ChooseUnsavedProfileAction(profileName)
         if (choice == "Cancel")
             return false
         if (choice == "Yes")
-            return this.SaveCurrentProfile()
+            return this.SaveCurrentProfile(allowDuringShutdown)
         if !(choice == "No")
             return false
 
-        originalProfile := ProfileManager.profiles[profileName]
+        if !this.BeginProfileMutationTransaction("discard unsaved profile changes", allowDuringShutdown)
+            return false
         try {
-            stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath(profileName))
-        } catch as err {
-            this.NotifyUser(
-                "The saved profile could not be reloaded, so the unsaved changes were retained.`n`n" err.Message,
-                "Discard Failed",
-                "Icon!"
-            )
-            return false
-        }
-
-        restoreError := ""
-        if !this.RestoreRuntimeProfile(stored, &restoreError) {
-            this.RestoreRuntimeAndNotify(
-                originalProfile,
-                "The unsaved changes were retained because the saved runtime bindings could not be restored.`n`n" restoreError,
-                "Discard Failed"
-            )
-            return false
-        }
-
-        ProfileManager.profiles[profileName] := stored
-        ProfileManager.profileRevisions[profileName] :=
-            ProfileManager.GetProfileRevision(profileName) + 1
-        this.ClearProfileDirty(profileName)
-
-        if (refreshMainWindow && this.HasMainWindow()) {
-            try {
-                this.gui.Destroy()
-                ; The stored profile is already the verified live runtime contract.
-                ; Rebuild only the view; re-registering would add another failure edge.
-                this.CreateMainGUI(false)
-            } catch as err {
+            if (!this.IsProfileDirty(profileName)
+                || !this.ProfileMutationStateIsCurrent(mutationState)) {
                 this.NotifyUser(
-                    "The saved profile was restored, but the main window could not be refreshed.`n`n" err.Message,
-                    "Profile View Refresh Failed",
+                    "The profile changed while the discard prompt was open. Review the current changes and try again.",
+                    "Profile Changed",
                     "Icon!"
                 )
                 return false
             }
-        }
-        return true
+
+            originalProfile := ProfileManager.profiles[profileName]
+            try {
+                stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath(profileName))
+            } catch as err {
+                this.NotifyUser(
+                    "The saved profile could not be reloaded, so the unsaved changes were retained.`n`n" err.Message,
+                    "Discard Failed",
+                    "Icon!"
+                )
+                return false
+            }
+
+            restoreError := ""
+            if !this.RestoreRuntimeProfile(stored, &restoreError) {
+                this.RestoreRuntimeAndNotify(
+                    originalProfile,
+                    "The unsaved changes were retained because the saved runtime bindings could not be restored.`n`n" restoreError,
+                    "Discard Failed"
+                )
+                return false
+            }
+
+            ProfileManager.profiles[profileName] := stored
+            ProfileManager.profileRevisions[profileName] :=
+                ProfileManager.GetProfileRevision(profileName) + 1
+            this.ClearProfileDirty(profileName)
+
+            if (refreshMainWindow && this.HasMainWindow()) {
+                try {
+                    this.gui.Destroy()
+                    ; The stored profile is already the verified live runtime contract.
+                    ; Rebuild only the view; re-registering would add another failure edge.
+                    this.CreateMainGUI(false)
+                } catch as err {
+                    this.NotifyUser(
+                        "The saved profile was restored, but the main window could not be refreshed.`n`n" err.Message,
+                        "Profile View Refresh Failed",
+                        "Icon!"
+                    )
+                    return false
+                }
+            }
+            return true
+        } finally this.EndProfileMutationTransaction()
     }
 
     ApplyBinds(showErrors := true) {
-        currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
-        return this.ApplyProfileBinds(currentProfile, showErrors)
+        ownsTransaction := false
+        if (!KeybindGUI.captureTransactionActive
+            && !KeybindGUI.profileMutationTransactionActive) {
+            if !this.BeginProfileMutationTransaction("apply profile keybinds")
+                return false
+            ownsTransaction := true
+        }
+        try {
+            currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
+            return this.ApplyProfileBinds(currentProfile, showErrors)
+        } finally {
+            if ownsTransaction
+                this.EndProfileMutationTransaction()
+        }
     }
 
     ApplyProfileBinds(currentProfile, showErrors := true) {
@@ -951,19 +1147,101 @@ class KeybindGUI {
         return MsgBox(message, title, options)
     }
 
-    ProfileMutationAllowed(action) {
-        if !KeybindGUI.captureTransactionActive
-            return true
-        this.NotifyUser(
-            "Finish or cancel the active key capture before you " action ".",
-            "Keybind In Progress",
-            "Icon!"
-        )
-        return false
+    ProfileMutationAllowed(action, allowDuringShutdown := false) {
+        if PACSCommands.clinicalCommandActive {
+            this.NotifyUser(
+                "Wait for '" PACSCommands.activeClinicalCommand "' to finish before you " action ".",
+                "Clinical Command In Progress",
+                "Icon!"
+            )
+            return false
+        }
+        if KeybindGUI.captureTransactionActive {
+            this.NotifyUser(
+                "Finish or cancel the active key capture before you " action ".",
+                "Keybind In Progress",
+                "Icon!"
+            )
+            return false
+        }
+        if KeybindGUI.profileMutationTransactionActive {
+            this.NotifyUser(
+                "Wait for the current profile operation ('"
+                    . KeybindGUI.profileMutationTransactionAction
+                    . "') to finish before you " action ".",
+                "Profile Operation In Progress",
+                "Icon!"
+            )
+            return false
+        }
+        if Settings.writeTransactionActive {
+            this.NotifyUser(
+                "Wait for the current settings operation to finish before you " action ".",
+                "Settings Operation In Progress",
+                "Icon!"
+            )
+            return false
+        }
+        if (KeybindGUI.shutdownTransactionActive && !allowDuringShutdown) {
+            this.NotifyUser(
+                "PACS Assistant is preparing to " KeybindGUI.shutdownAction
+                    . ". Wait for that operation to finish before you " action ".",
+                "Shutdown In Progress",
+                "Icon!"
+            )
+            return false
+        }
+        return true
     }
 
-    BeginCaptureTransaction() {
-        KeybindGUI.captureTransactionActive := true
+    BeginProfileMutationTransaction(action, allowDuringShutdown := false) {
+        if !this.ProfileMutationAllowed(action, allowDuringShutdown)
+            return false
+        acquired := false
+        Critical("On")
+        try {
+            if (!PACSCommands.clinicalCommandActive
+                && !KeybindGUI.captureTransactionActive
+                && !Settings.writeTransactionActive
+                && !KeybindGUI.profileMutationTransactionActive
+                && (!KeybindGUI.shutdownTransactionActive || allowDuringShutdown)) {
+                KeybindGUI.profileMutationTransactionActive := true
+                KeybindGUI.profileMutationTransactionAction := action
+                acquired := true
+            }
+        } finally Critical("Off")
+        if !acquired
+            this.ProfileMutationAllowed(action, allowDuringShutdown)
+        return acquired
+    }
+
+    EndProfileMutationTransaction() {
+        Critical("On")
+        try {
+            KeybindGUI.profileMutationTransactionAction := ""
+            KeybindGUI.profileMutationTransactionActive := false
+        } finally Critical("Off")
+    }
+
+    BeginCaptureTransaction(action := "start key capture") {
+        if !this.ProfileMutationAllowed(action)
+            return false
+        acquired := false
+        Critical("On")
+        try {
+            if (!PACSCommands.clinicalCommandActive
+                && !KeybindGUI.captureTransactionActive
+                && !KeybindGUI.profileMutationTransactionActive
+                && !Settings.writeTransactionActive
+                && !KeybindGUI.shutdownTransactionActive) {
+                KeybindGUI.captureTransactionActive := true
+                acquired := true
+            }
+        } finally Critical("Off")
+        if !acquired {
+            this.ProfileMutationAllowed(action)
+            return false
+        }
         KeybindGUI.captureOwnerGui := 0
         hasMainWindow := false
         try hasMainWindow := this.HasMainWindow()
@@ -971,17 +1249,36 @@ class KeybindGUI {
             KeybindGUI.captureOwnerGui := this.gui
             try this.gui.Opt("+Disabled")
         }
+        return true
     }
 
     ReleaseCaptureTransaction() {
-        ownerGui := KeybindGUI.captureOwnerGui
-        KeybindGUI.captureOwnerGui := 0
-        KeybindGUI.captureTransactionActive := false
-        if IsObject(ownerGui)
-            try ownerGui.Opt("-Disabled")
+        Critical("On")
+        try {
+            ownerGui := KeybindGUI.captureOwnerGui
+            if IsObject(ownerGui)
+                try ownerGui.Opt("-Disabled")
+            KeybindGUI.captureOwnerGui := 0
+            ; This is the terminal publication step: callbacks can enter only after
+            ; the owner/UI/runtime/dirty state has already been finalized.
+            KeybindGUI.captureTransactionActive := false
+        } finally Critical("Off")
     }
 
     AbortStaleCapture(dialog, message, title) {
+        ; BeginListening revalidates its dialog after taking the capture lease but
+        ; before suspending hotkeys or starting InputHook. If that snapshot is stale,
+        ; release directly: an Off/On "restore" would introduce a failure boundary
+        ; despite there being no runtime mutation to undo.
+        if (!KeybindGUI.isListening
+            && !IsObject(KeybindGUI.activeInputHook)
+            && !IsObject(KeybindGUI.captureRuntimeProfile)) {
+            try dialog.Destroy()
+            this.NotifyUser(message, title, "Icon!")
+            this.ReleaseCaptureTransaction()
+            return false
+        }
+
         try this.StopListening()
         catch as err {
             this.NotifyUser(
@@ -1255,8 +1552,6 @@ class KeybindGUI {
     }
 
     RenameProfile(oldName, newName, renameGui, parentGui := 0) {
-        if !this.ProfileMutationAllowed("rename a profile")
-            return false
         if !this.RenameDialogIsCurrent(oldName, renameGui, parentGui)
             return false
 
@@ -1266,21 +1561,26 @@ class KeybindGUI {
             return
         }
 
-        if (ProfileManager.RenameProfile(oldName, newName)) {
-            this.ClearProfileDirty(oldName)
-            this.ClearProfileDirty(newName)
-            renameGui.Destroy()
-            if (parentGui) {
-                parentGui.Destroy()
-                this.ShowProfileSelector()  ; Refresh the selector
-            } else {
-                this.gui.Destroy()
-                ; Renaming changes storage/display identity only. Rebuilding the
-                ; window must not tear down and re-register unchanged hotkeys.
-                this.CreateMainGUI(false)
+        if !this.BeginProfileMutationTransaction("rename a profile")
+            return false
+        try {
+            if !this.RenameDialogIsCurrent(oldName, renameGui, parentGui)
+                return false
+            if (ProfileManager.RenameProfile(oldName, newName)) {
+                this.ClearProfileDirty(oldName)
+                this.ClearProfileDirty(newName)
+                renameGui.Destroy()
+                if (parentGui) {
+                    parentGui.Destroy()
+                    this.ShowProfileSelector()  ; Refresh the selector
+                } else {
+                    this.gui.Destroy()
+                    ; Renaming changes storage/display identity only. Rebuilding the
+                    ; window must not tear down and re-register unchanged hotkeys.
+                    this.CreateMainGUI(false)
+                }
+                return true
             }
-            return true
-        } else {
             MsgBox(
                 this.ProfileStorageFailureText(
                     "Failed to rename profile. The name may already be in use."
@@ -1289,7 +1589,7 @@ class KeybindGUI {
                 "Icon!"
             )
             return false
-        }
+        } finally this.EndProfileMutationTransaction()
     }
 
     ProfileStorageFailureText(fallback) {
@@ -1460,52 +1760,64 @@ class KeybindGUI {
                 return false
             }
 
-            profileName := deletionState.profileName
-            originalProfile := ProfileManager.profiles[profileName]
-            candidate := ProfileManager.CloneProfile(originalProfile)
-            
-            ; Remove from a candidate and publish it only after the atomic file save.
-            candidate.customFuncs.Delete(funcName)
-            
-            ; Remove from current profile's bindings if it exists
-            if (candidate.binds.Has(funcName)) {
-                candidate.binds.Delete(funcName)
-            }
-            if (candidate.scopes.Has(funcName)) {
-                candidate.scopes.Delete(funcName)
-            }
-
-            ; Prove that every old native variant can be retired and every remaining
-            ; bind can be registered before changing the file, live profile, or UI.
-            if !this.ApplyProfileCandidate(candidate, originalProfile, "custom-function deletion")
+            if !this.BeginProfileMutationTransaction("delete a custom function")
                 return false
+            try {
+                if !this.CustomDeletionStateIsCurrent(deletionState, selectorGui) {
+                    this.NotifyUser(
+                        "The selected custom function changed before deletion began. Reopen Add Function before deleting it.",
+                        "Function Changed",
+                        "Icon!"
+                    )
+                    return false
+                }
 
-            if !this.CustomDeletionStateIsCurrent(deletionState, selectorGui) {
-                this.RestoreRuntimeAndNotify(
-                    originalProfile,
-                    "The selected custom function changed before deletion completed. The previous profile was retained.",
-                    "Function Changed"
-                )
-                return false
-            }
+                profileName := deletionState.profileName
+                originalProfile := ProfileManager.profiles[profileName]
+                candidate := ProfileManager.CloneProfile(originalProfile)
 
-            try ProfileManager.SaveProfile(profileName, candidate)
-            catch as err {
-                message := "The custom function could not be deleted. The previous profile was left unchanged.`n`n" err.Message
-                this.RestoreRuntimeAndNotify(originalProfile, message, "Delete Failed")
-                return false
-            }
-            ProfileManager.profiles[profileName] := candidate
-            this.ClearProfileDirty(profileName)
+                ; Remove from a candidate and publish it only after the atomic file save.
+                candidate.customFuncs.Delete(funcName)
 
-            ; Just destroy both GUIs and recreate them
-            selectorGui.Destroy()
-            this.gui.Destroy()
+                ; Remove from current profile's bindings if it exists
+                if (candidate.binds.Has(funcName)) {
+                    candidate.binds.Delete(funcName)
+                }
+                if (candidate.scopes.Has(funcName)) {
+                    candidate.scopes.Delete(funcName)
+                }
+
+                ; Prove that every old native variant can be retired and every remaining
+                ; bind can be registered before changing the file, live profile, or UI.
+                if !this.ApplyProfileCandidate(candidate, originalProfile, "custom-function deletion")
+                    return false
+
+                if !this.CustomDeletionStateIsCurrent(deletionState, selectorGui) {
+                    this.RestoreRuntimeAndNotify(
+                        originalProfile,
+                        "The selected custom function changed before deletion completed. The previous profile was retained.",
+                        "Function Changed"
+                    )
+                    return false
+                }
+
+                try ProfileManager.SaveProfile(profileName, candidate)
+                catch as err {
+                    message := "The custom function could not be deleted. The previous profile was left unchanged.`n`n" err.Message
+                    this.RestoreRuntimeAndNotify(originalProfile, message, "Delete Failed")
+                    return false
+                }
+                ProfileManager.profiles[profileName] := candidate
+                this.ClearProfileDirty(profileName)
+            } finally this.EndProfileMutationTransaction()
+
             ; The candidate was already applied transactionally above. Rebuilding the
             ; window must not tear it down and create a second failure boundary.
+            selectorGui.Destroy()
+            this.gui.Destroy()
             this.CreateMainGUI(false)
             
-            ; Show the add function dialog with the main ListView
+            ; Reopen Add Function only after releasing the publication boundary.
             for ctrl in this.gui {
                 if (ctrl.Type = "ListView") {
                     this.ShowAddFunctionDialog(ctrl)
@@ -1539,8 +1851,6 @@ class KeybindGUI {
     }
 
     AddCustomKeybind(name, keys, window, listView, customGui) {
-        if !this.ProfileMutationAllowed("create a custom keybind")
-            return false
         if !this.DialogProfileIsCurrent(customGui)
             return false
         profileName := customGui.profileName
@@ -1568,19 +1878,39 @@ class KeybindGUI {
             MsgBox("A keybind with this name already exists in this profile.", "Error", "Icon!")
             return
         }
-        
-        ; Persist configuration only. ApplyBinds creates the runtime callback at the
-        ; application boundary, keeping profile storage independent of commands.
-        currentProfile.customFuncs[funcName] := {keys: keys, window: window}
 
-        ; Add to profile with empty binding, active in any window until scoped
-        currentProfile.binds[funcName] := ""
-        currentProfile.scopes[funcName] := "Any"
-
-        ; Add to ListView (removed type)
-        listView.Add(, funcName, "Unassigned", this.ScopeLabel(funcName))
-        this.ResizeColumns(listView)
-        this.MarkProfileDirty(profileName)
+        if !this.BeginProfileMutationTransaction("create a custom keybind")
+            return false
+        row := 0
+        try {
+            if (!this.DialogProfileIsCurrent(customGui)
+                || !this.CustomFunctionNameAvailable(
+                    ProfileManager.profiles[profileName],
+                    funcName
+                ))
+                return false
+            currentProfile := ProfileManager.profiles[profileName]
+            try {
+                ; Persist configuration only. ApplyBinds creates the runtime callback
+                ; at the application boundary.
+                currentProfile.customFuncs[funcName] := {keys: keys, window: window}
+                currentProfile.binds[funcName] := ""
+                currentProfile.scopes[funcName] := "Any"
+                row := listView.Add(, funcName, "Unassigned", "Any window")
+                this.ResizeColumns(listView)
+                this.MarkProfileDirty(profileName)
+            } catch {
+                if currentProfile.customFuncs.Has(funcName)
+                    currentProfile.customFuncs.Delete(funcName)
+                if currentProfile.binds.Has(funcName)
+                    currentProfile.binds.Delete(funcName)
+                if currentProfile.scopes.Has(funcName)
+                    currentProfile.scopes.Delete(funcName)
+                if row
+                    try listView.Delete(row)
+                throw
+            }
+        } finally this.EndProfileMutationTransaction()
 
         customGui.Destroy()
         
@@ -1594,8 +1924,6 @@ class KeybindGUI {
     }
 
     AddFunction(funcName, listView, selectorGui) {
-        if !this.ProfileMutationAllowed("add a function")
-            return false
         if !this.DialogProfileIsCurrent(selectorGui)
             return false
 
@@ -1618,14 +1946,33 @@ class KeybindGUI {
             return false
         }
 
-        ; Add to profile with empty binding, active in any window until scoped
-        profile.binds[funcName] := ""
-        profile.scopes[funcName] := "Any"
-
-        ; Add to ListView (removed type)
-        listView.Add(, funcName, "Unassigned", this.ScopeLabel(funcName))
-        this.ResizeColumns(listView)
-        this.MarkProfileDirty(profileName)
+        if !this.BeginProfileMutationTransaction("add a function")
+            return false
+        row := 0
+        try {
+            if !this.DialogProfileIsCurrent(selectorGui)
+                return false
+            profile := ProfileManager.profiles[profileName]
+            stillAvailable := !ProfileManager.HasIniKeyIdentity(profile.binds, funcName)
+                && (PACSCommands.commands.Has(funcName) || profile.customFuncs.Has(funcName))
+            if !stillAvailable
+                return false
+            try {
+                profile.binds[funcName] := ""
+                profile.scopes[funcName] := "Any"
+                row := listView.Add(, funcName, "Unassigned", "Any window")
+                this.ResizeColumns(listView)
+                this.MarkProfileDirty(profileName)
+            } catch {
+                if profile.binds.Has(funcName)
+                    profile.binds.Delete(funcName)
+                if profile.scopes.Has(funcName)
+                    profile.scopes.Delete(funcName)
+                if row
+                    try listView.Delete(row)
+                throw
+            }
+        } finally this.EndProfileMutationTransaction()
 
         selectorGui.Destroy()
         
@@ -1657,39 +2004,45 @@ class KeybindGUI {
                 return false
             }
 
-            profileName := removalState.profileName
-            originalProfile := ProfileManager.profiles[profileName]
-            candidate := ProfileManager.CloneProfile(originalProfile)
-            candidate.binds.Delete(funcName)
-            if candidate.scopes.Has(funcName)
-                candidate.scopes.Delete(funcName)
-
-            if !this.ApplyProfileCandidate(candidate, originalProfile, "function removal")
+            if !this.BeginProfileMutationTransaction("remove a function")
                 return false
+            try {
+                if !this.FunctionRemovalStateIsCurrent(removalState, listView)
+                    return false
+                profileName := removalState.profileName
+                originalProfile := ProfileManager.profiles[profileName]
+                candidate := ProfileManager.CloneProfile(originalProfile)
+                candidate.binds.Delete(funcName)
+                if candidate.scopes.Has(funcName)
+                    candidate.scopes.Delete(funcName)
 
-            if !this.FunctionRemovalStateIsCurrent(removalState, listView) {
-                this.RestoreRuntimeAndNotify(
-                    originalProfile,
-                    "The selected function changed before removal completed. The previous profile was retained.",
-                    "Function Changed"
-                )
-                return false
-            }
+                if !this.ApplyProfileCandidate(candidate, originalProfile, "function removal")
+                    return false
 
-            try listView.Delete(removalState.row)
-            catch as err {
-                this.RestoreRuntimeAndNotify(
-                    originalProfile,
-                    "The function row could not be removed, so the previous profile was retained.`n`n" err.Message,
-                    "Function Removal Failed"
-                )
-                return false
-            }
-            ; No longer delete the custom function itself, only its binding.
-            ProfileManager.profiles[profileName] := candidate
-            this.MarkProfileDirty(profileName)
-            try this.ResizeColumns(listView)
-            return true
+                if !this.FunctionRemovalStateIsCurrent(removalState, listView) {
+                    this.RestoreRuntimeAndNotify(
+                        originalProfile,
+                        "The selected function changed before removal completed. The previous profile was retained.",
+                        "Function Changed"
+                    )
+                    return false
+                }
+
+                try listView.Delete(removalState.row)
+                catch as err {
+                    this.RestoreRuntimeAndNotify(
+                        originalProfile,
+                        "The function row could not be removed, so the previous profile was retained.`n`n" err.Message,
+                        "Function Removal Failed"
+                    )
+                    return false
+                }
+                ; No longer delete the custom function itself, only its binding.
+                ProfileManager.profiles[profileName] := candidate
+                this.MarkProfileDirty(profileName)
+                try this.ResizeColumns(listView)
+                return true
+            } finally this.EndProfileMutationTransaction()
         }
         return false
     }
@@ -1729,7 +2082,11 @@ class KeybindGUI {
             return false
         }
 
-        this.BeginListening(funcName, listView, promptGui)
+        if !this.BeginListening(funcName, listView, promptGui) {
+            if !KeybindGUI.captureTransactionActive
+                try promptGui.Destroy()
+            return false
+        }
 
         promptGui.Show()
         return true
@@ -1748,6 +2105,8 @@ class KeybindGUI {
     }
 
     ShowScopeDialog(listView) {
+        if !this.ProfileMutationAllowed("change a keybind scope")
+            return false
         if (listView.GetNext(0) = 0) {
             MsgBox("Please select a function first.", "Error", "Icon!")
             return
@@ -1787,46 +2146,52 @@ class KeybindGUI {
         if !this.FunctionDialogIsCurrent(scopeGui, funcName, listView)
             return false
 
-        oldScope := ProfileManager.GetScope(funcName)
-        newScope := HotkeyManager.ScopeFromFlags(requirePACS, requirePowerScribe)
-        currentProfile := ProfileManager.profiles[scopeGui.profileName]
-        changed := false
-
+        if !this.BeginProfileMutationTransaction("change a keybind scope")
+            return false
         try {
-            ProfileManager.SetScope(funcName, newScope)
-            changed := true
-            listView.Modify(rowIndex,, funcName, listView.GetText(rowIndex, 2), this.ScopeLabel(funcName))
-            this.ResizeColumns(listView)
+            if !this.FunctionDialogIsCurrent(scopeGui, funcName, listView)
+                return false
+            oldScope := ProfileManager.GetScope(funcName)
+            newScope := HotkeyManager.ScopeFromFlags(requirePACS, requirePowerScribe)
+            currentProfile := ProfileManager.profiles[scopeGui.profileName]
+            changed := false
 
-            if !this.ApplyBinds() {
-                ProfileManager.SetScope(funcName, oldScope)
+            try {
+                ProfileManager.SetScope(funcName, newScope)
+                changed := true
                 listView.Modify(rowIndex,, funcName, listView.GetText(rowIndex, 2), this.ScopeLabel(funcName))
                 this.ResizeColumns(listView)
-                this.RestoreRuntimeAndNotify(
+
+                if !this.ApplyBinds() {
+                    ProfileManager.SetScope(funcName, oldScope)
+                    listView.Modify(rowIndex,, funcName, listView.GetText(rowIndex, 2), this.ScopeLabel(funcName))
+                    this.ResizeColumns(listView)
+                    this.RestoreRuntimeAndNotify(
+                        currentProfile,
+                        "The scope change was rejected and the previous profile value was retained.",
+                        "Scope Recovery Failed",
+                        false
+                    )
+                    return false
+                }
+
+                scopeGui.Destroy()
+                this.MarkProfileDirty(scopeGui.profileName)
+                return true
+            } catch as err {
+                if changed
+                    ProfileManager.SetScope(funcName, oldScope)
+                try listView.Modify(rowIndex,, funcName, listView.GetText(rowIndex, 2), this.ScopeLabel(funcName))
+                try this.ResizeColumns(listView)
+                try this.RestoreRuntimeAndNotify(
                     currentProfile,
-                    "The scope change was rejected and the previous profile value was retained.",
+                    "The scope change failed and the previous profile value was retained.",
                     "Scope Recovery Failed",
                     false
                 )
-                return false
+                throw err
             }
-
-            scopeGui.Destroy()
-            this.MarkProfileDirty(scopeGui.profileName)
-            return true
-        } catch as err {
-            if changed
-                ProfileManager.SetScope(funcName, oldScope)
-            try listView.Modify(rowIndex,, funcName, listView.GetText(rowIndex, 2), this.ScopeLabel(funcName))
-            try this.ResizeColumns(listView)
-            try this.RestoreRuntimeAndNotify(
-                currentProfile,
-                "The scope change failed and the previous profile value was retained.",
-                "Scope Recovery Failed",
-                false
-            )
-            throw err
-        }
+        } finally this.EndProfileMutationTransaction()
     }
 
     ShowModalityAttendingsDialog() {
@@ -1892,14 +2257,23 @@ class KeybindGUI {
             candidate.modalityAttendings[modality] := Trim(edit.Value)
         }
 
+        if !this.BeginProfileMutationTransaction("save attending assignments")
+            return false
         try {
-            ProfileManager.SaveProfile(profileName, candidate)
-        } catch as err {
-            MsgBox("The attending assignments could not be saved. The previous file was left unchanged.`n`n" err.Message, "Save Failed", "Icon!")
-            return
-        }
-        ProfileManager.profiles[profileName] := candidate
-        this.ClearProfileDirty(profileName)
+            ; Revalidate after acquiring the serialization boundary. A callback may
+            ; have run between the dialog checks and the transaction acquisition.
+            if (!this.DialogProfileIsCurrent(modGui)
+                || modGui.profileRevision != ProfileManager.GetProfileRevision(profileName)
+                || modGui.profileMutationRevision != KeybindGUI.GetProfileMutationRevision(profileName))
+                return false
+            try ProfileManager.SaveProfile(profileName, candidate)
+            catch as err {
+                MsgBox("The attending assignments could not be saved. The previous file was left unchanged.`n`n" err.Message, "Save Failed", "Icon!")
+                return false
+            }
+            ProfileManager.profiles[profileName] := candidate
+            this.ClearProfileDirty(profileName)
+        } finally this.EndProfileMutationTransaction()
         modGui.Destroy()
         return true
     }

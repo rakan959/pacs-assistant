@@ -12,12 +12,18 @@ class UpdateCheckerTest {
         "TestAutoCheckTimerRespectsSettings",
         "TestSettingsChangeRestartsTimer",
         "TestAutomaticCheckUsesAsyncTransport",
+        "TestAutomaticCheckNeverOpensAnActivatingDialog",
+        "TestManualCheckIsAsyncAndReportsNoUpdate",
+        "TestManualCompletionDefersDialogDuringClinicalCommand",
+        "TestAsyncRequestDisconnectBreaksCallbackOwnership",
         "TestSettingsChangeCancelsInFlightAutomaticCheck",
+        "TestClinicalCommandBlocksUpdateExit",
         "TestVersionComesFromAppVersion",
         "TestJsonParserHandlesEscapesAndUnicode",
         "TestJsonParserRejectsUppercaseTokensAndEscapes",
         "TestReleaseParserKeepsAssetMetadataTogether",
         "TestReleaseParserAcceptsArrayResponse",
+        "TestReleaseParserRejectsOversizedAsset",
         "TestReleaseStatusDistinguishesExpectedAbsenceFromFailure",
         "TestDownloadUrlMustBelongToThisRepository",
         "TestSha256KnownVector",
@@ -28,6 +34,7 @@ class UpdateCheckerTest {
         "TestCleanupDoesNotOwnGenericScript",
         "TestUpdateDialogPreferencesCommitTogether",
         "TestUpdateDialogPreferenceFailurePreservesEveryValue",
+        "TestStaleUpdateDialogCannotOverwriteNewerSettings",
         "TestSkippedVersionPersistsAcrossReload"
     ]
 
@@ -37,6 +44,31 @@ class UpdateCheckerTest {
         Settings.settingsFile := this.tempSettings
         Settings.SaveAllSettings()
         this.originalTransport := UpdateChecker.transport
+        this.originalClinicalActivityProbe := UpdateChecker.clinicalActivityProbe
+        this.originalShutdownCoordinator := UpdateChecker.shutdownCoordinator
+        this.originalUpdateCheckEligibleProbe := UpdateChecker.updateCheckEligibleProbe
+        this.originalUpdateAvailableNotifier := UpdateChecker.updateAvailableNotifier
+        this.originalManualResultNotifier := UpdateChecker.manualResultNotifier
+        this.originalPendingUpdateInfo := UpdateChecker.pendingUpdateInfo
+        this.originalNotifiedVersion := UpdateChecker.notifiedVersion
+        this.originalUpdateDialog := UpdateChecker.updateDialog
+        UpdateChecker.shutdownCoordinator := 0
+        UpdateChecker.updateCheckEligibleProbe := (*) => true
+        this.updateNotifications := []
+        this.manualNotifications := []
+        UpdateChecker.updateAvailableNotifier := (text, title, options) => this.updateNotifications.Push({
+            text: text,
+            title: title,
+            options: options
+        })
+        UpdateChecker.manualResultNotifier := (text, title, options) => this.manualNotifications.Push({
+            text: text,
+            title: title,
+            options: options
+        })
+        UpdateChecker.pendingUpdateInfo := 0
+        UpdateChecker.notifiedVersion := ""
+        UpdateChecker.updateDialog := 0
         UpdateChecker.activeRequest := 0
     }
     
@@ -198,6 +230,20 @@ class UpdateCheckerTest {
         Assert.Equal(42, release.assetSize)
     }
 
+    TestReleaseParserRejectsOversizedAsset() {
+        size := UpdateChecker.maxUpdateSizeBytes + 1
+        json := '{"tag_name":"v9.0.0","body":"Large","assets":['
+            . '{"name":"pacs-assistant.exe","size":' size
+            . ',"digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"'
+            . ',"browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v9.0.0/pacs-assistant.exe"}'
+            . ']}'
+
+        Assert.Throws(
+            (*) => UpdateChecker.ParseReleaseResponse(json),
+            "invalid size"
+        )
+    }
+
     TestReleaseStatusDistinguishesExpectedAbsenceFromFailure() {
         Assert.True(UpdateChecker.ReleaseResponseAvailable(200, true))
         Assert.False(UpdateChecker.ReleaseResponseAvailable(404, true))
@@ -315,6 +361,21 @@ class UpdateCheckerTest {
         Assert.Equal("", UpdateChecker.skippedVersion)
     }
 
+    TestStaleUpdateDialogCannotOverwriteNewerSettings() {
+        capturedRevision := Settings.revision
+        Settings.Set("AutoUpdate", false)
+
+        result := UpdateChecker.TrySaveUpdatePreferences(
+            capturedRevision,
+            true,
+            false
+        )
+
+        Assert.False(result)
+        Assert.False(Settings.Get("AutoUpdate"))
+        Assert.True(Settings.Get("SkipBetaVersions"))
+    }
+
     TestSkippedVersionPersistsAcrossReload() {
         UpdateChecker.SaveUpdatePreferences(true, true, "v2.2.0")
         UpdateChecker.skippedVersion := ""
@@ -356,6 +417,66 @@ class UpdateCheckerTest {
         Assert.Equal(0, UpdateChecker.activeRequest)
     }
 
+    TestAutomaticCheckNeverOpensAnActivatingDialog() {
+        transport := FakeAsyncUpdateTransport()
+        UpdateChecker.transport := transport
+        Settings.Set("SkipBetaVersions", true)
+        Assert.True(UpdateChecker.BeginAutoCheck(true))
+        slot := UpdateChecker.activeRequest
+
+        transport.Resolve({status: 200, body: UpdateReleaseJson("v9.0.0")})
+
+        Assert.Equal(0, UpdateChecker.activeRequest)
+        Assert.Equal(0, slot.handle)
+        Assert.True(IsObject(UpdateChecker.pendingUpdateInfo))
+        Assert.Equal("v9.0.0", UpdateChecker.pendingUpdateInfo.latestVersion)
+        Assert.Equal(0, UpdateChecker.updateDialog)
+        Assert.Equal(1, this.updateNotifications.Length)
+    }
+
+    TestManualCheckIsAsyncAndReportsNoUpdate() {
+        transport := FakeAsyncUpdateTransport()
+        UpdateChecker.transport := transport
+        Settings.Set("SkipBetaVersions", true)
+
+        Assert.True(UpdateChecker.ShowUpdateDialog())
+        Assert.Equal(1, transport.asyncCalls)
+        Assert.Equal(0, transport.syncCalls)
+        transport.Resolve({status: 404, body: ""})
+
+        Assert.Equal(0, UpdateChecker.activeRequest)
+        Assert.Equal(1, this.manualNotifications.Length)
+        Assert.True(InStr(this.manualNotifications[1].text, "up to date") > 0)
+    }
+
+    TestManualCompletionDefersDialogDuringClinicalCommand() {
+        transport := FakeAsyncUpdateTransport()
+        UpdateChecker.transport := transport
+        UpdateChecker.clinicalActivityProbe := (*) => false
+        Assert.True(UpdateChecker.BeginManualCheck())
+        UpdateChecker.clinicalActivityProbe := (*) => true
+
+        transport.Resolve({status: 200, body: UpdateReleaseJson("v9.0.0")})
+
+        Assert.Equal(0, UpdateChecker.updateDialog)
+        Assert.True(IsObject(UpdateChecker.pendingUpdateInfo))
+        Assert.True(this.updateNotifications.Length >= 2)
+    }
+
+    TestAsyncRequestDisconnectBreaksCallbackOwnership() {
+        operation := WinHttpTextRequest(
+            FakeWinHttpRequest(),
+            (*) => 0,
+            (*) => 0
+        )
+
+        operation.Disconnect()
+
+        Assert.Equal(0, operation.request)
+        Assert.Equal(0, operation.onComplete)
+        Assert.Equal(0, operation.onError)
+    }
+
     TestSettingsChangeCancelsInFlightAutomaticCheck() {
         transport := FakeAsyncUpdateTransport()
         UpdateChecker.transport := transport
@@ -369,15 +490,60 @@ class UpdateCheckerTest {
         Assert.Equal(0, UpdateChecker.activeRequest)
         Assert.Equal(0, UpdateChecker.updateTimer)
     }
+
+    TestClinicalCommandBlocksUpdateExit() {
+        transport := CountingDownloadTransport()
+        UpdateChecker.transport := transport
+        coordinator := FakeShutdownCoordinator(false)
+        UpdateChecker.shutdownCoordinator := coordinator
+
+        result := UpdateChecker.PerformUpdate({}, {})
+
+        Assert.False(result)
+        Assert.Equal(0, transport.downloadCalls)
+        Assert.Equal(1, coordinator.beginCalls)
+        Assert.Equal(0, coordinator.completeCalls)
+    }
     
     Teardown() {
         try UpdateChecker.CancelActiveCheck()
         UpdateChecker.StopAutoCheck()
         UpdateChecker.transport := this.originalTransport
+        UpdateChecker.clinicalActivityProbe := this.originalClinicalActivityProbe
+        UpdateChecker.shutdownCoordinator := this.originalShutdownCoordinator
+        UpdateChecker.updateCheckEligibleProbe := this.originalUpdateCheckEligibleProbe
+        UpdateChecker.updateAvailableNotifier := this.originalUpdateAvailableNotifier
+        UpdateChecker.manualResultNotifier := this.originalManualResultNotifier
+        UpdateChecker.pendingUpdateInfo := this.originalPendingUpdateInfo
+        UpdateChecker.notifiedVersion := this.originalNotifiedVersion
+        UpdateChecker.updateDialog := this.originalUpdateDialog
         UpdateChecker.skippedVersion := ""
         UpdateChecker.lastRemindTime := 0
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalSettingsFile
+    }
+}
+
+class FakeShutdownCoordinator {
+    __New(beginResult := true) {
+        this.beginResult := beginResult
+        this.beginCalls := 0
+        this.completeCalls := 0
+        this.cancelCalls := 0
+    }
+
+    BeginShutdown(*) {
+        this.beginCalls++
+        return this.beginResult
+    }
+
+    CompleteShutdown(*) {
+        this.completeCalls++
+        return true
+    }
+
+    CancelShutdown(*) {
+        this.cancelCalls++
     }
 }
 
@@ -417,6 +583,30 @@ class FakeAsyncUpdateHandle {
     }
 }
 
+class FakeWinHttpRequest {
+    Abort() {
+    }
+}
+
+class CountingDownloadTransport {
+    __New() {
+        this.downloadCalls := 0
+    }
+
+    Download(*) {
+        this.downloadCalls++
+    }
+}
+
 FailUpdatePreferenceReplace(*) {
     throw Error("simulated update preference replace failure")
+}
+
+UpdateReleaseJson(version) {
+    return '{"tag_name":"' version '","body":"Release notes","assets":['
+        . '{"name":"pacs-assistant.exe","size":1550000,'
+        . '"digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",'
+        . '"browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/'
+        . version '/pacs-assistant.exe"}'
+        . ']}'
 }

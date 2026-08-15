@@ -16,10 +16,15 @@ class KeybindGUITest {
         "TestProfileSwitchPreparationStopsActiveCapture",
         "TestProfileSwitchAbortsWhenCaptureCannotStop",
         "TestCaptureStartFailureWarnsWhenRuntimeCannotBeRestored",
+        "TestStaleCaptureBeforeSuspensionReleasesWithoutRuntimeMutation",
         "TestActiveCaptureBlocksSaveAndFunctionRemoval",
+        "TestClinicalCommandBlocksProfileMutationAndExit",
+        "TestTrayExitUsesTheSameClinicalAndCaptureGate",
         "TestStaleRealCaptureRestoresCurrentProfileNotSnapshot",
         "TestCapturedBindPublishesDirtyStateBeforeReleasingOwner",
         "TestCancelCaptureWarnsWhenPriorRuntimeCannotBeRestored",
+        "TestCancelCaptureRetainsTransactionWhenHookCannotStop",
+        "TestOnInputEndRetainsCaptureWhenHookTeardownFails",
         "TestModifierRestartFailureWarnsWhenPriorRuntimeCannotBeRestored",
         "TestCaptureFailureRestoresBindingAndHookState",
         "TestStaleKeyCaptureCannotReinsertRemovedFunction",
@@ -56,6 +61,8 @@ class KeybindGUITest {
         "TestRejectedKeybindWarnsWhenPriorRuntimeCannotBeRestored",
         "TestRejectedScopeWarnsWhenPriorRuntimeCannotBeRestored",
         "TestSavedProfileFailsWhenRuntimeCannotBeVerified",
+        "TestConcurrentMutationDuringSaveRemainsDirtyAndRestoresNewRuntime",
+        "TestClinicalCommandCannotInterruptProfileApply",
         "TestStaleProfileDeleteCannotDeleteRecreatedProfile"
     ]
 
@@ -67,10 +74,28 @@ class KeybindGUITest {
         this.originalCaptureTransactionActive := KeybindGUI.captureTransactionActive
         this.originalCaptureOwnerGui := KeybindGUI.captureOwnerGui
         this.originalProfileMutationRevisions := KeybindGUI.profileMutationRevisions
+        this.originalProfileMutationTransactionActive := KeybindGUI.profileMutationTransactionActive
+        this.originalProfileMutationTransactionAction := KeybindGUI.profileMutationTransactionAction
+        this.originalShutdownTransactionActive := KeybindGUI.shutdownTransactionActive
+        this.originalShutdownAuthorized := KeybindGUI.shutdownAuthorized
+        this.originalShutdownAction := KeybindGUI.shutdownAction
+        this.originalClinicalCommandActive := PACSCommands.clinicalCommandActive
+        this.originalActiveClinicalCommand := PACSCommands.activeClinicalCommand
+        this.originalCommandAvailabilityProbe := PACSCommands.commandAvailabilityProbe
+        this.originalSettingsWriteTransactionActive := Settings.writeTransactionActive
         KeybindGUI.captureRuntimeProfile := 0
         KeybindGUI.captureTransactionActive := false
         KeybindGUI.captureOwnerGui := 0
         KeybindGUI.profileMutationRevisions := Map()
+        KeybindGUI.profileMutationTransactionActive := false
+        KeybindGUI.profileMutationTransactionAction := ""
+        KeybindGUI.shutdownTransactionActive := false
+        KeybindGUI.shutdownAuthorized := false
+        KeybindGUI.shutdownAction := ""
+        PACSCommands.clinicalCommandActive := false
+        PACSCommands.activeClinicalCommand := ""
+        PACSCommands.commandAvailabilityProbe := (*) => true
+        Settings.writeTransactionActive := false
     }
 
     Teardown() {
@@ -78,6 +103,15 @@ class KeybindGUITest {
         KeybindGUI.captureTransactionActive := this.originalCaptureTransactionActive
         KeybindGUI.captureOwnerGui := this.originalCaptureOwnerGui
         KeybindGUI.profileMutationRevisions := this.originalProfileMutationRevisions
+        KeybindGUI.profileMutationTransactionActive := this.originalProfileMutationTransactionActive
+        KeybindGUI.profileMutationTransactionAction := this.originalProfileMutationTransactionAction
+        KeybindGUI.shutdownTransactionActive := this.originalShutdownTransactionActive
+        KeybindGUI.shutdownAuthorized := this.originalShutdownAuthorized
+        KeybindGUI.shutdownAction := this.originalShutdownAction
+        PACSCommands.clinicalCommandActive := this.originalClinicalCommandActive
+        PACSCommands.activeClinicalCommand := this.originalActiveClinicalCommand
+        PACSCommands.commandAvailabilityProbe := this.originalCommandAvailabilityProbe
+        Settings.writeTransactionActive := this.originalSettingsWriteTransactionActive
     }
 
     TestSelectedFunctionPrefersBuiltIn() {
@@ -236,6 +270,10 @@ class KeybindGUITest {
         originalControl := KeybindGUI.listeningControl
         originalHook := KeybindGUI.activeInputHook
         profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := ""
+        profile.scopes["Sign Report"] := "Any"
+        listView := FunctionalListView("Sign Report", "Unassigned", "Any window")
+        prompt := FakeProfileDialog("Test")
         notifications := CapturingNotificationDriver()
         gui := {
             base: CaptureStartRestoreFailingKeybindGUI.Prototype,
@@ -255,7 +293,13 @@ class KeybindGUITest {
             KeybindGUI.listeningControl := ""
             KeybindGUI.activeInputHook := 0
 
-            try gui.BeginListening("Sign Report", {}, {})
+            Assert.True(gui.CaptureFunctionDialogState(
+                prompt,
+                "Sign Report",
+                listView,
+                1
+            ))
+            try gui.BeginListening("Sign Report", listView, prompt)
             catch as err {
                 threw := true
                 caughtMessage := err.Message
@@ -364,6 +408,64 @@ class KeybindGUITest {
         Assert.Equal(1, rowCount)
     }
 
+    TestClinicalCommandBlocksProfileMutationAndExit() {
+        gui := {
+            base: DirtyLeaveTestGUI.Prototype,
+            exitCalls: 0,
+            notifications: []
+        }
+        gui.notificationDriver := ArrayNotificationDriver(gui.notifications)
+        PACSCommands.clinicalCommandActive := true
+        PACSCommands.activeClinicalCommand := "Paste Wet Read"
+
+        try {
+            mutationAllowed := gui.ProfileMutationAllowed("change profiles")
+            closeResult := gui.CloseMainWindow()
+        } finally {
+            PACSCommands.clinicalCommandActive := false
+            PACSCommands.activeClinicalCommand := ""
+        }
+
+        Assert.False(mutationAllowed)
+        Assert.False(closeResult)
+        Assert.Equal(0, gui.exitCalls)
+        Assert.Equal(2, gui.notifications.Length)
+        Assert.True(InStr(gui.notifications[1].message, "Paste Wet Read") > 0)
+    }
+
+    TestTrayExitUsesTheSameClinicalAndCaptureGate() {
+        originalClinicalActive := PACSCommands.clinicalCommandActive
+        originalClinicalName := PACSCommands.activeClinicalCommand
+        gui := {base: KeybindGUI.Prototype, notifications: []}
+        gui.notificationDriver := ArrayNotificationDriver(gui.notifications)
+
+        try {
+            PACSCommands.clinicalCommandActive := true
+            PACSCommands.activeClinicalCommand := "Paste Wet Read"
+            clinicalResult := gui.HandleProcessExit("Menu", 0)
+
+            PACSCommands.clinicalCommandActive := false
+            PACSCommands.activeClinicalCommand := ""
+            KeybindGUI.captureTransactionActive := true
+            captureResult := gui.HandleProcessExit("Menu", 0)
+
+            KeybindGUI.captureTransactionActive := false
+            cleanResult := gui.HandleProcessExit("Menu", 0)
+            authorized := KeybindGUI.shutdownAuthorized
+        } finally {
+            gui.CancelShutdown()
+            PACSCommands.clinicalCommandActive := originalClinicalActive
+            PACSCommands.activeClinicalCommand := originalClinicalName
+            KeybindGUI.captureTransactionActive := false
+        }
+
+        Assert.Equal(1, clinicalResult)
+        Assert.Equal(1, captureResult)
+        Assert.Equal(0, cleanResult)
+        Assert.True(authorized)
+        Assert.Equal(2, gui.notifications.Length)
+    }
+
     TestStaleRealCaptureRestoresCurrentProfileNotSnapshot() {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
@@ -411,6 +513,58 @@ class KeybindGUITest {
         Assert.False(result)
         Assert.True(profileAbsent)
         Assert.True(runtimeAbsent)
+        Assert.True(prompt.destroyed)
+    }
+
+    TestStaleCaptureBeforeSuspensionReleasesWithoutRuntimeMutation() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalActive := HotkeyManager.activeHotkeys
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        listView := RemovableListView("Sign Report", "Ctrl + F13", "Any window")
+        prompt := FakeProfileDialog("Test")
+        gui := {base: StaleBeforeSuspensionGUI.Prototype}
+        gui.gui := FakeCaptureOwnerGui()
+        gui.notifications := []
+        gui.restoreCalls := 0
+        gui.onAcquired := (*) => (profile.binds["Sign Report"] := "^F14")
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            HotkeyManager.activeHotkeys := Map("Sign Report", {hotkey: "^F13"})
+            Assert.True(gui.CaptureFunctionDialogState(
+                prompt,
+                "Sign Report",
+                listView,
+                1
+            ))
+
+            result := gui.BeginListening("Sign Report", listView, prompt)
+
+            captureActive := KeybindGUI.captureTransactionActive
+            captureOwner := KeybindGUI.captureOwnerGui
+            ownerDisabled := gui.gui.disabled
+            runtimeStillTracked := HotkeyManager.activeHotkeys.Has("Sign Report")
+        } finally {
+            KeybindGUI.captureRuntimeProfile := 0
+            KeybindGUI.captureTransactionActive := false
+            KeybindGUI.captureOwnerGui := 0
+            KeybindGUI.isListening := false
+            KeybindGUI.activeInputHook := 0
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            HotkeyManager.activeHotkeys := originalActive
+        }
+
+        Assert.False(result)
+        Assert.False(captureActive)
+        Assert.False(IsObject(captureOwner))
+        Assert.False(ownerDisabled)
+        Assert.Equal(0, gui.restoreCalls)
+        Assert.True(runtimeStillTracked)
         Assert.True(prompt.destroyed)
     }
 
@@ -468,6 +622,9 @@ class KeybindGUITest {
         originalControl := KeybindGUI.listeningControl
         originalHook := KeybindGUI.activeInputHook
         profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := ""
+        profile.scopes["Sign Report"] := "Any"
+        listView := FunctionalListView("Sign Report", "Unassigned", "Any window")
         prompt := FakeProfileDialog("Test")
         notifications := CapturingNotificationDriver()
         gui := {
@@ -486,7 +643,13 @@ class KeybindGUITest {
             KeybindGUI.listeningControl := ""
             KeybindGUI.activeInputHook := 0
 
-            Assert.True(gui.BeginListening("Sign Report", {}, prompt))
+            Assert.True(gui.CaptureFunctionDialogState(
+                prompt,
+                "Sign Report",
+                listView,
+                1
+            ))
+            Assert.True(gui.BeginListening("Sign Report", listView, prompt))
             result := gui.CancelKeybindPrompt(prompt)
             capturedListening := KeybindGUI.isListening
         } finally {
@@ -506,6 +669,114 @@ class KeybindGUITest {
         Assert.Equal(1, gui.restoreCalls)
         Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
         Assert.True(InStr(notifications.message, "simulated cancel restore failure") > 0)
+    }
+
+    TestCancelCaptureRetainsTransactionWhenHookCannotStop() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalListening := KeybindGUI.isListening
+        originalControl := KeybindGUI.listeningControl
+        originalHook := KeybindGUI.activeInputHook
+        originalSnapshot := KeybindGUI.captureRuntimeProfile
+        originalTransaction := KeybindGUI.captureTransactionActive
+        profile := ProfileManager.NewProfile()
+        prompt := FakeProfileDialog("Test")
+        notifications := CapturingNotificationDriver()
+        hook := FailingCaptureHook("F13")
+        gui := {
+            base: StopFailureCancelGUI.Prototype,
+            restoreCalls: 0,
+            notificationDriver: notifications
+        }
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            KeybindGUI.isListening := true
+            KeybindGUI.listeningControl := {}
+            KeybindGUI.activeInputHook := hook
+            KeybindGUI.captureRuntimeProfile := ProfileManager.CloneProfile(profile)
+            KeybindGUI.captureTransactionActive := true
+
+            result := gui.CancelKeybindPrompt(prompt)
+            hookRetained := KeybindGUI.activeInputHook = hook
+            listeningRetained := KeybindGUI.isListening
+            transactionRetained := KeybindGUI.captureTransactionActive
+        } finally {
+            KeybindGUI.activeInputHook := 0
+            KeybindGUI.isListening := originalListening
+            KeybindGUI.listeningControl := originalControl
+            KeybindGUI.captureRuntimeProfile := originalSnapshot
+            KeybindGUI.captureTransactionActive := originalTransaction
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.False(result)
+        Assert.True(hookRetained)
+        Assert.True(listeningRetained)
+        Assert.True(transactionRetained)
+        Assert.False(prompt.destroyed)
+        Assert.Equal(0, gui.restoreCalls)
+        Assert.True(InStr(notifications.message, "restart PACS Assistant") > 0)
+    }
+
+    TestOnInputEndRetainsCaptureWhenHookTeardownFails() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalActive := HotkeyManager.activeHotkeys
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
+        prompt := FakeProfileDialog("Test")
+        gui := {
+            base: OnEndStopFailureGUI.Prototype,
+            notifications: [],
+            restoreCalls: 0
+        }
+        threw := false
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            HotkeyManager.activeHotkeys := Map()
+            Assert.True(gui.CaptureFunctionDialogState(
+                prompt,
+                "Sign Report",
+                listView,
+                1
+            ))
+            Assert.True(gui.BeginListening("Sign Report", listView, prompt))
+            hook := KeybindGUI.activeInputHook
+            try gui.OnInputEnd("Sign Report", listView, prompt, hook)
+            catch
+                threw := true
+
+            capturedHook := KeybindGUI.activeInputHook
+            capturedListening := KeybindGUI.isListening
+            capturedTransaction := KeybindGUI.captureTransactionActive
+            capturedBind := profile.binds["Sign Report"]
+        } finally {
+            KeybindGUI.activeInputHook := 0
+            KeybindGUI.isListening := false
+            KeybindGUI.listeningControl := ""
+            KeybindGUI.captureRuntimeProfile := 0
+            KeybindGUI.captureTransactionActive := false
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            HotkeyManager.activeHotkeys := originalActive
+        }
+
+        Assert.True(threw)
+        Assert.True(capturedHook == hook)
+        Assert.True(capturedListening)
+        Assert.True(capturedTransaction)
+        Assert.Equal("^F13", capturedBind)
+        Assert.False(prompt.destroyed)
+        Assert.Equal(0, gui.restoreCalls)
+        Assert.Equal(1, gui.notifications.Length)
+        Assert.True(InStr(gui.notifications[1].message, "restart PACS Assistant") > 0)
     }
 
     TestModifierRestartFailureWarnsWhenPriorRuntimeCannotBeRestored() {
@@ -1920,6 +2191,87 @@ class KeybindGUITest {
         Assert.True(InStr(notifications.message, "simulated saved-profile restore failure") > 0)
     }
 
+    TestConcurrentMutationDuringSaveRemainsDirtyAndRestoresNewRuntime() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        originalRevisions := ProfileManager.profileRevisions
+        tempRoot := A_Temp "\pacs_concurrent_profile_save_" DllCall("GetTickCount64", "UInt64")
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        notifications := CapturingNotificationDriver()
+        gui := {
+            base: ConcurrentSaveMutationGUI.Prototype,
+            applyCalls: 0,
+            restoreCalls: 0,
+            restoredAttending: "",
+            notificationDriver: notifications
+        }
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profileRevisions := Map("Test", 0)
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            gui.MarkProfileDirty("Test")
+
+            result := gui.SaveCurrentProfile()
+            stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath("Test"))
+            storedHasConcurrent := stored.modalityAttendings.Has("Concurrent")
+            memoryValue := profile.modalityAttendings["Concurrent"]
+            dirty := gui.IsProfileDirty("Test")
+            transactionReleased := !KeybindGUI.profileMutationTransactionActive
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profilesPath := originalProfilesPath
+            ProfileManager.profileRevisions := originalRevisions
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.False(result)
+        Assert.False(storedHasConcurrent)
+        Assert.Equal("New Attending", memoryValue)
+        Assert.True(dirty)
+        Assert.Equal(1, gui.applyCalls)
+        Assert.Equal(1, gui.restoreCalls)
+        Assert.Equal("New Attending", gui.restoredAttending)
+        Assert.True(transactionReleased)
+        Assert.True(InStr(notifications.message, "newer edits remain unsaved") > 0)
+    }
+
+    TestClinicalCommandCannotInterruptProfileApply() {
+        originalProbe := PACSCommands.commandAvailabilityProbe
+        originalNotifier := PACSCommands.busyNotifier
+        notifications := []
+        callbackCalls := 0
+        gui := {base: InterruptingProfileApplyGUI.Prototype}
+        gui.callback := (*) => callbackCalls++
+        PACSCommands.commandAvailabilityProbe := (*) =>
+            !KeybindGUI.profileMutationTransactionActive
+            && !KeybindGUI.captureTransactionActive
+            && !Settings.writeTransactionActive
+            && !KeybindGUI.shutdownTransactionActive
+        PACSCommands.busyNotifier := (text, title, options) => notifications.Push(text)
+
+        try {
+            Assert.True(gui.BeginProfileMutationTransaction("test profile apply"))
+            Assert.True(gui.ApplyProfileBinds(ProfileManager.NewProfile(), false))
+            result := gui.commandResult
+        } finally {
+            gui.EndProfileMutationTransaction()
+            PACSCommands.commandAvailabilityProbe := originalProbe
+            PACSCommands.busyNotifier := originalNotifier
+        }
+
+        Assert.False(result)
+        Assert.Equal(0, callbackCalls)
+        Assert.Equal(1, notifications.Length)
+    }
+
     TestStaleProfileDeleteCannotDeleteRecreatedProfile() {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
@@ -2101,6 +2453,41 @@ class PassiveRuntimeKeybindGUI extends KeybindGUI {
     }
 }
 
+class StaleBeforeSuspensionGUI extends KeybindGUI {
+    HasMainWindow() {
+        return true
+    }
+
+    BeginCaptureTransaction(action := "start key capture") {
+        acquired := super.BeginCaptureTransaction(action)
+        if acquired
+            this.onAcquired.Call()
+        return acquired
+    }
+
+    RestoreRuntimeProfile(*) {
+        this.restoreCalls++
+        return false
+    }
+
+    NotifyUser(text, title, options := "") {
+        this.notifications.Push({text: text, title: title, options: options})
+    }
+}
+
+class FakeCaptureOwnerGui {
+    __New() {
+        this.disabled := false
+    }
+
+    Opt(option) {
+        if (option = "+Disabled")
+            this.disabled := true
+        else if (option = "-Disabled")
+            this.disabled := false
+    }
+}
+
 class FailedRestoreKeybindGUI extends PassiveRuntimeKeybindGUI {
     RestoreRuntimeProfile(profile, &errorText) {
         errorText := "simulated restore failure"
@@ -2196,6 +2583,34 @@ class CaptureCancelRestoreFailingKeybindGUI extends KeybindGUI {
     }
 }
 
+class StopFailureCancelGUI extends KeybindGUI {
+    RestoreCapturedRuntimeAndNotify(*) {
+        this.restoreCalls++
+        return true
+    }
+}
+
+class OnEndStopFailureGUI extends CaptureMutationGuardGUI {
+    StartInputHook(*) {
+        KeybindGUI.activeInputHook := FailingCaptureHook("F14")
+    }
+
+    RestoreRuntimeProfile(profile, &errorText) {
+        this.restoreCalls++
+        return super.RestoreRuntimeProfile(profile, &errorText)
+    }
+}
+
+class InterruptingProfileApplyGUI extends KeybindGUI {
+    ApplyProfileBinds(*) {
+        this.commandResult := PACSCommands.RunClinicalCommand(
+            "interrupted command",
+            this.callback
+        )
+        return true
+    }
+}
+
 class ModifierRestartRestoreFailingKeybindGUI extends KeybindGUI {
     StartInputHook(*) {
         this.startCalls++
@@ -2220,6 +2635,25 @@ class SaveRuntimeFailingKeybindGUI extends KeybindGUI {
         this.restoreCalls++
         errorText := "simulated saved-profile restore failure"
         return false
+    }
+}
+
+class ConcurrentSaveMutationGUI extends KeybindGUI {
+    ApplyProfileBinds(*) {
+        this.applyCalls++
+        profile := ProfileManager.profiles["Test"]
+        profile.modalityAttendings["Concurrent"] := "New Attending"
+        ; This deliberately bypasses the public GUI mutation guard to prove the
+        ; save postcondition still catches an unexpected reentrant writer.
+        this.MarkProfileDirty("Test")
+        return true
+    }
+
+    RestoreRuntimeProfile(profile, &errorText) {
+        this.restoreCalls++
+        errorText := ""
+        this.restoredAttending := profile.modalityAttendings["Concurrent"]
+        return true
     }
 }
 
@@ -2265,7 +2699,11 @@ class DirtyLeaveTestGUI extends KeybindGUI {
     }
 
     RequestExit() {
+        if !this.BeginShutdown("close PACS Assistant")
+            return false
         this.exitCalls++
+        this.CancelShutdown()
+        return true
     }
 }
 
@@ -2433,6 +2871,16 @@ class CapturingNotificationDriver {
     Notify(message, *) {
         this.message := message
         return "OK"
+    }
+}
+
+class ArrayNotificationDriver {
+    __New(messages) {
+        this.messages := messages
+    }
+
+    Notify(message, title, options := "") {
+        this.messages.Push({message: message, title: title, options: options})
     }
 }
 

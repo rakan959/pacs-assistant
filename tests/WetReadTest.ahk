@@ -4,11 +4,7 @@
 
 class WetReadTest {
     static Tests := [
-        "ClipboardFailureDoesNotTouchTheNote",
-        "FailedSendRestoresThePreviousNoteAndClipboard",
-        "SuccessfulSendRestoresTheClipboard",
-        "ExternalClipboardChangeSurvivesSendTransaction",
-        "SendRollbackNeverStagesThePreviousClinicalNote",
+        "ClipboardPasteModeIsRejectedWithoutMutation",
         "UnsupportedUIADoesNotClearTheNote",
         "PostMutationUIAErrorRestoresThePreviousNote",
         "FailedUIAVerificationRestoresThePreviousNote",
@@ -16,9 +12,6 @@ class WetReadTest {
         "FailedControlVerificationRestoresThePreviousNote",
         "UnsupportedControlDoesNotAttemptRollback",
         "DirectRestoreFallsBackAfterPreferredException",
-        "SendExceptionRestoresThePreviousNoteAndClipboard",
-        "ClearFailureAfterMutationRestoresThePreviousNote",
-        "ClipboardRestoreFailureIsReported",
         "UnreadableNoteDoesNotAttemptPaste",
         "UnreadableNativeFieldFailsClosed",
         "StickyRootMustBelongToPacsProcess",
@@ -31,17 +24,15 @@ class WetReadTest {
         "StickyOpenerRejectsPreexistingReactivatedStickyWindow",
         "StickyOpenerRejectsOwnerlessStickyWindow",
         "StickyOpenerPinsNewlyActiveExactWindow",
+        "StickyOpenerRejectsTwoNewWindowsAfterInvoke",
+        "StickySessionRejectsANewSiblingAfterCapture",
         "StickyDriverUsesExactValidatedWindowHandle",
         "StickyNoteTargetRequiresExpectedTypeProcessAndCapability",
         "StickyNoteTargetMustBeTheUniqueWritableField",
         "StickyNoteTargetRejectsUnreadableWritableSibling",
         "NativeDirectWriteRefusesStaleStickyTarget",
-        "NativeFocusRefusesStaleStickyTargetBeforeAnyUIAction",
-        "NativeFocusDoesNotClickAFieldInvalidatedBySetFocus",
         "NativeControlWithoutHandleIsUnsupported",
         "NativeControlWriteHasNoFocusSideEffect",
-        "NativeSendRefusesLostFocus",
-        "NativeSendRefusesWrongStickyControlFocus",
         "NativeForwardVerificationRejectsCaseOnlyDifference",
         "NativeRollbackVerificationRejectsCaseOnlyDifference",
         "RoutingFailureReportsTheActualCause",
@@ -49,69 +40,18 @@ class WetReadTest {
         "StickyTargetIsPinnedBeforePowerScribeRouting"
     ]
 
-    ClipboardFailureDoesNotTouchTheNote() {
+    ClipboardPasteModeIsRejectedWithoutMutation() {
         driver := FakeWetReadDriver("existing note", "original clipboard")
-        driver.clipboardReady := false
 
         result := WetReadPasteEngine.Paste(1, "new wet read", "send", driver)
 
         Assert.False(result.success)
-        Assert.Equal("clipboard", result.reason)
-        Assert.Equal("existing note", driver.fieldValue)
-        Assert.Equal(0, driver.clearCalls)
-        Assert.Equal("original clipboard", driver.clipboardValue)
-        Assert.True(result.clipboardRestored)
-    }
-
-    FailedSendRestoresThePreviousNoteAndClipboard() {
-        driver := FakeWetReadDriver("existing note", "original clipboard")
-        driver.failedText := "new wet read"
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "send", driver)
-
-        Assert.False(result.success)
-        Assert.True(result.restored)
+        Assert.Equal("invalid-mode", result.reason)
         Assert.Equal("existing note", driver.fieldValue)
         Assert.Equal("original clipboard", driver.clipboardValue)
-        Assert.True(result.clipboardRestored)
-    }
-
-    SuccessfulSendRestoresTheClipboard() {
-        driver := FakeWetReadDriver("existing note", "original clipboard")
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "send", driver)
-
-        Assert.True(result.success)
-        Assert.Equal("new wet read", driver.fieldValue)
-        Assert.Equal("original clipboard", driver.clipboardValue)
-        Assert.True(result.clipboardRestored)
-    }
-
-    ExternalClipboardChangeSurvivesSendTransaction() {
-        driver := FakeWetReadDriver("existing note", "original clipboard")
-        driver.externalCopyOnSequenceCheck := 2
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "send", driver)
-
-        Assert.False(result.success)
-        Assert.Equal("clipboard-changed", result.reason)
-        Assert.True(result.restored)
-        Assert.Equal("existing note", driver.fieldValue)
-        Assert.Equal("new user copy", driver.clipboardValue)
-        Assert.Equal(0, driver.restoreClipboardCalls)
-    }
-
-    SendRollbackNeverStagesThePreviousClinicalNote() {
-        driver := FakeWetReadDriver("prior clinical note", "original clipboard")
-        driver.failedText := "new wet read"
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "send", driver)
-
-        Assert.False(result.success)
-        Assert.True(result.restored)
-        Assert.Equal(1, driver.stagedClipboardValues.Length)
-        Assert.Equal("new wet read", driver.stagedClipboardValues[1])
-        Assert.Equal("prior clinical note", driver.fieldValue)
+        Assert.Equal(0, driver.readCalls)
+        Assert.Equal(0, driver.uiaCalls)
+        Assert.Equal(0, driver.controlCalls)
     }
 
     UnsupportedUIADoesNotClearTheNote() {
@@ -124,14 +64,13 @@ class WetReadTest {
         Assert.True(result.unsupported)
         Assert.True(result.restored)
         Assert.Equal("existing note", driver.fieldValue)
-        Assert.Equal(0, driver.clearCalls)
+        Assert.Equal(0, driver.controlCalls)
     }
 
     PostMutationUIAErrorRestoresThePreviousNote() {
         field := PostMutationFailingWetReadElement("existing note", "new wet read")
         driver := NativeWetReadDriver(
             "Sticky Notes",
-            FakeWetReadWindowDriver(true),
             FakeWetReadFocusDriver(true)
         )
 
@@ -215,44 +154,6 @@ class WetReadTest {
         Assert.Equal(1, driver.controlCalls)
     }
 
-    SendExceptionRestoresThePreviousNoteAndClipboard() {
-        driver := FakeWetReadDriver("existing note", "original clipboard")
-        driver.throwOnFailedText := "new wet read"
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "send", driver)
-
-        Assert.False(result.success)
-        Assert.True(result.restored)
-        Assert.True(result.error != "")
-        Assert.Equal("existing note", driver.fieldValue)
-        Assert.Equal("original clipboard", driver.clipboardValue)
-    }
-
-    ClearFailureAfterMutationRestoresThePreviousNote() {
-        driver := FakeWetReadDriver("existing note", "original clipboard")
-        driver.clearFailuresRemaining := 1
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "send", driver)
-
-        Assert.False(result.success)
-        Assert.True(result.restored)
-        Assert.Equal("existing note", driver.fieldValue)
-        Assert.Equal(1, driver.clearCalls)
-        Assert.True(driver.uiaCalls > 0)
-        Assert.Equal("original clipboard", driver.clipboardValue)
-    }
-
-    ClipboardRestoreFailureIsReported() {
-        driver := FakeWetReadDriver("existing note", "original clipboard")
-        driver.throwOnClipboardRestore := true
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "send", driver)
-
-        Assert.True(result.success)
-        Assert.False(result.clipboardRestored)
-        Assert.True(InStr(result.error, "Clipboard restore failed") > 0)
-    }
-
     UnreadableNoteDoesNotAttemptPaste() {
         driver := FakeWetReadDriver("existing note", "original clipboard")
         driver.throwOnRead := true
@@ -262,14 +163,13 @@ class WetReadTest {
         Assert.False(result.success)
         Assert.Equal("read", result.reason)
         Assert.Equal("existing note", driver.fieldValue)
-        Assert.Equal(0, driver.clearCalls)
         Assert.Equal(0, driver.uiaCalls)
+        Assert.Equal(0, driver.controlCalls)
     }
 
     UnreadableNativeFieldFailsClosed() {
         driver := NativeWetReadDriver(
             "Sticky Notes",
-            FakeWetReadWindowDriver(true),
             FakeWetReadFocusDriver(true)
         )
         Assert.Throws(
@@ -405,6 +305,30 @@ class WetReadTest {
         Assert.Equal(1, driver.invokeCalls)
     }
 
+    StickyOpenerRejectsTwoNewWindowsAfterInvoke() {
+        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
+        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
+        stickyRoot := FakeStickyTargetRoot(42, [], 200)
+        driver := FakeStickyNoteWindowDriver(pacsRoot, stickyRoot, 200)
+        driver.postClickStickyWindows := [200, 201]
+
+        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
+        Assert.Equal(1, driver.invokeCalls)
+    }
+
+    StickySessionRejectsANewSiblingAfterCapture() {
+        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
+        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
+        stickyRoot := FakeStickyTargetRoot(42, [], 200)
+        driver := FakeStickyNoteWindowDriver(pacsRoot, stickyRoot, 200)
+        opener := StickyNoteOpener(driver)
+        session := opener.Open({title: "Vue PACS", exe: "mp.exe"})
+
+        driver.postClickStickyWindows := [200, 201]
+
+        Assert.False(driver.IsExpectedStickySession(session))
+    }
+
     StickyDriverUsesExactValidatedWindowHandle() {
         driver := NativeWetReadDriver.ForRoot(FakeStickyTargetRoot(42, [], 200))
 
@@ -455,7 +379,6 @@ class WetReadTest {
         field := FakeWritableWetReadElement()
         driver := NativeWetReadDriver(
             "Sticky Notes",
-            FakeWetReadWindowDriver(true),
             FakeWetReadFocusDriver(false)
         )
 
@@ -463,42 +386,9 @@ class WetReadTest {
         Assert.Equal(0, field.writeCalls)
     }
 
-    NativeFocusRefusesStaleStickyTargetBeforeAnyUIAction() {
-        focusDriver := FakeWetReadFocusDriver(false)
-        driver := NativeWetReadDriver(
-            "ahk_id 200",
-            FakeWetReadWindowDriver(true),
-            focusDriver
-        )
-
-        Assert.Throws(
-            () => driver.Focus(FakeWetReadField()),
-            "no longer the unique expected target"
-        )
-        Assert.Equal(0, focusDriver.requestCalls)
-    }
-
-    NativeFocusDoesNotClickAFieldInvalidatedBySetFocus() {
-        focusDriver := InvalidatingNativeWetReadFocusDriver()
-        field := InvalidatingWetReadField(focusDriver)
-        driver := NativeWetReadDriver(
-            "ahk_id 200",
-            FakeWetReadWindowDriver(true),
-            focusDriver
-        )
-
-        Assert.Throws(
-            () => driver.Focus(field),
-            "no longer the unique expected target"
-        )
-        Assert.Equal(1, field.setFocusCalls)
-        Assert.Equal(0, field.clickCalls)
-    }
-
     NativeControlWithoutHandleIsUnsupported() {
         driver := NativeWetReadDriver(
             "Sticky Notes",
-            FakeWetReadWindowDriver(true),
             FakeWetReadFocusDriver(true)
         )
 
@@ -509,7 +399,6 @@ class WetReadTest {
         controlDriver := FakeWetReadControlDriver()
         driver := NativeWetReadDriver(
             "ahk_id 200",
-            FakeWetReadWindowDriver(true),
             FakeWetReadFocusDriver(true),
             controlDriver
         )
@@ -518,30 +407,6 @@ class WetReadTest {
         Assert.Equal(1, controlDriver.writes.Length)
         Assert.Equal(555, controlDriver.writes[1].hwnd)
         Assert.Equal("new wet read", controlDriver.writes[1].value)
-        Assert.Equal(0, controlDriver.focusCalls)
-    }
-
-    NativeSendRefusesLostFocus() {
-        windowDriver := FakeWetReadWindowDriver(false)
-        driver := NativeWetReadDriver("Sticky Notes", windowDriver)
-
-        Assert.Throws(
-            () => driver.Clear(FakeWetReadField()),
-            "no longer active"
-        )
-        Assert.Equal(0, windowDriver.sent.Length)
-    }
-
-    NativeSendRefusesWrongStickyControlFocus() {
-        windowDriver := FakeWetReadWindowDriver(true)
-        focusDriver := FakeWetReadFocusDriver(false)
-        driver := NativeWetReadDriver("Sticky Notes", windowDriver, focusDriver)
-
-        Assert.Throws(
-            () => driver.Clear(FakeWetReadField()),
-            "expected text field"
-        )
-        Assert.Equal(0, windowDriver.sent.Length)
     }
 
     NativeForwardVerificationRejectsCaseOnlyDifference() {
@@ -642,81 +507,22 @@ class FakeWetReadDriver {
     __New(fieldValue, clipboardValue) {
         this.fieldValue := fieldValue
         this.clipboardValue := clipboardValue
-        this.clipboardReady := true
+        this.readCalls := 0
         this.failedText := ""
-        this.throwOnFailedText := ""
         this.uiaSupported := true
         this.uiaSupportedCalls := 0
         this.uiaCalls := 0
         this.controlSupported := true
         this.controlCalls := 0
-        this.throwOnClipboardRestore := false
         this.throwOnRead := false
         this.throwOnUiaValue := ""
-        this.clearCalls := 0
-        this.clearFailuresRemaining := 0
-        this.sequenceNumber := 10
-        this.sequenceChecks := 0
-        this.externalCopyOnSequenceCheck := 0
-        this.restoreClipboardCalls := 0
-        this.stagedClipboardValues := []
     }
 
     Read(field) {
+        this.readCalls++
         if this.throwOnRead
             throw Error("simulated unreadable field")
         return this.fieldValue
-    }
-
-    Focus(field) {
-    }
-
-    Clear(field) {
-        this.clearCalls++
-        this.fieldValue := ""
-        if this.clearFailuresRemaining > 0 {
-            this.clearFailuresRemaining--
-            throw Error("simulated clear failure after mutation")
-        }
-    }
-
-    CaptureClipboard() {
-        return this.clipboardValue
-    }
-
-    SetClipboard(value) {
-        this.clipboardValue := value
-        this.stagedClipboardValues.Push(value)
-        this.sequenceNumber++
-        return this.sequenceNumber
-    }
-
-    WaitForClipboard(timeoutSeconds) {
-        return this.clipboardReady
-    }
-
-    RestoreClipboard(value) {
-        this.restoreClipboardCalls++
-        if this.throwOnClipboardRestore
-            throw Error("simulated clipboard restore failure")
-        this.clipboardValue := value
-        this.sequenceNumber++
-    }
-
-    ClipboardSequence() {
-        this.sequenceChecks++
-        if (this.externalCopyOnSequenceCheck > 0
-            && this.sequenceChecks = this.externalCopyOnSequenceCheck) {
-            this.clipboardValue := "new user copy"
-            this.sequenceNumber++
-        }
-        return this.sequenceNumber
-    }
-
-    PasteClipboard(field) {
-        if (this.clipboardValue = this.throwOnFailedText)
-            throw Error("simulated paste failure")
-        this.fieldValue := this.clipboardValue = this.failedText ? "partial value" : this.clipboardValue
     }
 
     WriteUIA(field, value) {
@@ -782,45 +588,6 @@ class PostMutationFailingWetReadElement {
             if (value = this.failingValue)
                 throw Error("provider failed after mutation")
         }
-    }
-}
-
-class FakeWetReadField {
-    SetFocus() {
-    }
-
-    Click(*) {
-    }
-}
-
-class InvalidatingNativeWetReadFocusDriver extends NativeWetReadFocusDriver {
-    __New() {
-        this.matches := true
-    }
-
-    IsExpectedTarget(*) {
-        return this.matches
-    }
-
-    IsExpectedFocus(*) {
-        return false
-    }
-}
-
-class InvalidatingWetReadField {
-    __New(focusDriver) {
-        this.focusDriver := focusDriver
-        this.setFocusCalls := 0
-        this.clickCalls := 0
-    }
-
-    SetFocus() {
-        this.setFocusCalls++
-        this.focusDriver.matches := false
-    }
-
-    Click(*) {
-        this.clickCalls++
     }
 }
 
@@ -911,6 +678,10 @@ class FakeStickyNoteWindowDriver {
         this.livePacsTitle := "Vue PACS"
         this.exactPacsWindowCount := 1
         this.preexistingStickyWindows := []
+        this.postClickStickyWindows := activatedStickyHwnd > 0
+            ? [activatedStickyHwnd]
+            : []
+        this.stickyWindowQueries := 0
         this.stickyOwner := pacsRoot.WinId
     }
 
@@ -951,7 +722,20 @@ class FakeStickyNoteWindowDriver {
     }
 
     FindExactStickyWindows(*) {
-        return this.preexistingStickyWindows.Clone()
+        this.stickyWindowQueries++
+        return (this.stickyWindowQueries = 1
+            ? this.preexistingStickyWindows
+            : this.postClickStickyWindows).Clone()
+    }
+
+
+    IsExpectedStickySession(session) {
+        windows := this.FindExactStickyWindows(session.processId)
+        delta := StickyNoteOpener.NewWindowDelta(session.preexistingSticky, windows)
+        return IsObject(delta)
+            && delta.Length = 1
+            && delta[1] = session.stickyHwnd
+            && this.stickyOwner = session.pacsHwnd
     }
 
     ActivateSticky(session) {
@@ -978,7 +762,6 @@ class FakeWetReadWindowDriver {
 class FakeWetReadControlDriver {
     __New() {
         this.writes := []
-        this.focusCalls := 0
     }
 
     SetText(hwnd, value) {
@@ -989,18 +772,10 @@ class FakeWetReadControlDriver {
 class FakeWetReadFocusDriver {
     __New(matches) {
         this.matches := matches
-        this.requestCalls := 0
-    }
-
-    RequestFocus(*) {
-        this.requestCalls++
     }
 
     IsExpectedTarget(*) {
         return this.matches
     }
 
-    IsExpectedFocus(*) {
-        return this.matches
-    }
 }

@@ -123,19 +123,17 @@ class NativeStickyNoteWindowDriver {
         if (!IsObject(session)
             || !HasProp(session, "pacsHwnd")
             || !HasProp(session, "stickyHwnd")
-            || !HasProp(session, "processId"))
+            || !HasProp(session, "processId")
+            || !HasProp(session, "preexistingSticky"))
             return false
         windows := this.FindExactStickyWindows(session.processId)
         if !IsObject(windows)
             return false
-        found := false
-        for hwnd in windows {
-            if (hwnd = session.stickyHwnd) {
-                found := true
-                break
-            }
-        }
-        return found && this.GetOwner(session.stickyHwnd) = session.pacsHwnd
+        delta := StickyNoteOpener.NewWindowDelta(session.preexistingSticky, windows)
+        return IsObject(delta)
+            && delta.Length = 1
+            && delta[1] = session.stickyHwnd
+            && this.GetOwner(session.stickyHwnd) = session.pacsHwnd
     }
 
     ActivateSticky(session) {
@@ -194,10 +192,14 @@ class StickyNoteOpener {
         stickyHwnd := driver.WaitForActiveSticky(liveRoot.ProcessId, 2)
         if (stickyHwnd <= 0 || stickyHwnd = pacsHwnd)
             return 0
-        for priorHwnd in preexistingSticky {
-            if (stickyHwnd = priorHwnd)
-                return 0
-        }
+        postClickSticky := driver.FindExactStickyWindows(liveRoot.ProcessId)
+        if !IsObject(postClickSticky)
+            return 0
+        newSticky := StickyNoteOpener.NewWindowDelta(preexistingSticky, postClickSticky)
+        if (!IsObject(newSticky)
+            || newSticky.Length != 1
+            || newSticky[1] != stickyHwnd)
+            return 0
         owner := driver.GetOwner(stickyHwnd)
         if (owner != pacsHwnd)
             return 0
@@ -218,8 +220,30 @@ class StickyNoteOpener {
             stickyHwnd: stickyHwnd,
             stickyRoot: stickyRoot,
             processId: liveRoot.ProcessId,
+            preexistingSticky: preexistingSticky.Clone(),
             driver: driver
         }
+    }
+
+    static NewWindowDelta(before, after) {
+        if !IsObject(before) || !IsObject(after)
+            return 0
+        previous := Map()
+        for hwnd in before {
+            if (hwnd <= 0 || previous.Has(hwnd))
+                return 0
+            previous[hwnd] := true
+        }
+        delta := []
+        seen := Map()
+        for hwnd in after {
+            if (hwnd <= 0 || seen.Has(hwnd))
+                return 0
+            seen[hwnd] := true
+            if !previous.Has(hwnd)
+                delta.Push(hwnd)
+        }
+        return delta
     }
 
     IsExpectedPacsRoot(root, hwnd) {
@@ -259,29 +283,11 @@ class StickyNoteOpener {
 }
 
 class NativeWetReadFocusDriver {
-    RequestFocus(field) {
-        try field.SetFocus()
-    }
-
-    RequestClick(field) {
-        try field.Click("left")
-    }
-
     IsExpectedTarget(targetTitle, field) {
         try root := UIA.ElementFromHandle(targetTitle)
         catch
             return false
         return NativeWetReadDriver.IsExpectedNoteField(root, field)
-    }
-
-    IsExpectedFocus(targetTitle, field) {
-        try {
-            focused := UIA.GetFocusedElement()
-            return UIA.CompareElementsEx(field, focused)
-                && this.IsExpectedTarget(targetTitle, focused)
-        } catch {
-            return false
-        }
     }
 }
 
@@ -298,12 +304,10 @@ class NativeWetReadControlDriver {
 class NativeWetReadDriver {
     __New(
         targetTitle := "Sticky Notes",
-        windowDriver := NativeWindowDriver(),
         focusDriver := NativeWetReadFocusDriver(),
         controlDriver := NativeWetReadControlDriver()
     ) {
         this.targetTitle := targetTitle
-        this.windowDriver := windowDriver
         this.focusDriver := focusDriver
         this.controlDriver := controlDriver
     }
@@ -321,14 +325,13 @@ class NativeWetReadDriver {
         }
     }
 
-    static ForRoot(root, windowDriver := 0, focusDriver := 0, controlDriver := 0) {
+    static ForRoot(root, focusDriver := 0, controlDriver := 0) {
         hwnd := 0
         try hwnd := root.WinId
         if (hwnd <= 0)
             throw Error("Sticky Notes window handle could not be verified")
         return NativeWetReadDriver(
             "ahk_id " hwnd,
-            windowDriver ? windowDriver : NativeWindowDriver(),
             focusDriver ? focusDriver : NativeWetReadFocusDriver(),
             controlDriver ? controlDriver : NativeWetReadControlDriver()
         )
@@ -408,131 +411,6 @@ class NativeWetReadDriver {
         return result.value
     }
 
-    Focus(field) {
-        if !this.windowDriver.IsActive(this.targetTitle)
-            throw Error(this.targetTitle " is no longer active; focus was not changed")
-
-        loop 3 {
-            if !this.focusDriver.IsExpectedTarget(this.targetTitle, field)
-                throw Error(this.targetTitle " expected text field is no longer the unique expected target; focus was not changed")
-            if !this.windowDriver.IsActive(this.targetTitle)
-                throw Error(this.targetTitle " is no longer active; focus was not changed")
-            this.focusDriver.RequestFocus(field)
-            if this.focusDriver.IsExpectedFocus(this.targetTitle, field)
-                return true
-
-            ; SetFocus can itself rerender the provider or fail because the saved
-            ; element went stale. Prove the exact target/window again before the
-            ; mouse fallback; never click merely because SetFocus did not stick.
-            if !this.focusDriver.IsExpectedTarget(this.targetTitle, field)
-                throw Error(this.targetTitle " expected text field is no longer the unique expected target; focus was not changed")
-            if !this.windowDriver.IsActive(this.targetTitle)
-                throw Error(this.targetTitle " is no longer active; focus was not changed")
-            this.focusDriver.RequestClick(field)
-            if this.focusDriver.IsExpectedFocus(this.targetTitle, field)
-                return true
-            Sleep(50)
-        }
-        throw Error(this.targetTitle " expected text field did not retain focus")
-    }
-
-    Clear(field) {
-        this.Focus(field)
-        this.SendKeysToTarget("^a{Backspace}", field)
-        Sleep(50)
-    }
-
-    CaptureClipboard() {
-        return ClipboardAll()
-    }
-
-    SetClipboard(value) {
-        this.SetPrivateClipboardText(value)
-        return this.ClipboardSequence()
-    }
-
-    WaitForClipboard(timeoutSeconds) {
-        return ClipWait(timeoutSeconds)
-    }
-
-    RestoreClipboard(value) {
-        A_Clipboard := value
-    }
-
-    ClipboardSequence() {
-        return DllCall("GetClipboardSequenceNumber", "UInt")
-    }
-
-    SetPrivateClipboardText(value) {
-        if !DllCall("OpenClipboard", "Ptr", 0)
-            throw OSError(A_LastError, "OpenClipboard")
-        try {
-            if !DllCall("EmptyClipboard")
-                throw OSError(A_LastError, "EmptyClipboard")
-
-            ; Publish the opt-out formats in the same open/close transaction as the
-            ; text, so clipboard history/cloud/monitoring never observes the staged
-            ; clinical text without its exclusion contract.
-            this.SetClipboardDwordFormat("ExcludeClipboardContentFromMonitorProcessing", 1)
-            this.SetClipboardDwordFormat("CanIncludeInClipboardHistory", 0)
-            this.SetClipboardDwordFormat("CanUploadToCloudClipboard", 0)
-            this.SetClipboardUnicodeText(value)
-        } finally {
-            DllCall("CloseClipboard")
-        }
-    }
-
-    SetClipboardDwordFormat(name, value) {
-        format := DllCall("RegisterClipboardFormat", "Str", name, "UInt")
-        if !format
-            throw OSError(A_LastError, "RegisterClipboardFormat")
-        this.SetClipboardMemory(format, 4, (buffer) => NumPut("UInt", value, buffer))
-    }
-
-    SetClipboardUnicodeText(value) {
-        byteCount := (StrLen(value) + 1) * 2
-        this.SetClipboardMemory(
-            13,
-            byteCount,
-            (buffer) => StrPut(value, buffer, "UTF-16")
-        )
-    }
-
-    SetClipboardMemory(format, byteCount, writer) {
-        ; GMEM_MOVEABLE | GMEM_ZEROINIT is required by SetClipboardData.
-        memory := DllCall("GlobalAlloc", "UInt", 0x42, "UPtr", byteCount, "Ptr")
-        if !memory
-            throw OSError(A_LastError, "GlobalAlloc")
-        transferred := false
-        try {
-            buffer := DllCall("GlobalLock", "Ptr", memory, "Ptr")
-            if !buffer
-                throw OSError(A_LastError, "GlobalLock")
-            try writer.Call(buffer)
-            finally DllCall("GlobalUnlock", "Ptr", memory)
-
-            if !DllCall("SetClipboardData", "UInt", format, "Ptr", memory, "Ptr")
-                throw OSError(A_LastError, "SetClipboardData")
-            transferred := true
-        } finally {
-            if !transferred
-                DllCall("GlobalFree", "Ptr", memory)
-        }
-    }
-
-    PasteClipboard(field) {
-        this.Focus(field)
-        this.SendKeysToTarget("^v", field)
-    }
-
-    SendKeysToTarget(keys, field := 0) {
-        if !this.windowDriver.IsActive(this.targetTitle)
-            throw Error(this.targetTitle " is no longer active; no keys were sent")
-        if field && !this.focusDriver.IsExpectedFocus(this.targetTitle, field)
-            throw Error(this.targetTitle " expected text field lost focus; no keys were sent")
-        this.windowDriver.SendKeys(keys)
-    }
-
     WriteUIA(field, value) {
         if !this.focusDriver.IsExpectedTarget(this.targetTitle, field)
             return false
@@ -574,8 +452,8 @@ class NativeWetReadDriver {
 }
 
 /**
- * Replaces a sticky-note value without sacrificing the previous note or clipboard
- * on a failed paste.
+ * Replaces a sticky-note value through a verified direct-write primitive and
+ * restores the previous note if verification fails.
  */
 class WetReadPasteEngine {
     static attempts := 3
@@ -583,23 +461,19 @@ class WetReadPasteEngine {
 
     static Paste(field, text, mode, driver := NativeWetReadDriver()) {
         result := this.NewResult()
+        if (mode != "uia" && mode != "control") {
+            result.reason := "invalid-mode"
+            result.error := "Unknown wet-read paste mode: " mode
+            return result
+        }
+
         try originalValue := driver.Read(field)
         catch as err {
             result.reason := "read"
             result.error := err.Message
             return result
         }
-
-        switch mode {
-            case "send":
-                return this.PasteWithClipboard(field, text, originalValue, driver, result)
-            case "uia", "control":
-                return this.PasteDirect(field, text, originalValue, mode, driver, result)
-            default:
-                result.reason := "invalid-mode"
-                result.error := "Unknown wet-read paste mode: " mode
-                return result
-        }
+        return this.PasteDirect(field, text, originalValue, mode, driver, result)
     }
 
     static NewResult() {
@@ -607,68 +481,9 @@ class WetReadPasteEngine {
             success: false,
             unsupported: false,
             restored: true,
-            clipboardRestored: true,
             reason: "",
             error: ""
         }
-    }
-
-    static PasteWithClipboard(field, text, originalValue, driver, result) {
-        backupCaptured := false
-        fieldChanged := false
-        ownedSequence := 0
-
-        try {
-            clipboardBackup := driver.CaptureClipboard()
-            backupCaptured := true
-            ownedSequence := driver.SetClipboard(text)
-            if (ownedSequence <= 0 || !driver.WaitForClipboard(0.5)) {
-                result.reason := "clipboard"
-                return result
-            }
-
-            loop this.attempts {
-                if (driver.ClipboardSequence() != ownedSequence) {
-                    result.reason := "clipboard-changed"
-                    result.error := "The clipboard changed before the wet read could be pasted"
-                    return result
-                }
-                ; Clear can mutate before it raises. Mark the transaction dirty first
-                ; so every uncertain/partial clear takes the rollback path.
-                fieldChanged := true
-                driver.Clear(field)
-                if (driver.ClipboardSequence() != ownedSequence) {
-                    result.reason := "clipboard-changed"
-                    result.error := "The clipboard changed while the wet read was being pasted"
-                    return result
-                }
-                driver.PasteClipboard(field)
-                if driver.WaitForValue(field, text, this.verifyTimeoutMs) {
-                    result.success := true
-                    return result
-                }
-            }
-            result.reason := "verification"
-        } catch as err {
-            result.reason := "error"
-            result.error := err.Message
-        } finally {
-            if (!result.success && fieldChanged)
-                result.restored := this.RestoreDirect(field, originalValue, "uia", driver, result)
-
-            ; Restore the entry we displaced only while the clipboard still holds
-            ; our exact generation. A newer user/application copy always wins.
-            if (backupCaptured && ownedSequence > 0
-                && driver.ClipboardSequence() = ownedSequence) {
-                try driver.RestoreClipboard(clipboardBackup)
-                catch as restoreError {
-                    result.clipboardRestored := false
-                    this.AppendError(result, "Clipboard restore failed: " restoreError.Message)
-                }
-            }
-        }
-
-        return result
     }
 
     static PasteDirect(field, text, originalValue, mode, driver, result) {
@@ -911,15 +726,9 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
 	} else if !result.success {
 		if !result.restored {
 			MsgBox("The wet read failed and PACS Assistant could not restore the previous sticky note. Keep the window open and verify the note manually.", "Sticky Note Restore Failed", "Icon!")
-		} else if (result.reason = "clipboard") {
-			MsgBox("The wet read was not pasted because the clipboard did not become ready. The previous sticky note was left unchanged.", "Clipboard Not Ready", "Icon!")
 		} else {
 			MsgBox("The wet read was not pasted. The previous sticky note was restored; verify it before closing the window.", "Paste Failed", "Icon!")
 		}
-	}
-
-	if !result.clipboardRestored {
-		MsgBox("The wet read operation could not restore the clipboard. Copy any needed clipboard content again.", "Clipboard Restore Failed", "Icon!")
 	}
 
 	Return
@@ -929,12 +738,9 @@ PromptWetReadMode() {
 	modeGui := Gui("+AlwaysOnTop", "Wet Read Paste Mode")
 	modeGui.Add("Text",, "Select paste method for this run:")
 
-	; Default to cancelling. Closing the window with the X leaves whatever this holds,
-	; and defaulting to "send" meant dismissing the dialog silently went ahead and
-	; pasted rather than backing out.
+	; Closing the window must never choose a mutation method implicitly.
 	choice := "cancel"
 
-	modeGui.Add("Button", "w200", "Original (Ctrl+V)").OnEvent("Click", (*) => (choice := "send", modeGui.Destroy()))
 	modeGui.Add("Button", "w200", "UIA Value pattern").OnEvent("Click", (*) => (choice := "uia", modeGui.Destroy()))
 	modeGui.Add("Button", "w200", "ControlSetText").OnEvent("Click", (*) => (choice := "control", modeGui.Destroy()))
 	modeGui.Add("Button", "w200", "Cancel").OnEvent("Click", (*) => (choice := "cancel", modeGui.Destroy()))

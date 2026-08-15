@@ -96,6 +96,12 @@ class NativeAppLifecycleDriver {
         Run(path)
         return true
     }
+
+    ResolveShortcut(path) {
+        target := ""
+        FileGetShortcut(path, &target)
+        return target
+    }
 }
 
 /**
@@ -329,7 +335,12 @@ class AppControl {
         if !session
             return false
         try {
-            if (this.windowDriver.GetMinMax(session.target) = -1)
+            state := this.windowDriver.GetMinMax(session.target)
+            ; GetMinMax can yield to a provider/window transition. Reacquire the
+            ; exact set at the final boundary before either visible side effect.
+            if !this.ExactSessionIsUniqueAndLive(session)
+                return false
+            if (state = -1)
                 return this.windowDriver.Activate(
                     session.target,
                     this.activationTimeoutSeconds
@@ -448,12 +459,25 @@ class AppControl {
             ; substring match could treat a similarly named script as PACS and report
             ; a successful restart after launching the wrong entry.
             Loop Files, directory "\Vue Client (Integrated).lnk", "F" {
-                try return this.lifecycleDriver.Launch(A_LoopFileFullPath) ? true : false
+                try {
+                    target := this.lifecycleDriver.ResolveShortcut(A_LoopFileFullPath)
+                    if !this.IsExpectedVueLaunchTarget(target)
+                        return false
+                    return this.lifecycleDriver.Launch(A_LoopFileFullPath) ? true : false
+                }
                 catch
                     return false
             }
         }
         return false
+    }
+
+    static IsExpectedVueLaunchTarget(path) {
+        if (Type(path) != "String" || path = "" || !FileExist(path))
+            return false
+        SplitPath(path, &fileName, , &extension)
+        return StrCompare(fileName, this.vuePacsExecutable, false) = 0
+            && StrCompare(extension, "exe", false) = 0
     }
 }
 
@@ -570,9 +594,46 @@ class NativePacsRestartDriver {
         Sleep(milliseconds)
     }
 
+    VerifyQuiescence() {
+        try {
+            if AppControl.ResolveExactWindows(AppControl.PowerScribeWindowSpec()).Length
+                return {clear: false, error: "PowerScribe reporting window reappeared"}
+            if AppControl.lifecycleDriver.FindProcess(AppControl.powerScribeExecutable)
+                return {clear: false, error: "PowerScribe process is still running"}
+            for spec in AppControl.PacsRestartTargetSpecs() {
+                if AppControl.ResolveExactWindows(spec.target).Length
+                    return {clear: false, error: spec.label " reappeared"}
+            }
+        } catch as err {
+            return {clear: false, error: err.Message}
+        }
+        return {clear: true, error: ""}
+    }
+
     Launch() {
         return AppControl.LaunchVuePacs(A_DesktopCommon)
             || AppControl.LaunchVuePacs(A_Desktop)
+    }
+
+    WaitForLaunch(timeoutMs := 15000) {
+        deadline := DllCall("GetTickCount64", "UInt64") + timeoutMs
+        stableReads := 0
+        while (DllCall("GetTickCount64", "UInt64") < deadline) {
+            try sessions := AppControl.ResolveExactWindows(AppControl.VuePacsWindowSpec())
+            catch
+                return false
+            if (sessions.Length > 1)
+                return false
+            if (sessions.Length = 1) {
+                stableReads++
+                if (stableReads >= 2)
+                    return true
+            } else {
+                stableReads := 0
+            }
+            Sleep(100)
+        }
+        return false
     }
 }
 
@@ -652,23 +713,34 @@ restartPACS(driver := 0) {
         driver.Pause(500)
     }
 
+
+    try quiescence := driver.VerifyQuiescence()
+    catch as err
+        quiescence := {clear: false, error: err.Message}
+    if (!IsObject(quiescence) || !HasProp(quiescence, "clear") || !quiescence.clear) {
+        detail := IsObject(quiescence) && HasProp(quiescence, "error")
+            ? quiescence.error
+            : "restart target state could not be verified"
+        MsgBox(
+            "A clinical client reappeared before launch. The restart was cancelled.`n`n" detail,
+            "PACS Restart Cancelled",
+            "Icon!"
+        )
+        return false
+    }
+
     ; The shortcut sits on either the all-users desktop or this user's own
     if !driver.Launch() {
         MsgBox "ERROR: PACS not found..."
         return false
     }
-    return true
-}
-
-toggleWindow(winName) {
-    if WinExist(winName) {
-        if WinGetMinMax(winName) = -1  ; -1 indicates window is minimized
-        {
-            AppControl.ActivateWindow(winName)  ; Restore and activate the window
-        }
-        else
-        {
-            WinMinimize(winName)  ; Minimize the window
-        }
+    if !driver.WaitForLaunch() {
+        MsgBox(
+            "The PACS shortcut ran, but one unique Vue PACS window did not appear. Check the client before trying again.",
+            "PACS Launch Not Verified",
+            "Icon!"
+        )
+        return false
     }
+    return true
 }

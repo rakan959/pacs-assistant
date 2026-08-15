@@ -36,17 +36,28 @@ class WinHttpTransport {
         return operation.Start()
     }
 
-    Download(url, destination) {
+    Download(url, destination, expectedSize, maximumSize) {
+        if (!(expectedSize is Integer)
+            || expectedSize <= 0
+            || expectedSize > maximumSize)
+            throw Error("Update download size is outside the allowed range")
         request := this.CreateRequest(url)
         request.Send()
         if (request.Status != 200)
             throw Error("Update download returned HTTP " request.Status)
+        try contentLength := Integer(request.GetResponseHeader("Content-Length"))
+        catch
+            throw Error("Update download did not provide a valid Content-Length")
+        if (contentLength != expectedSize || contentLength > maximumSize)
+            throw Error("Update download Content-Length does not match trusted metadata")
 
         stream := ComObject("ADODB.Stream")
         stream.Type := 1  ; binary
         stream.Open()
         try {
             stream.Write(request.ResponseBody)
+            if (stream.Size != expectedSize || stream.Size > maximumSize)
+                throw Error("Update download byte count does not match trusted metadata")
             stream.SaveToFile(destination, 2)  ; overwrite
         } finally {
             stream.Close()
@@ -66,7 +77,7 @@ class WinHttpTextRequest {
 
     Start() {
         try {
-            this.startedAt := A_TickCount
+            this.startedAt := this.NowMilliseconds()
             this.request.Send()
             this.pollTimer := ObjBindMethod(this, "Poll")
             SetTimer(this.pollTimer, 50)
@@ -87,7 +98,7 @@ class WinHttpTextRequest {
                     + WinHttpTransport.sendTimeoutMs
                     + WinHttpTransport.receiveTimeoutMs
                     + 2000
-                if (A_TickCount - this.startedAt > maxDuration)
+                if (this.NowMilliseconds() - this.startedAt > maxDuration)
                     this.Fail(Error("WinHTTP asynchronous request timed out"))
                 return
             }
@@ -125,6 +136,12 @@ class WinHttpTextRequest {
             this.pollTimer := 0
         }
         this.request := 0
+        this.onComplete := 0
+        this.onError := 0
+    }
+
+    NowMilliseconds() {
+        return DllCall("GetTickCount64", "UInt64")
     }
 
     Cancel() {
@@ -146,12 +163,25 @@ class UpdateChecker {
     static latestStableUrl := "https://api.github.com/repos/rakan959/pacs-assistant/releases/latest"
     static newestReleaseUrl := "https://api.github.com/repos/rakan959/pacs-assistant/releases?per_page=1"
     static transport := WinHttpTransport()
+    ; Wired by the composition root to the clinical command gate. Keeping the
+    ; probe injectable avoids a dependency from the updater back into PACSCommands.
+    static clinicalActivityProbe := (*) => false
+    ; The composition root supplies the authoritative two-phase shutdown owner.
+    ; Tests may leave this unset and exercise the legacy clinical probe directly.
+    static shutdownCoordinator := 0
+    static maxUpdateSizeBytes := 100 * 1024 * 1024
 
     static updateTimer := 0
     static activeRequest := 0
     static cleanupTimer := 0
     static skippedVersion := ""  ; Track which version the user chose to skip
     static lastRemindTime := 0   ; Track when the user last clicked "Remind Me Later"
+    static pendingUpdateInfo := 0
+    static notifiedVersion := ""
+    static updateDialog := 0
+    static updateAvailableNotifier := (text, title, options) => TrayTip(text, title, options)
+    static manualResultNotifier := (text, title, options) => MsgBox(text, title, options)
+    static updateCheckEligibleProbe := (*) => A_IsCompiled && !AppVersion.isDevBuild
     
     static Start() {
         this.LoadSkippedVersion()
@@ -185,14 +215,16 @@ class UpdateChecker {
         slot := this.activeRequest
         this.activeRequest := 0
         slot.completed := true
-        if slot.handle
-            try slot.handle.Cancel()
+        handle := slot.handle
+        slot.handle := 0
+        if handle
+            try handle.Cancel()
     }
 
     static BeginAutoCheck(force := false) {
         if this.activeRequest
             return false
-        if (!force && (!A_IsCompiled || AppVersion.isDevBuild))
+        if (!force && !this.updateCheckEligibleProbe.Call())
             return false
 
         stableOnly := Settings.Get("SkipBetaVersions")
@@ -208,6 +240,7 @@ class UpdateChecker {
             )
         } catch as err {
             slot.completed := true
+            slot.handle := 0
             if (this.activeRequest = slot)
                 this.activeRequest := 0
             OutputDebug("Update check failed: " err.Message)
@@ -225,13 +258,14 @@ class UpdateChecker {
         if slot.completed
             return
         slot.completed := true
+        slot.handle := 0
         if (this.activeRequest = slot)
             this.activeRequest := 0
 
         try {
             updateInfo := this.ProcessReleaseResponse(response, stableOnly)
             if updateInfo.hasUpdate
-                this.ShowUpdateDialog(updateInfo)
+                this.RecordAvailableUpdate(updateInfo)
         } catch as err {
             OutputDebug("Update check failed: " err.Message)
         }
@@ -241,6 +275,7 @@ class UpdateChecker {
         if slot.completed
             return
         slot.completed := true
+        slot.handle := 0
         if (this.activeRequest = slot)
             this.activeRequest := 0
         message := IsObject(error) && HasProp(error, "Message") ? error.Message : String(error)
@@ -250,6 +285,18 @@ class UpdateChecker {
     static OnSettingsChanged() {
         ; Restart auto-check with new settings
         this.StartAutoCheck()
+    }
+
+    static RecordAvailableUpdate(updateInfo) {
+        this.pendingUpdateInfo := updateInfo
+        if (this.notifiedVersion == updateInfo.latestVersion)
+            return
+        this.notifiedVersion := updateInfo.latestVersion
+        try this.updateAvailableNotifier.Call(
+            "Version " updateInfo.latestVersion " is available. Use Check for Updates when ready.",
+            "PACS Assistant update available",
+            "Iconi"
+        )
     }
 
     static LoadSkippedVersion() {
@@ -283,16 +330,26 @@ class UpdateChecker {
         return true
     }
 
-    static TrySaveUpdatePreferences(autoUpdate, skipBetaVersions, skippedVersion?) {
+    static TrySaveUpdatePreferences(expectedRevision, autoUpdate, skipBetaVersions, skippedVersion?) {
+        values := Map(
+            "AutoUpdate", autoUpdate ? true : false,
+            "SkipBetaVersions", skipBetaVersions ? true : false
+        )
+        if IsSet(skippedVersion) {
+            if (Type(skippedVersion) != "String" || Trim(skippedVersion) = "")
+                return false
+            values["SkippedUpdateVersion"] := skippedVersion
+        }
         try {
+            Settings.SaveValuesAtRevision(values, expectedRevision)
             if IsSet(skippedVersion)
-                this.SaveUpdatePreferences(autoUpdate, skipBetaVersions, skippedVersion)
-            else
-                this.SaveUpdatePreferences(autoUpdate, skipBetaVersions)
+                this.skippedVersion := skippedVersion
         } catch as err {
             MsgBox(
-                "The update preferences could not be saved. The previous settings were left unchanged.`n`n" err.Message,
-                "Save Failed",
+                (InStr(err.Message, "Settings changed")
+                    ? "Settings changed while this update dialog was open. Reopen it before saving preferences."
+                    : "The update preferences could not be saved. The previous settings were left unchanged.`n`n" err.Message),
+                InStr(err.Message, "Settings changed") ? "Settings Changed" : "Save Failed",
                 "Icon!"
             )
             return false
@@ -474,7 +531,7 @@ class UpdateChecker {
             throw Error("Release asset has an untrusted download URL")
         if (Type(digest) != "String" || !RegExMatch(digest, "i)^sha256:([0-9a-f]{64})$", &digestMatch))
             throw Error("Release asset is missing a valid SHA-256 digest")
-        if !(size is Integer) || size <= 0
+        if !(size is Integer) || size <= 0 || size > this.maxUpdateSizeBytes
             throw Error("Release asset has an invalid size")
 
         notes := "No release notes available."
@@ -517,7 +574,8 @@ class UpdateChecker {
         latestVersion := release.version
         if (latestVersion = this.skippedVersion)
             return { hasUpdate: false }
-        if (this.lastRemindTime && (A_TickCount - this.lastRemindTime) < 14400000)
+        if (this.lastRemindTime
+            && (DllCall("GetTickCount64", "UInt64") - this.lastRemindTime) < 14400000)
             return { hasUpdate: false }
         if (this.CompareVersions(this.currentVersion, latestVersion) >= 0)
             return { hasUpdate: false }
@@ -537,7 +595,7 @@ class UpdateChecker {
         ; Never offer to update an uncompiled run: PerformUpdate replaces
         ; A_ScriptFullPath, which for a script is main.ahk, so it would drop an EXE on
         ; top of the source. Untagged builds have no meaningful version to compare.
-        if (!A_IsCompiled || AppVersion.isDevBuild)
+        if !this.updateCheckEligibleProbe.Call()
             return { hasUpdate: false }
 
         ; Ask GitHub for the right release rather than filtering on the tag name.
@@ -558,6 +616,124 @@ class UpdateChecker {
         }
         return { hasUpdate: false }
     }
+
+    static BeginManualCheck() {
+        if this.clinicalActivityProbe.Call() {
+            this.manualResultNotifier.Call(
+                "Wait for the active clinical command to finish before checking for updates.",
+                "Clinical Command In Progress",
+                "Icon!"
+            )
+            return false
+        }
+        if this.activeRequest {
+            this.manualResultNotifier.Call(
+                "An update check is already in progress.",
+                "Checking for Updates",
+                "Iconi"
+            )
+            return false
+        }
+        if !this.updateCheckEligibleProbe.Call() {
+            this.manualResultNotifier.Call(
+                "Update checks are available in tagged release builds.",
+                "Development Build",
+                "Iconi"
+            )
+            return false
+        }
+
+        stableOnly := Settings.Get("SkipBetaVersions")
+        url := stableOnly ? this.latestStableUrl : this.newestReleaseUrl
+        slot := {handle: 0, completed: false, manual: true}
+        this.activeRequest := slot
+        try {
+            slot.handle := this.transport.GetTextAsync(
+                url,
+                ObjBindMethod(this, "CompleteManualCheck", slot, stableOnly),
+                ObjBindMethod(this, "FailManualCheck", slot)
+            )
+        } catch as err {
+            slot.completed := true
+            slot.handle := 0
+            if (this.activeRequest = slot)
+                this.activeRequest := 0
+            this.manualResultNotifier.Call(
+                "The update check could not start: " err.Message,
+                "Update Check Failed",
+                "Icon!"
+            )
+            return false
+        }
+        if (!slot.handle && !slot.completed) {
+            this.activeRequest := 0
+            this.manualResultNotifier.Call(
+                "The update check could not start.",
+                "Update Check Failed",
+                "Icon!"
+            )
+            return false
+        }
+        try this.updateAvailableNotifier.Call(
+            "Checking GitHub for a PACS Assistant update...",
+            "Checking for updates",
+            "Iconi"
+        )
+        return true
+    }
+
+    static CompleteManualCheck(slot, stableOnly, response) {
+        if slot.completed
+            return
+        slot.completed := true
+        slot.handle := 0
+        if (this.activeRequest = slot)
+            this.activeRequest := 0
+        try {
+            updateInfo := this.ProcessReleaseResponse(response, stableOnly)
+            if !updateInfo.hasUpdate {
+                this.manualResultNotifier.Call(
+                    "PACS Assistant is up to date.",
+                    "No Update Available",
+                    "Iconi"
+                )
+                return
+            }
+            this.pendingUpdateInfo := updateInfo
+            if this.clinicalActivityProbe.Call() {
+                this.updateAvailableNotifier.Call(
+                    "The update is ready to review after the active clinical command finishes.",
+                    "PACS Assistant update available",
+                    "Iconi"
+                )
+                return
+            }
+            this.ShowUpdateDialog(updateInfo)
+        } catch as err {
+            this.manualResultNotifier.Call(
+                "The update check failed: " err.Message,
+                "Update Check Failed",
+                "Icon!"
+            )
+        }
+    }
+
+    static FailManualCheck(slot, error) {
+        if slot.completed
+            return
+        slot.completed := true
+        slot.handle := 0
+        if (this.activeRequest = slot)
+            this.activeRequest := 0
+        message := IsObject(error) && HasProp(error, "Message")
+            ? error.Message
+            : String(error)
+        this.manualResultNotifier.Call(
+            "The update check failed: " message,
+            "Update Check Failed",
+            "Icon!"
+        )
+    }
     
     /**
      * Shows the update dialog.
@@ -568,13 +744,31 @@ class UpdateChecker {
      * already authorised.
      */
     static ShowUpdateDialog(updateInfo?) {
-        if !IsSet(updateInfo)
-            updateInfo := this.CheckForUpdates()
+        if !IsSet(updateInfo) {
+            if (IsObject(this.pendingUpdateInfo) && this.pendingUpdateInfo.hasUpdate)
+                updateInfo := this.pendingUpdateInfo
+            else
+                return this.BeginManualCheck()
+        }
         if (!updateInfo.hasUpdate)
-            return
+            return false
+        this.pendingUpdateInfo := updateInfo
+        if this.clinicalActivityProbe.Call() {
+            this.manualResultNotifier.Call(
+                "Wait for the active clinical command to finish before opening the update dialog.",
+                "Clinical Command In Progress",
+                "Icon!"
+            )
+            return false
+        }
+        if this.UpdateDialogIsLive() {
+            try WinActivate("ahk_id " this.updateDialog.Hwnd)
+            return this.updateDialog
+        }
             
         ; Create update dialog with modern styling
-        updateGui := Gui("+AlwaysOnTop", "PACS Assistant - Update Available")
+        updateGui := Gui(, "PACS Assistant - Update Available")
+        updateGui.settingsRevision := Settings.revision
         updateGui.SetFont("s10", "Segoe UI")  ; Modern font
         
         ; Header
@@ -598,15 +792,20 @@ class UpdateChecker {
         ; It used to live only in the Close handler, and Gui.Destroy() does not raise
         ; Close - so every button discarded the user's choices.
         saveChoices := (*) => this.TrySaveUpdatePreferences(
+            updateGui.settingsRevision,
             autoUpdateCheckbox.Value,
             skipBetaCheckbox.Value
         )
         saveSkippedChoices := (*) => this.TrySaveUpdatePreferences(
+            updateGui.settingsRevision,
             autoUpdateCheckbox.Value,
             skipBetaCheckbox.Value,
             updateInfo.latestVersion
         )
-        dismiss := (*) => (saveChoices() && updateGui.Destroy())
+        dismiss := (*) => (
+            saveChoices(),
+            this.CloseUpdateDialog(updateGui)
+        )
 
         ; Buttons
         updateGui.Add("GroupBox", "y+15 w400 h50")
@@ -615,17 +814,34 @@ class UpdateChecker {
         ))
         updateGui.Add("Button", "x+10 w120", "Remind Me Later").OnEvent("Click", (*) => (
             saveChoices() && (
-                this.lastRemindTime := A_TickCount,  ; Set the remind time
-                updateGui.Destroy()
+                this.lastRemindTime := DllCall("GetTickCount64", "UInt64"),
+                this.CloseUpdateDialog(updateGui)
             )
         ))
         updateGui.Add("Button", "x+10 w120", "Skip This Version").OnEvent("Click", (*) => (
-            saveSkippedChoices() && updateGui.Destroy()
+            saveSkippedChoices() && this.CloseUpdateDialog(updateGui)
         ))
 
         updateGui.OnEvent("Close", dismiss)
 
+        this.updateDialog := updateGui
         updateGui.Show()
+        return updateGui
+    }
+
+    static UpdateDialogIsLive() {
+        if !IsObject(this.updateDialog)
+            return false
+        try return this.updateDialog.Hwnd > 0
+            && WinExist("ahk_id " this.updateDialog.Hwnd)
+        return false
+    }
+
+    static CloseUpdateDialog(updateGui) {
+        if (this.updateDialog == updateGui)
+            this.updateDialog := 0
+        try updateGui.Destroy()
+        return true
     }
     
     static HashFileSha256(path) {
@@ -909,6 +1125,19 @@ class UpdateChecker {
     }
 
     static PerformUpdate(updateInfo, updateGui) {
+        shutdownStarted := false
+        if IsObject(this.shutdownCoordinator) {
+            if !this.shutdownCoordinator.BeginShutdown("install the update")
+                return false
+            shutdownStarted := true
+        } else if this.clinicalActivityProbe.Call() {
+            MsgBox(
+                "Wait for the active clinical command to finish before updating PACS Assistant.",
+                "Clinical Command In Progress",
+                "Icon!"
+            )
+            return false
+        }
         currentExe := A_ScriptFullPath
         backupExe := A_ScriptDir "\pacs-assistant.backup.exe"
         newExe := A_ScriptDir "\pacs-assistant.new.exe"
@@ -925,7 +1154,12 @@ class UpdateChecker {
             if (FileExist(updaterPath))
                 throw Error("The private updater script path already exists")
 
-            this.transport.Download(updateInfo.downloadUrl, newExe)
+            this.transport.Download(
+                updateInfo.downloadUrl,
+                newExe,
+                updateInfo.downloadSize,
+                this.maxUpdateSizeBytes
+            )
             if !this.ValidateDownloadedArtifact(
                 newExe,
                 updateInfo.downloadSize,
@@ -942,14 +1176,19 @@ class UpdateChecker {
                 . ' "' currentExe '" "' newExe '" "' backupExe '"'
             Run(command, A_ScriptDir, "Hide")
             updateGui.Destroy()
+            if shutdownStarted
+                return this.shutdownCoordinator.CompleteShutdown()
             ExitApp
         } catch as err {
+            if shutdownStarted
+                this.shutdownCoordinator.CancelShutdown()
             MsgBox("Update failed: " err.Message, "Error", "Icon!")
             ; The running executable is not touched until the updater starts after
             ; ExitApp, so a preflight failure only needs to remove staged artifacts.
             try FileDelete(newExe)
             try FileDelete(updaterPath)
             this.ScheduleUpdateArtifactCleanup()
+            return false
         }
     }
 }

@@ -12,9 +12,11 @@ class ClinicalAutomationTest {
         "ExactWindowResolverRejectsSubstringAndDuplicateMatches",
         "PacsSeriesCommandsUseExactHwndTarget",
         "BuiltInClinicalCommandUsesConfirmedTarget",
+        "WindowToggleRevalidatesUniqueSessionBeforeMutation",
         "NativePowerScribeCaptureRejectsImpostorAndDuplicate",
         "TargetedCustomCommandUsesConfirmedTarget",
         "ClinicalCommandGateRejectsNestedBuiltIn",
+        "ShutdownGateRejectsNewClinicalCommand",
         "AttendingTargetRequiresSemanticControlIdentity",
         "NativeAttendingWriteRefusesLostControlFocus",
         "AttendingVerificationRejectsSubstringNearMatch",
@@ -22,6 +24,7 @@ class ClinicalAutomationTest {
         "NativeAttendingPickerRequiresUniqueSemanticControl",
         "NativeAttendingPickerUncertaintyCannotManufactureUniqueness",
         "NativeAttendingRequiresCapturedExactAutomationId",
+        "UnavailableNativeAttendingTransactionHasNoWindowSideEffects",
         "AttendingNameUsesLiteralText",
         "AttendingConfirmationNeverUsesPositionalKeys",
         "AttendingStopsBeforeTextWhenControlMissing",
@@ -47,12 +50,15 @@ class ClinicalAutomationTest {
         "RestartSpecsNeverHardStopPowerScribe",
         "RestartAbortsWhenPowerScribeSaveIsUnverified",
         "RestartAbortsForUnverifiedPowerScribeProcess",
+        "RestartAbortsWhenTargetReappearsBeforeLaunch",
+        "RestartRequiresExpectedVueWindowAfterLaunch",
         "GracefulCloseTimesOutAcross32BitTickWrap",
         "GracefulCloseRequiresCapturedProcessIdentity",
         "GracefulCloseRejectsSameProcessWrongTitleBeforeRequest",
         "GracefulCloseRejectsDuplicateExactWindowBeforeRequest",
         "RestartTargetsUseExactClinicalIdentities",
         "PacsLauncherRejectsNonShortcutMatch",
+        "PacsLauncherRejectsRetargetedShortcut",
         "PacsLauncherAcceptsInstalledShortcut",
         "ReportSelectionUsesOnlyReportShapedText",
         "ReportSelectionRejectsMultipleReportCandidates",
@@ -72,15 +78,18 @@ class ClinicalAutomationTest {
             ? PowerScribe.sessionDriver
             : 0
         this.originalApprovedAttendingIds := NativeAttendingControlDriver.approvedAutomationIds
+        this.originalApprovedConfirmationIds := NativeAttendingControlDriver.approvedConfirmationAutomationIds
         this.originalProfiles := ProfileManager.profiles
         this.originalCurrentProfile := ProfileManager.currentProfile
         this.originalClinicalCommandActive := PACSCommands.clinicalCommandActive
         this.originalActiveClinicalCommand := PACSCommands.activeClinicalCommand
         this.originalBusyNotifier := PACSCommands.busyNotifier
+        this.originalCommandAvailabilityProbe := PACSCommands.commandAvailabilityProbe
         this.busyNotifications := []
         PowerScribe.attendingControlDriver := FakeAttendingControlDriver()
         PowerScribe.sessionDriver := FakePowerScribeSessionDriver()
         NativeAttendingControlDriver.approvedAutomationIds := ["attendingPicker"]
+        NativeAttendingControlDriver.approvedConfirmationAutomationIds := ["confirmAttending"]
         ProfileManager.profiles := Map()
         ProfileManager.currentProfile := ""
         PACSCommands.clinicalCommandActive := false
@@ -90,6 +99,7 @@ class ClinicalAutomationTest {
             title: title,
             options: options
         })
+        PACSCommands.commandAvailabilityProbe := (*) => true
     }
 
     ActivationFailureDoesNotSend() {
@@ -192,6 +202,24 @@ class ClinicalAutomationTest {
         Assert.Equal("{F12}", driver.calls[3].value)
     }
 
+    WindowToggleRevalidatesUniqueSessionBeforeMutation() {
+        spec := AppControl.ExactWindowSpec("PowerScribe 360 | Reporting", "Nuance.PowerScribe360.exe")
+        driver := ToggleRaceWindowDriver([{
+            hwnd: 501,
+            title: spec.title,
+            exe: spec.exe,
+            pid: 42
+        }])
+        AppControl.windowDriver := driver
+        driver.addDuplicateOnStateRead := true
+
+        result := AppControl.ToggleExactWindow(spec)
+
+        Assert.False(result)
+        Assert.Equal(0, driver.minimizeCalls)
+        Assert.Equal(0, driver.activateCalls)
+    }
+
     NativePowerScribeCaptureRejectsImpostorAndDuplicate() {
         exact := {
             hwnd: 601,
@@ -261,6 +289,22 @@ class ClinicalAutomationTest {
         Assert.Equal("{Right}", driver.calls[3].value)
     }
 
+    ShutdownGateRejectsNewClinicalCommand() {
+        callbackCalls := 0
+        PACSCommands.commandAvailabilityProbe := (*) => false
+
+        result := PACSCommands.RunClinicalCommand(
+            "Sign Report",
+            (*) => callbackCalls++
+        )
+
+        Assert.False(result)
+        Assert.Equal(0, callbackCalls)
+        Assert.False(PACSCommands.clinicalCommandActive)
+        Assert.Equal(1, this.busyNotifications.Length)
+        Assert.True(InStr(this.busyNotifications[1].text, "shutting down") > 0)
+    }
+
     AttendingTargetRequiresSemanticControlIdentity() {
         root := FakeAttendingTargetElement(UIA.Type.Window, 42)
         valid := FakeAttendingTargetElement(UIA.Type.ComboBox, 42, "Attending", "attendingPicker", true)
@@ -288,6 +332,34 @@ class ClinicalAutomationTest {
         NativeAttendingControlDriver.approvedAutomationIds := []
 
         Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, candidate))
+    }
+
+    UnavailableNativeAttendingTransactionHasNoWindowSideEffects() {
+        windowDriver := FakeWindowDriver()
+        sessionDriver := FakePowerScribeSessionDriver()
+        PowerScribe.attendingControlDriver := NativeAttendingControlDriver()
+        PowerScribe.sessionDriver := sessionDriver
+        AppControl.windowDriver := windowDriver
+
+        NativeAttendingControlDriver.approvedAutomationIds := []
+        NativeAttendingControlDriver.approvedConfirmationAutomationIds := []
+        Assert.False(PowerScribe.SetAttending("Smith"))
+        Assert.Equal(0, sessionDriver.captureCalls)
+        Assert.Equal(0, windowDriver.calls.Length)
+
+        ; A picker identity alone is insufficient: the semantic confirmation
+        ; capability must be approved before any window action is allowed.
+        NativeAttendingControlDriver.approvedAutomationIds := ["attendingPicker"]
+        Assert.False(PowerScribe.SetAttending("Smith"))
+        Assert.Equal(0, sessionDriver.captureCalls)
+        Assert.Equal(0, windowDriver.calls.Length)
+
+        ; Placeholder strings must not enable mutation before the semantic confirm
+        ; resolver/action is implemented.
+        NativeAttendingControlDriver.approvedConfirmationAutomationIds := ["confirmAttending"]
+        Assert.False(PowerScribe.SetAttending("Smith"))
+        Assert.Equal(0, sessionDriver.captureCalls)
+        Assert.Equal(0, windowDriver.calls.Length)
     }
 
     NativeAttendingWriteRefusesLostControlFocus() {
@@ -683,6 +755,25 @@ class ClinicalAutomationTest {
         Assert.Equal(0, driver.launchCalls)
     }
 
+    RestartAbortsWhenTargetReappearsBeforeLaunch() {
+        driver := FakePacsRestartDriver([], 0, true)
+        driver.quiescent := false
+
+        Assert.False(restartPACS(driver))
+        Assert.Equal(1, driver.stopCalls)
+        Assert.Equal(1, driver.verifyCalls)
+        Assert.Equal(0, driver.launchCalls)
+    }
+
+    RestartRequiresExpectedVueWindowAfterLaunch() {
+        driver := FakePacsRestartDriver([], 0, true)
+        driver.launchVerified := false
+
+        Assert.False(restartPACS(driver))
+        Assert.Equal(1, driver.launchCalls)
+        Assert.Equal(1, driver.waitForLaunchCalls)
+    }
+
     GracefulCloseTimesOutAcross32BitTickWrap() {
         driver := FakeGracefulCloseDriver(0xFFFFFFFF - 50, 77)
 
@@ -756,12 +847,32 @@ class ClinicalAutomationTest {
         }
     }
 
+    PacsLauncherRejectsRetargetedShortcut() {
+        root := A_Temp "\pacs_launch_retarget_" A_TickCount "_" Random(1000, 9999)
+        DirCreate(root)
+        shortcut := root "\Vue Client (Integrated).lnk"
+        target := root "\notepad.exe"
+        FileAppend("test shortcut", shortcut)
+        FileAppend("test target", target)
+        driver := FakeAppLifecycleDriver("launcher")
+        driver.shortcutTarget := target
+        AppControl.lifecycleDriver := driver
+
+        try Assert.False(AppControl.LaunchVuePacs(root))
+        finally DirDelete(root, true)
+
+        Assert.Equal(0, driver.launches.Length)
+    }
+
     PacsLauncherAcceptsInstalledShortcut() {
         root := A_Temp "\pacs_launch_" A_TickCount "_" Random(1000, 9999)
         DirCreate(root)
         shortcut := root "\Vue Client (Integrated).lnk"
+        target := root "\mp.exe"
         FileAppend("test shortcut", shortcut)
+        FileAppend("test target", target)
         driver := FakeAppLifecycleDriver("launcher")
+        driver.shortcutTarget := target
         AppControl.lifecycleDriver := driver
 
         try {
@@ -857,11 +968,13 @@ class ClinicalAutomationTest {
         PowerScribe.attendingControlDriver := this.originalAttendingDriver
         PowerScribe.sessionDriver := this.originalPowerScribeSessionDriver
         NativeAttendingControlDriver.approvedAutomationIds := this.originalApprovedAttendingIds
+        NativeAttendingControlDriver.approvedConfirmationAutomationIds := this.originalApprovedConfirmationIds
         ProfileManager.profiles := this.originalProfiles
         ProfileManager.currentProfile := this.originalCurrentProfile
         PACSCommands.clinicalCommandActive := this.originalClinicalCommandActive
         PACSCommands.activeClinicalCommand := this.originalActiveClinicalCommand
         PACSCommands.busyNotifier := this.originalBusyNotifier
+        PACSCommands.commandAvailabilityProbe := this.originalCommandAvailabilityProbe
     }
 }
 
@@ -947,6 +1060,37 @@ class FakeExactWindowDriver extends FakeWindowDriver {
     }
 }
 
+class ToggleRaceWindowDriver extends FakeExactWindowDriver {
+    __New(windows) {
+        super.__New(windows)
+        this.addDuplicateOnStateRead := false
+        this.minimizeCalls := 0
+        this.activateCalls := 0
+    }
+
+    GetMinMax(*) {
+        if this.addDuplicateOnStateRead {
+            first := this.windows[1]
+            this.windows.Push({
+                hwnd: 777,
+                title: first.title,
+                exe: first.exe,
+                pid: 77
+            })
+        }
+        return 0
+    }
+
+    Minimize(*) {
+        this.minimizeCalls++
+    }
+
+    Activate(*) {
+        this.activateCalls++
+        return true
+    }
+}
+
 class FakePacsRestartDriver {
     __New(powerScribeWindows, powerScribePid, closeResult) {
         this.powerScribeWindows := powerScribeWindows
@@ -955,6 +1099,10 @@ class FakePacsRestartDriver {
         this.closeCalls := 0
         this.stopCalls := 0
         this.launchCalls := 0
+        this.verifyCalls := 0
+        this.waitForLaunchCalls := 0
+        this.quiescent := true
+        this.launchVerified := true
     }
 
     FindPowerScribeWindows() {
@@ -981,6 +1129,19 @@ class FakePacsRestartDriver {
     Launch() {
         this.launchCalls++
         return true
+    }
+
+    VerifyQuiescence() {
+        this.verifyCalls++
+        return {
+            clear: this.quiescent,
+            error: this.quiescent ? "" : "Vue PACS reappeared"
+        }
+    }
+
+    WaitForLaunch(*) {
+        this.waitForLaunchCalls++
+        return this.launchVerified
     }
 }
 
@@ -1041,6 +1202,10 @@ class FakeAttendingControlDriver {
         this.committedValueChecks := 0
         this.semanticConfirmations := 0
         this.writes := []
+    }
+
+    CanAutomateAttendingTransaction() {
+        return true
     }
 
     FindExpectedControl(*) {
@@ -1254,6 +1419,7 @@ class FakeAppLifecycleDriver {
         this.launches := []
         this.killCalls := 0
         this.processAvailable := true
+        this.shortcutTarget := ""
     }
 
     FindProcess(target) {
@@ -1323,6 +1489,13 @@ class FakeAppLifecycleDriver {
     Launch(path) {
         this.launches.Push(path)
         return true
+    }
+
+    ResolveShortcut(path) {
+        if (this.shortcutTarget != "")
+            return this.shortcutTarget
+        SplitPath(path, , &directory)
+        return directory "\mp.exe"
     }
 }
 

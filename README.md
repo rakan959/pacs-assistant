@@ -8,8 +8,10 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - Toggle Dictation, Draft Report, Sign Report
 - Select Next/Previous Field, Delete Previous/Next Word
 - Open/Force Restart PACS (legacy command name): asks PowerScribe to close, requires any save prompt to be completed manually, and closes only revalidated PACS/portal windows. It never force-kills a process by executable basename; an unverified or stuck close cancels the restart.
-- Paste Wet Read (optional LF→CRLF conversion; choose Ctrl+V, UIA Value, or ControlSetText paste)
-- Toggle PowerScribe / EPIC windows, Next/Previous Series
+- Paste Wet Read (optional LF→CRLF conversion; choose a verified UIA Value or ControlSetText write)
+- Toggle PowerScribe, Next/Previous Series. The legacy **Toggle EPIC Window**
+  command remains loadable for profile compatibility but deliberately performs no
+  window action until a stable exact Hyperspace title/executable identity is captured.
 - Set PowerScribe Microphone
 
 ### Profiles & custom binds
@@ -38,7 +40,10 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 1) **Download**
 - Tagged releases publish `pacs-assistant.exe` with the applicable license notices.
 - Untagged pushes upload a `pacs-assistant-build` artifact from CI.
-- Place the EXE anywhere; profiles/settings live alongside it.
+- Place the EXE anywhere. Compiled builds store mutable settings, profile metadata,
+  and profiles under `%APPDATA%\PACS Assistant`, so read-only install locations are
+  supported. On first launch, legacy files beside the EXE are copied there without
+  deleting or overwriting either copy. Source runs remain portable beside the script.
 
 2) **Initial setup**
 - Launch, create a profile, assign keybinds, and set notification/update preferences.
@@ -47,12 +52,12 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 
 3) **Wet read workflow**
 - Copy your wet read text to clipboard.
-- Use the wet read hotkey; if prompted, pick a paste method (Ctrl+V/UIA Value/ControlSetText).
+- Use the wet read hotkey; if prompted, pick a verified direct-write method (UIA Value or ControlSetText). PACS Assistant does not synthesize Ctrl+V because the system clipboard can change between validation and paste delivery.
   The workflow first pins a newly created Sticky Notes window for the active PACS
   study; a pre-existing/reused or ownerless window is rejected.
-- Ctrl+V staging is excluded from Windows clipboard history/cloud processing. If
-  another app or the user copies something mid-operation, that newer clipboard is
-  preserved, and note rollback uses verified direct writes rather than the clipboard.
+- The source clipboard is read once and never rewritten. Note mutation and rollback
+  use verified direct writes, so no clinical note is staged into clipboard history or
+  cloud synchronization.
 - Enable "Convert clipboard line endings" in Settings to normalize LF→CRLF before pasting.
 
 4) **Keybind scope**
@@ -75,7 +80,7 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - PowerScribe: set microphone on login, and the name to match. An exact name is
   preferred; a partial name such as `PowerMic` is accepted only when exactly one
   full device name matches.
-- Notifications: sound on/off, message popups, choose alert sound, custom sound file
+- Notifications: sound on/off, Windows tray notifications, choose alert sound, custom sound file
 - Updates: auto-check toggle, skip betas
 
 Hotkey scope is set per bind from the main window, not here.
