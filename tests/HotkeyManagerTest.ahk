@@ -18,7 +18,8 @@ class HotkeyManagerTest {
         "TestScopePredicatesAreStable",
         "TestDuplicateHotkeyIsRejectedWithoutReplacingOwner",
         "TestEquivalentModifierOrderIsRejected",
-        "TestInvalidReassignmentPreservesExistingRegistration"
+        "TestMissingCallbackReassignmentPreservesExistingRegistration",
+        "TestInvalidHotkeyReassignmentPreservesExistingRegistration"
     ]
 
     Setup() {
@@ -157,12 +158,22 @@ class HotkeyManagerTest {
         Assert.False(HotkeyManager.activeHotkeys.Has("ActionTwo"))
     }
 
-    TestInvalidReassignmentPreservesExistingRegistration() {
+    TestMissingCallbackReassignmentPreservesExistingRegistration() {
         Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^a"))
 
         Assert.False(HotkeyManager.Register("ActionOne", "^b", 0))
         Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
         Assert.Equal("^a", HotkeyManager.activeHotkeys["ActionOne"].hotkey)
+    }
+
+    TestInvalidHotkeyReassignmentPreservesExistingRegistration() {
+        Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^F13"))
+
+        Assert.False(HotkeyManager.RegisterHotkey("ActionOne", "DefinitelyNotARealKeyName"))
+        Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
+        Assert.Equal("^F13", HotkeyManager.activeHotkeys["ActionOne"].hotkey)
+        Assert.Equal("Any", HotkeyManager.activeHotkeys["ActionOne"].scope)
+        Assert.True(InStr(HotkeyManager.lastError, "Invalid key name") > 0)
     }
 
     Teardown() {

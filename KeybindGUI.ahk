@@ -105,6 +105,36 @@ class KeybindGUI {
         return false
     }
 
+    NewProfileDialog(title, profileName := "") {
+        if (profileName = "")
+            profileName := ProfileManager.currentProfile
+        options := this.HasMainWindow() ? "+Owner" this.gui.Hwnd : ""
+        dialog := Gui(options, title)
+        dialog.profileName := profileName
+        return dialog
+    }
+
+    DialogProfileIsCurrent(dialog) {
+        profileName := ""
+        try profileName := dialog.profileName
+        if (profileName != ""
+            && profileName = ProfileManager.currentProfile
+            && ProfileManager.profiles.Has(profileName))
+            return true
+
+        ; An owned dialog normally disappears with its main window. This explicit
+        ; identity gate is the data-integrity backstop for queued callbacks or any
+        ; dialog that outlives a profile switch.
+        this.StopListening()
+        try dialog.Destroy()
+        MsgBox(
+            "The active profile changed while this dialog was open. Reopen it before saving changes.",
+            "Profile Changed",
+            "Icon!"
+        )
+        return false
+    }
+
     ShowProfileSelector() {
         selectorGui := Gui(, "PACS Assistant - Profile Selection")
         selectorGui.Add("Text",, "Select profile:")
@@ -291,6 +321,9 @@ class KeybindGUI {
         if (ih.EndReason != "EndKey")
             return
 
+        if !this.DialogProfileIsCurrent(promptGui)
+            return false
+
         key := ih.EndKey
         
         ; Handle Escape to cancel
@@ -312,7 +345,7 @@ class KeybindGUI {
         
         newBind := this.CapturedHotkey(ih)
         
-        currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
+        currentProfile := ProfileManager.profiles[promptGui.profileName]
         hadBinding := currentProfile.binds.Has(funcName)
         oldBind := hadBinding ? currentProfile.binds[funcName] : ""
         bindingChanged := false
@@ -348,7 +381,19 @@ class KeybindGUI {
 
 
             ; Reapply all binds
-            this.ApplyBinds()
+            if !this.ApplyBinds() {
+                if hadBinding
+                    currentProfile.binds[funcName] := oldBind
+                else
+                    currentProfile.binds.Delete(funcName)
+                if modifiedRow
+                    control.Modify(modifiedRow,, funcName, this.PrettifyHotkey(oldBind))
+                ; The failed candidate has already been reported. Restore the prior
+                ; runtime set without producing a second dialog for the same action.
+                this.ApplyBinds(false)
+                return false
+            }
+            return true
         } catch as err {
             if bindingChanged {
                 if hadBinding
@@ -418,7 +463,7 @@ class KeybindGUI {
         return true
     }
 
-    ApplyBinds() {
+    ApplyBinds(showErrors := true) {
         HotkeyManager.DisableAllHotkeys()
         currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
         if (!currentProfile.HasProp("scopes"))
@@ -450,13 +495,14 @@ class KeybindGUI {
         }
 
         ; One message for the whole apply rather than a dialog per bind
-        if (failed.Length) {
+        if (failed.Length && showErrors) {
             errMsg := "These keybinds failed to register:" "`n"
             for item in failed {
                 errMsg .= "- " item "`n"
             }
             MsgBox(RTrim(errMsg, "`n"), "Keybind Errors", "Icon!")
         }
+        return failed.Length = 0
     }
 
     PrettifyHotkey(hotkeyStr) {
@@ -526,7 +572,7 @@ class KeybindGUI {
     }
 
     ShowAddFunctionDialog(listView) {
-        selectorGui := Gui(, "PACS Assistant - Add Function")
+        selectorGui := this.NewProfileDialog("PACS Assistant - Add Function")
         
         ; Get list of unbound functions, separated by type
         builtInFunctions := []
@@ -547,7 +593,10 @@ class KeybindGUI {
         }
         
         ; Add custom keybind creation button
-        selectorGui.Add("Button", "w200", "Create New Custom Keybind").OnEvent("Click", (*) => (selectorGui.Destroy(), this.ShowCustomKeybindDialog(listView)))
+        selectorGui.Add("Button", "w200", "Create New Custom Keybind").OnEvent("Click", (*) => (
+            selectorGui.Destroy(),
+            this.ShowCustomKeybindDialog(listView, selectorGui.profileName)
+        ))
         
         ; Add built-in functions section
         selectorGui.Add("Text", "xm y+20", "Built-in Functions:")
@@ -586,6 +635,9 @@ class KeybindGUI {
     }
 
     DeleteCustomFunction(funcName, selectorGui) {
+        if !this.DialogProfileIsCurrent(selectorGui)
+            return false
+
         if (funcName = "") {
             MsgBox("Please select a custom function to delete.", "Error", "Icon!")
             return
@@ -600,7 +652,7 @@ class KeybindGUI {
         }
         
         if (MsgBox("Are you sure you want to delete the custom function '" funcName "'?", "Confirm Delete", "YesNo Icon!") = "Yes") {
-            profileName := ProfileManager.currentProfile
+            profileName := selectorGui.profileName
             candidate := ProfileManager.CloneProfile(ProfileManager.profiles[profileName])
             
             ; Remove from a candidate and publish it only after the atomic file save.
@@ -636,8 +688,8 @@ class KeybindGUI {
         }
     }
 
-    ShowCustomKeybindDialog(listView) {
-        customGui := Gui(, "PACS Assistant - Configure Custom Keybind")
+    ShowCustomKeybindDialog(listView, profileName := "") {
+        customGui := this.NewProfileDialog("PACS Assistant - Configure Custom Keybind", profileName)
         customGui.Add("Text",, "Name for this keybind:")
         nameEdit := customGui.Add("Edit", "w200")
         
@@ -658,6 +710,10 @@ class KeybindGUI {
     }
 
     AddCustomKeybind(name, keys, window, listView, customGui) {
+        if !this.DialogProfileIsCurrent(customGui)
+            return false
+        profileName := customGui.profileName
+
         name := Trim(name)
         if (name = "") {
             MsgBox("Please enter a name for the keybind.", "Error", "Icon!")
@@ -676,7 +732,7 @@ class KeybindGUI {
         }
         
         ; Check if name already exists in current profile
-        currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
+        currentProfile := ProfileManager.profiles[profileName]
         if !this.CustomFunctionNameAvailable(currentProfile, funcName) {
             MsgBox("A keybind with this name already exists in this profile.", "Error", "Icon!")
             return
@@ -697,7 +753,7 @@ class KeybindGUI {
         customGui.Destroy()
         
         ; Prompt user to set the keybind
-        this.PromptKeybind(funcName, listView)
+        this.PromptKeybind(funcName, listView, profileName)
     }
 
     CustomFunctionNameAvailable(profile, funcName) {
@@ -705,14 +761,18 @@ class KeybindGUI {
     }
 
     AddFunction(funcName, listView, selectorGui) {
+        if !this.DialogProfileIsCurrent(selectorGui)
+            return false
+
         if (funcName = "") {
             MsgBox("Please select a function first.", "Error", "Icon!")
             return
         }
         
         ; Add to profile with empty binding, active in any window until scoped
-        ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName] := ""
-        ProfileManager.profiles[ProfileManager.currentProfile].scopes[funcName] := "Any"
+        profileName := selectorGui.profileName
+        ProfileManager.profiles[profileName].binds[funcName] := ""
+        ProfileManager.profiles[profileName].scopes[funcName] := "Any"
 
         ; Add to ListView (removed type)
         listView.Add(, funcName, "Unassigned", this.ScopeLabel(funcName))
@@ -721,7 +781,7 @@ class KeybindGUI {
         selectorGui.Destroy()
         
         ; Prompt user to set the keybind
-        this.PromptKeybind(funcName, listView)
+        this.PromptKeybind(funcName, listView, profileName)
     }
 
     RemoveFunction(listView) {
@@ -754,13 +814,13 @@ class KeybindGUI {
         this.PromptKeybind(funcName, listView)
     }
 
-    PromptKeybind(funcName, listView) {
+    PromptKeybind(funcName, listView, profileName := "") {
         if KeybindGUI.isListening {
             MsgBox("Already waiting for a keybind. Finish or cancel that one first.", "Keybind In Progress", "Icon!")
             return
         }
 
-        promptGui := Gui(, "PACS Assistant - Set Keybind")
+        promptGui := this.NewProfileDialog("PACS Assistant - Set Keybind", profileName)
         promptGui.Add("Text",, "Press keys for '" funcName "'...")
         promptGui.Add("Edit", "w200 ReadOnly", "Press keys...")
         promptGui.Add("Button",, "Cancel").OnEvent("Click", (*) => this.CancelKeybindPrompt(promptGui))
@@ -796,7 +856,7 @@ class KeybindGUI {
         funcName := listView.GetText(rowIndex, 1)
         flags := HotkeyManager.FlagsFromScope(ProfileManager.GetScope(funcName))
 
-        scopeGui := Gui(, "PACS Assistant - Keybind Scope")
+        scopeGui := this.NewProfileDialog("PACS Assistant - Keybind Scope")
         scopeGui.Add("Text",, "Only activate '" funcName "' when one of these is the active window:")
         pacsBox := scopeGui.Add("Checkbox", "y+10", "PACS")
         pacsBox.Value := flags.requirePACS
@@ -811,13 +871,37 @@ class KeybindGUI {
     }
 
     ApplyScope(funcName, requirePACS, requirePowerScribe, listView, rowIndex, scopeGui) {
-        ProfileManager.SetScope(funcName, HotkeyManager.ScopeFromFlags(requirePACS, requirePowerScribe))
+        if !this.DialogProfileIsCurrent(scopeGui)
+            return false
 
-        listView.Modify(rowIndex,, funcName, listView.GetText(rowIndex, 2), this.ScopeLabel(funcName))
-        this.ResizeColumns(listView)
+        oldScope := ProfileManager.GetScope(funcName)
+        newScope := HotkeyManager.ScopeFromFlags(requirePACS, requirePowerScribe)
+        changed := false
 
-        scopeGui.Destroy()
-        this.ApplyBinds()
+        try {
+            ProfileManager.SetScope(funcName, newScope)
+            changed := true
+            listView.Modify(rowIndex,, funcName, listView.GetText(rowIndex, 2), this.ScopeLabel(funcName))
+            this.ResizeColumns(listView)
+
+            if !this.ApplyBinds() {
+                ProfileManager.SetScope(funcName, oldScope)
+                listView.Modify(rowIndex,, funcName, listView.GetText(rowIndex, 2), this.ScopeLabel(funcName))
+                this.ResizeColumns(listView)
+                this.ApplyBinds(false)
+                return false
+            }
+
+            scopeGui.Destroy()
+            return true
+        } catch as err {
+            if changed
+                ProfileManager.SetScope(funcName, oldScope)
+            try listView.Modify(rowIndex,, funcName, listView.GetText(rowIndex, 2), this.ScopeLabel(funcName))
+            try this.ResizeColumns(listView)
+            try this.ApplyBinds(false)
+            throw err
+        }
     }
 
     ShowModalityAttendingsDialog() {
@@ -826,8 +910,8 @@ class KeybindGUI {
             return
         }
 
-        modGui := Gui(, "PACS Assistant - Modality Attendings")
-        modGui.Add("Text",, "Attending to assign per modality for '" ProfileManager.currentProfile "'.")
+        modGui := this.NewProfileDialog("PACS Assistant - Modality Attendings")
+        modGui.Add("Text",, "Attending to assign per modality for '" modGui.profileName "'.")
         modGui.Add("Text", "y+5", "Leave a modality blank to keep PowerScribe's default attending.")
 
         edits := Map()
@@ -842,7 +926,9 @@ class KeybindGUI {
     }
 
     SaveModalityAttendings(edits, modGui) {
-        profileName := ProfileManager.currentProfile
+        if !this.DialogProfileIsCurrent(modGui)
+            return false
+        profileName := modGui.profileName
         candidate := ProfileManager.CloneProfile(ProfileManager.profiles[profileName])
         for modality, edit in edits {
             candidate.modalityAttendings[modality] := Trim(edit.Value)

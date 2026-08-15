@@ -12,7 +12,10 @@ class KeybindGUITest {
         "TestCaptureSuppressesInputToTheForegroundWindow",
         "TestCapturedHotkeyUsesTerminationModifierSnapshot",
         "TestCaptureFailureRestoresBindingAndHookState",
+        "TestRejectedCapturedKeyRestoresPriorBinding",
+        "TestRejectedScopeChangeRestoresPriorScope",
         "TestFailedModalitySavePreservesLiveProfile",
+        "TestStaleModalityDialogCannotWriteAnotherProfile",
         "TestFailedCustomDeletePreservesLiveProfile"
     ]
 
@@ -124,6 +127,80 @@ class KeybindGUITest {
         Assert.True(capturedDestroyed)
     }
 
+    TestRejectedCapturedKeyRestoresPriorBinding() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalFunctions := HotkeyManager.hotkeyFunctions
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
+        hook := FakeCaptureHook("DefinitelyNotARealKeyName")
+        prompt := FakeProfileDialog()
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            HotkeyManager.hotkeyFunctions := Map("Sign Report", (*) => 0)
+            Assert.True(HotkeyManager.RegisterHotkey("Sign Report", "^F13"))
+            KeybindGUI.isListening := true
+            KeybindGUI.listeningControl := listView
+            KeybindGUI.activeInputHook := hook
+
+            this.gui.OnInputEnd("Sign Report", listView, prompt, hook)
+            capturedBind := profile.binds["Sign Report"]
+            capturedRuntimeBind := HotkeyManager.activeHotkeys.Has("Sign Report")
+                ? HotkeyManager.activeHotkeys["Sign Report"].hotkey
+                : ""
+            capturedListBind := listView.GetText(1, 2)
+            capturedDestroyed := prompt.destroyed
+            capturedStopped := hook.stopped
+        } finally {
+            HotkeyManager.DisableAllHotkeys()
+            HotkeyManager.hotkeyFunctions := originalFunctions
+            this.gui.StopListening()
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.Equal("^F13", capturedBind)
+        Assert.Equal("^F13", capturedRuntimeBind)
+        Assert.Equal("Ctrl + F13", capturedListBind)
+        Assert.True(capturedDestroyed)
+        Assert.True(capturedStopped)
+    }
+
+    TestRejectedScopeChangeRestoresPriorScope() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalFunctions := HotkeyManager.hotkeyFunctions
+        profile := ProfileManager.NewProfile()
+        profile.binds["Missing Action"] := "^F14"
+        profile.scopes["Missing Action"] := "Any"
+        listView := FunctionalListView("Missing Action", "Ctrl + F14", "Any window")
+        dialog := FakeProfileDialog()
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            HotkeyManager.hotkeyFunctions := Map()
+
+            this.gui.ApplyScope("Missing Action", true, false, listView, 1, dialog)
+            capturedScope := profile.scopes["Missing Action"]
+            capturedListScope := listView.GetText(1, 3)
+            capturedDestroyed := dialog.destroyed
+        } finally {
+            HotkeyManager.DisableAllHotkeys()
+            HotkeyManager.hotkeyFunctions := originalFunctions
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.Equal("Any", capturedScope)
+        Assert.Equal("Any window", capturedListScope)
+        Assert.False(capturedDestroyed)
+    }
+
     TestFailedModalitySavePreservesLiveProfile() {
         state := this.PrepareBlockedProfileSave()
         profile := ProfileManager.NewProfile()
@@ -145,6 +222,42 @@ class KeybindGUITest {
 
         Assert.Equal("Old Attending", savedValue)
         Assert.False(destroyed)
+    }
+
+    TestStaleModalityDialogCannotWriteAnotherProfile() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        tempRoot := A_Temp "\pacs_stale_dialog_" A_TickCount
+        profileA := ProfileManager.NewProfile()
+        profileA.modalityAttendings["Neuro"] := "A Attending"
+        profileB := ProfileManager.NewProfile()
+        profileB.modalityAttendings["Neuro"] := "B Attending"
+        dialog := FakeProfileDialog("A")
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profiles := Map("A", profileA, "B", profileB)
+            ProfileManager.currentProfile := "B"
+            this.gui.SaveModalityAttendings(
+                Map("Neuro", {Value: "Stale Attending"}),
+                dialog
+            )
+            capturedA := ProfileManager.profiles["A"].modalityAttendings["Neuro"]
+            capturedB := ProfileManager.profiles["B"].modalityAttendings["Neuro"]
+            capturedDestroyed := dialog.destroyed
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profilesPath := originalProfilesPath
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.Equal("A Attending", capturedA)
+        Assert.Equal("B Attending", capturedB)
+        Assert.True(capturedDestroyed)
     }
 
     TestFailedCustomDeletePreservesLiveProfile() {
@@ -204,6 +317,28 @@ class FailingListView {
     }
 }
 
+class FunctionalListView {
+    __New(functionName, binding, scope) {
+        this.rows := [[functionName, binding, scope]]
+    }
+
+    GetCount() {
+        return this.rows.Length
+    }
+
+    GetText(row, column) {
+        return this.rows[row][column]
+    }
+
+    Modify(row, options := "", values*) {
+        for column, value in values
+            this.rows[row][column] := value
+    }
+
+    ModifyCol(*) {
+    }
+}
+
 class FakeCaptureHook {
     __New(endKey, endMods := "") {
         this.EndKey := endKey
@@ -218,8 +353,9 @@ class FakeCaptureHook {
 }
 
 class FakeProfileDialog {
-    __New() {
+    __New(profileName := "Test") {
         this.destroyed := false
+        this.profileName := profileName
     }
 
     Destroy() {

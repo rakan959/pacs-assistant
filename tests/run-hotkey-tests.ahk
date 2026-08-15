@@ -100,6 +100,15 @@ Main() {
     HotkeyManager.Register("Test", "", Bump)
     AssertEqual(Press(), 0, "an unassigned bind does not fire")
 
+    ; A rejected replacement must leave the known-good binding both tracked and live.
+    HotkeyManager.Register("Test", "^F13", Bump)
+    AssertEqual(
+        HotkeyManager.Register("Test", "DefinitelyNotARealKeyName", Bump),
+        false,
+        "an invalid reassignment is rejected"
+    )
+    AssertEqual(Press(), 1, "a rejected reassignment leaves the old bind active")
+
     HotkeyManager.DisableAllHotkeys()
 
     ; Settings writes its ini next to the running script on load

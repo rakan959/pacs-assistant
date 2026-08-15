@@ -93,10 +93,16 @@ class HotkeyManager {
             return false
         }
 
-        ; Validation above is non-destructive: an invalid reassignment must not turn
-        ; off the function's currently working registration.
-        this.Unregister(funcName)
+        previous := this.activeHotkeys.Has(funcName)
+            ? this.activeHotkeys[funcName]
+            : 0
+        sameVariant := previous
+            && this.HotkeyIdentity(previous.hotkey) = this.HotkeyIdentity(hotkeyStr)
+            && previous.scope = scope
 
+        ; AutoHotkey itself is the final authority on key-name validity. Activate a
+        ; distinct replacement before retiring the known-good variant, so a rejected
+        ; key or provider error cannot silently unbind the command.
         try {
             this.EnterScope(scope)
             ; "On" is load-bearing. Hotkey() updates an existing variant's action but
@@ -104,14 +110,37 @@ class HotkeyManager {
             ; off stayed dead after being re-registered - which is how binds silently
             ; stopped working after editing a keybind or switching profiles.
             Hotkey(hotkeyStr, callback, "On")
-            this.activeHotkeys[funcName] := {hotkey: hotkeyStr, scope: scope}
-            return true
         } catch as err {
             this.lastError := err.Message
             return false
         } finally {
             this.ExitScope()
         }
+
+        if previous && !sameVariant {
+            try {
+                this.EnterScope(previous.scope)
+                Hotkey(previous.hotkey, "Off")
+            } catch as err {
+                ; The replacement is live but the old variant could not be retired.
+                ; Roll it back and keep the prior map entry rather than claiming an
+                ; ambiguous two-registration state succeeded.
+                try {
+                    this.ExitScope()
+                    this.EnterScope(scope)
+                    Hotkey(hotkeyStr, "Off")
+                } catch {
+                    ; Preserve the original retirement error as the actionable cause.
+                }
+                this.lastError := "the previous hotkey could not be disabled: " err.Message
+                return false
+            } finally {
+                this.ExitScope()
+            }
+        }
+
+        this.activeHotkeys[funcName] := {hotkey: hotkeyStr, scope: scope}
+        return true
     }
 
     static HotkeyIdentity(hotkeyStr) {
