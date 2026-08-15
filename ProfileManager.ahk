@@ -397,17 +397,21 @@ class ProfileManager {
     }
 
     static RenameProfile(oldName, newName) {
-        if (oldName = newName)
+        if (oldName == newName)
             return true
 
         if (!this.IsValidProfileName(oldName)
             || !this.IsValidProfileName(newName)
-            || !this.profiles.Has(oldName)
-            || this.profiles.Has(newName))
+            || !this.profiles.Has(oldName))
             return false
 
         oldPath := this.ProfilePath(oldName)
         newPath := this.ProfilePath(newName)
+        if (oldName = newName)
+            return this.RenameProfileCaseOnly(oldName, newName, oldPath, newPath)
+
+        if this.profiles.Has(newName)
+            return false
         if FileExist(newPath)
             return false
 
@@ -447,5 +451,53 @@ class ProfileManager {
             this.currentProfile := newName
 
         return true
+    }
+
+    static RenameProfileCaseOnly(oldName, newName, oldPath, newPath) {
+        ; Windows resolves both paths to the same file, so an ordinary replacement
+        ; does not reliably update the directory entry's casing. Move through a
+        ; unique same-directory name and roll back before reporting failure.
+        try this.MoveProfileThroughTemporaryPath(oldPath, newPath)
+        catch {
+            return false
+        }
+
+        defaultChanged := this.defaultProfile = oldName
+        if defaultChanged {
+            try {
+                IniWrite(newName, this.configPath, "Settings", "DefaultProfile")
+            } catch {
+                try this.MoveProfileThroughTemporaryPath(newPath, oldPath)
+                catch as rollbackError
+                    OutputDebug("Case-only profile rename rollback failed: " rollbackError.Message)
+                return false
+            }
+        }
+
+        profile := this.profiles[oldName]
+        this.profiles.Delete(oldName)
+        this.profiles[newName] := profile
+        if defaultChanged
+            this.defaultProfile := newName
+        if (this.currentProfile = oldName)
+            this.currentProfile := newName
+        return true
+    }
+
+    static MoveProfileThroughTemporaryPath(sourcePath, destinationPath) {
+        loop {
+            this.saveSequence++
+            temporaryPath := sourcePath ".case-rename-" DllCall("GetCurrentProcessId") "-" this.saveSequence
+        } until !FileExist(temporaryPath)
+
+        FileMove(sourcePath, temporaryPath, false)
+        try {
+            FileMove(temporaryPath, destinationPath, false)
+        } catch as err {
+            try FileMove(temporaryPath, sourcePath, false)
+            catch as rollbackError
+                OutputDebug("Case-only profile file rollback failed: " rollbackError.Message)
+            throw err
+        }
     }
 }

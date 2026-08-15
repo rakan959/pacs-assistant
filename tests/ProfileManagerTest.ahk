@@ -8,6 +8,7 @@ class ProfileManagerTest {
         "TestProfileNameContainingIniRoundTrips",
         "TestDefaultProfileTracking",
         "TestProfileRename",
+        "TestProfileCaseOnlyRename",
         "TestProfileDeletionRules",
         "TestFailedDefaultDeletionPreservesProfile",
         "TestCustomFunctionPersistence",
@@ -91,6 +92,30 @@ class ProfileManagerTest {
         Assert.False(ProfileManager.profiles.Has("OldName"))
         Assert.True(FileExist(ProfileManager.profilesPath "\NewName.ini") != "")
         Assert.False(FileExist(ProfileManager.profilesPath "\OldName.ini"))
+    }
+
+    TestProfileCaseOnlyRename() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        ProfileManager.profiles["Night"] := profile
+        ProfileManager.currentProfile := "Night"
+        ProfileManager.SaveProfile("Night", profile)
+        Assert.True(ProfileManager.SetDefaultProfile("Night"))
+
+        Assert.True(ProfileManager.RenameProfile("Night", "night"))
+
+        inMemoryName := ""
+        for name, _ in ProfileManager.profiles
+            inMemoryName := name
+        diskName := ""
+        Loop Files ProfileManager.profilesPath "\*.ini"
+            diskName := A_LoopFileName
+
+        Assert.True(inMemoryName == "night")
+        Assert.True(diskName == "night.ini")
+        Assert.True(ProfileManager.currentProfile == "night")
+        Assert.True(ProfileManager.defaultProfile == "night")
+        Assert.True(IniRead(ProfileManager.configPath, "Settings", "DefaultProfile") == "night")
     }
 
     TestProfileDeletionRules() {
