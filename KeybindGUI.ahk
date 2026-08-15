@@ -438,11 +438,16 @@ class KeybindGUI {
         if KeybindGUI.activeInputHook {
             try {
                 KeybindGUI.activeInputHook.Stop()
+            } catch as err {
+                ; Preserve the live hook and listening state so callers cannot tear
+                ; down its profile/dialog while it may still capture the next key.
+                throw Error("Input capture could not be stopped: " err.Message)
             }
             KeybindGUI.activeInputHook := 0
         }
         KeybindGUI.isListening := false
         KeybindGUI.listeningControl := ""
+        return true
     }
 
     CapturedHotkey(ih) {

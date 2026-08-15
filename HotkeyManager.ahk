@@ -2,9 +2,20 @@
 #Include HotkeyContract.ahk
 #Include PACSCommands.ahk
 
+class NativeHotkeyDriver {
+    Enable(hotkeyStr, callback) {
+        Hotkey(hotkeyStr, callback, "On")
+    }
+
+    Disable(hotkeyStr) {
+        Hotkey(hotkeyStr, "Off")
+    }
+}
+
 class HotkeyManager {
     static activeHotkeys := Map()  ; funcName -> {hotkey: "^j", scope: "PACS"}
     static hotkeyFunctions := Map()
+    static hotkeyDriver := NativeHotkeyDriver()
 
     ; Why the last Register call failed. Registration reports failure by return value
     ; rather than a dialog, so ApplyBinds can collect every failure and show one
@@ -82,8 +93,7 @@ class HotkeyManager {
 
         ; Skip registration if the hotkey is unassigned
         if (hotkeyStr = "") {
-            this.Unregister(funcName)
-            return true
+            return this.Unregister(funcName)
         }
 
         if !HotkeyContract.IsValidScope(scope) {
@@ -118,7 +128,7 @@ class HotkeyManager {
             ; leaves its enabled state alone, so a bind that DisableAllHotkeys turned
             ; off stayed dead after being re-registered - which is how binds silently
             ; stopped working after editing a keybind or switching profiles.
-            Hotkey(hotkeyStr, callback, "On")
+            this.hotkeyDriver.Enable(hotkeyStr, callback)
         } catch as err {
             this.lastError := err.Message
             return false
@@ -129,7 +139,7 @@ class HotkeyManager {
         if previous && !sameVariant {
             try {
                 this.EnterScope(previous.scope)
-                Hotkey(previous.hotkey, "Off")
+                this.hotkeyDriver.Disable(previous.hotkey)
             } catch as err {
                 ; The replacement is live but the old variant could not be retired.
                 ; Roll it back and keep the prior map entry rather than claiming an
@@ -137,7 +147,7 @@ class HotkeyManager {
                 try {
                     this.ExitScope()
                     this.EnterScope(scope)
-                    Hotkey(hotkeyStr, "Off")
+                    this.hotkeyDriver.Disable(hotkeyStr)
                 } catch {
                     ; Preserve the original retirement error as the actionable cause.
                 }
@@ -169,28 +179,41 @@ class HotkeyManager {
     ; Hotkey(name, "Off") only affects the variant of the *current* HotIf context, so
     ; the scope has to be restored before the hotkey can be turned off.
     static Unregister(funcName) {
+        this.lastError := ""
         if !this.activeHotkeys.Has(funcName)
-            return
+            return true
 
         entry := this.activeHotkeys[funcName]
-        this.activeHotkeys.Delete(funcName)
 
         try {
             this.EnterScope(entry.scope)
-            Hotkey(entry.hotkey, "Off")
-        } catch {
-            ; The variant may no longer exist (e.g. it was never successfully created).
-            ; There is nothing to turn off in that case.
+            this.hotkeyDriver.Disable(entry.hotkey)
+        } catch as err {
+            ; Keep the registration tracked until the native provider proves it is
+            ; disabled. Losing the registry entry here can leave a live clinical
+            ; action enabled with no way for later profile operations to retire it.
+            this.lastError := "the hotkey could not be disabled: " err.Message
+            return false
         } finally {
             this.ExitScope()
         }
+        this.activeHotkeys.Delete(funcName)
+        return true
     }
 
     static DisableAllHotkeys() {
         ; Iterate a snapshot: Unregister mutates activeHotkeys
+        failed := []
         for funcName, _ in this.activeHotkeys.Clone() {
-            this.Unregister(funcName)
+            if !this.Unregister(funcName)
+                failed.Push(funcName)
         }
-        this.activeHotkeys.Clear()
+        if failed.Length {
+            names := ""
+            for funcName in failed
+                names .= (names = "" ? "" : ", ") funcName
+            throw Error("These hotkeys could not be disabled: " names)
+        }
+        return true
     }
 }

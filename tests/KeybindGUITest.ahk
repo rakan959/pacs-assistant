@@ -12,6 +12,7 @@ class KeybindGUITest {
         "TestCaptureSuppressesInputToTheForegroundWindow",
         "TestCapturedHotkeyUsesTerminationModifierSnapshot",
         "TestProfileSwitchPreparationStopsActiveCapture",
+        "TestProfileSwitchAbortsWhenCaptureCannotStop",
         "TestCaptureFailureRestoresBindingAndHookState",
         "TestRejectedCapturedKeyRestoresPriorBinding",
         "TestRejectedScopeChangeRestoresPriorScope",
@@ -106,6 +107,39 @@ class KeybindGUITest {
         Assert.False(capturedListening)
         Assert.Equal(0, capturedHook)
         Assert.True(capturedStopped)
+    }
+
+    TestProfileSwitchAbortsWhenCaptureCannotStop() {
+        originalListening := KeybindGUI.isListening
+        originalControl := KeybindGUI.listeningControl
+        originalHook := KeybindGUI.activeInputHook
+        hook := FailingCaptureHook("F13")
+        control := {}
+        KeybindGUI.isListening := true
+        KeybindGUI.listeningControl := control
+        KeybindGUI.activeInputHook := hook
+
+        threw := false
+        try this.gui.PrepareForProfileSwitch()
+        catch
+            threw := true
+
+        capturedListening := KeybindGUI.isListening
+        capturedControl := KeybindGUI.listeningControl
+        capturedHook := KeybindGUI.activeInputHook
+
+        KeybindGUI.activeInputHook := 0
+        KeybindGUI.isListening := false
+        KeybindGUI.listeningControl := ""
+        try HotkeyManager.DisableAllHotkeys()
+        KeybindGUI.isListening := originalListening
+        KeybindGUI.listeningControl := originalControl
+        KeybindGUI.activeInputHook := originalHook
+
+        Assert.True(threw)
+        Assert.True(capturedListening)
+        Assert.True(capturedControl == control)
+        Assert.True(capturedHook == hook)
     }
 
     TestCaptureFailureRestoresBindingAndHookState() {
@@ -460,6 +494,12 @@ class FakeCaptureHook {
 
     Stop() {
         this.stopped := true
+    }
+}
+
+class FailingCaptureHook extends FakeCaptureHook {
+    Stop() {
+        throw Error("simulated InputHook stop failure")
     }
 }
 

@@ -97,11 +97,12 @@ class ProfileManager {
                 ; Profiles written before scopes existed have no [Scopes] section;
                 ; those binds default to firing in any window, as they always did.
                 ; [KeybindScopes] is the older per-bind format and is migrated.
-                profile.scopes[funcName] := IniRead(path, "Scopes", funcName, "")
-                if (profile.scopes[funcName] = "") {
+                persistedScope := IniRead(path, "Scopes", funcName, this.missingValue)
+                if (persistedScope == this.missingValue) {
                     legacy := IniRead(path, "KeybindScopes", funcName, "")
                     profile.scopes[funcName] := this.MigrateLegacyScope(legacy)
-                }
+                } else
+                    profile.scopes[funcName] := persistedScope
                 ; If it's a custom function, load its configuration
                 if (InStr(funcName, "Custom: ") = 1) {
                     keys := IniRead(path, "CustomFunctions", funcName "_keys", "")

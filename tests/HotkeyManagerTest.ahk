@@ -8,6 +8,8 @@ class HotkeyManagerTest {
         "TestRegistersAndStoresHotkeys",
         "TestReassignUpdatesBinding",
         "TestUnassignClearsBinding",
+        "TestUnregisterFailureKeepsLiveRegistrationTracked",
+        "TestDisableAllReportsAndRetainsFailedRegistration",
         "TestRejectsMissingFunction",
         "TestDisableAllHotkeys",
         "TestRegistersWithScope",
@@ -27,6 +29,7 @@ class HotkeyManagerTest {
     Setup() {
         HotkeyManager.DisableAllHotkeys()
         HotkeyManager.activeHotkeys.Clear()
+        this.originalHotkeyDriver := HotkeyManager.hotkeyDriver
 
         this.func1Calls := 0
         this.func2Calls := 0
@@ -180,6 +183,38 @@ class HotkeyManagerTest {
         Assert.False(HotkeyManager.activeHotkeys.Has("ActionTwo"))
     }
 
+    TestUnregisterFailureKeepsLiveRegistrationTracked() {
+        HotkeyManager.hotkeyDriver := FakeHotkeyDriver("^F23")
+        HotkeyManager.activeHotkeys["ActionOne"] := {
+            hotkey: "^F23",
+            scope: "Any"
+        }
+
+        Assert.False(HotkeyManager.Unregister("ActionOne"))
+        Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
+        Assert.True(InStr(HotkeyManager.lastError, "disable") > 0)
+
+        HotkeyManager.activeHotkeys.Delete("ActionOne")
+    }
+
+    TestDisableAllReportsAndRetainsFailedRegistration() {
+        HotkeyManager.hotkeyDriver := FakeHotkeyDriver("^F23")
+        HotkeyManager.activeHotkeys["ActionOne"] := {
+            hotkey: "^F23",
+            scope: "Any"
+        }
+        HotkeyManager.activeHotkeys["ActionTwo"] := {hotkey: "^F24", scope: "Any"}
+
+        Assert.Throws(
+            () => HotkeyManager.DisableAllHotkeys(),
+            "could not be disabled"
+        )
+        Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
+        Assert.False(HotkeyManager.activeHotkeys.Has("ActionTwo"))
+
+        HotkeyManager.activeHotkeys.Delete("ActionOne")
+    }
+
     TestMissingCallbackReassignmentPreservesExistingRegistration() {
         Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^a"))
 
@@ -199,10 +234,29 @@ class HotkeyManagerTest {
     }
 
     Teardown() {
+        if !(HotkeyManager.hotkeyDriver == this.originalHotkeyDriver)
+            HotkeyManager.activeHotkeys.Clear()
+        HotkeyManager.hotkeyDriver := this.originalHotkeyDriver
         HotkeyManager.DisableAllHotkeys()
         HotkeyManager.activeHotkeys.Clear()
         HotkeyManager.hotkeyFunctions.Clear()
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalSettings
+    }
+}
+
+class FakeHotkeyDriver {
+    __New(failingHotkey := "") {
+        this.failingHotkey := failingHotkey
+        this.disabled := []
+    }
+
+    Enable(*) {
+    }
+
+    Disable(hotkeyStr) {
+        this.disabled.Push(hotkeyStr)
+        if (hotkeyStr == this.failingHotkey)
+            throw Error("simulated native Off failure")
     }
 }

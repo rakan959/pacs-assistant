@@ -30,6 +30,7 @@ class ProfileManagerTest {
         "TestDuplicateBindingsAreRejected",
         "TestEquivalentModifierBindingsAreRejected",
         "TestUnknownScopeIsRejected",
+        "TestExplicitBlankPersistedScopeIsRejected",
         "TestNonCanonicalPersistedScopeIsRejected"
     ]
 
@@ -405,6 +406,17 @@ class ProfileManagerTest {
             "hotkey scope"
         )
         Assert.False(FileExist(ProfileManager.profilesPath "\UnknownScope.ini"))
+    }
+
+    TestExplicitBlankPersistedScopeIsRejected() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        profile.scopes["Sign Report"] := "PACS"
+        path := ProfileManager.profilesPath "\BlankScope.ini"
+        ProfileManager.SaveProfile("BlankScope", profile)
+        IniWrite("", path, "Scopes", "Sign Report")
+
+        Assert.Throws(() => ProfileManager.LoadProfile(path), "hotkey scope")
     }
 
     TestNonCanonicalPersistedScopeIsRejected() {
