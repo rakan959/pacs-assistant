@@ -104,18 +104,28 @@ class Settings {
 
     ; Get a setting value, returns the default if not found
     static Get(settingName) {
+        fallback := this.defaultSettings.Has(settingName)
+            ? this.defaultSettings[settingName]
+            : false
         try {
             value := IniRead(this.settingsFile, "Settings", settingName)
             ; Handle numeric values
-            if (settingName = "RefreshInterval")
-                return Integer(value)
+            if (settingName = "RefreshInterval") {
+                interval := Integer(value)
+                return interval >= 10 ? interval : fallback
+            }
             ; Handle boolean values
-            if this.IsBooleanSetting(settingName)
-                return value = "1" ? true : false
+            if this.IsBooleanSetting(settingName) {
+                if (value = "1")
+                    return true
+                if (value = "0")
+                    return false
+                return fallback
+            }
             ; Return string values as is
             return value
         } catch {
-            return this.defaultSettings.Has(settingName) ? this.defaultSettings[settingName] : false
+            return fallback
         }
     }
 
@@ -356,7 +366,11 @@ class Settings {
     ; Save settings from GUI
     static SaveSettings(controls, settingsGui) {
         ; Validate refresh interval
-        interval := Integer(controls.refreshInterval.Value)
+        try interval := Integer(controls.refreshInterval.Value)
+        catch {
+            MsgBox("Refresh interval must be a whole number of seconds.", "Invalid Setting", "Icon!")
+            return
+        }
         if (interval < 10) {
             MsgBox("Refresh interval must be at least 10 seconds.", "Invalid Setting", "Icon!")
             return

@@ -198,7 +198,11 @@ class KeybindGUI {
 
         KeybindGUI.isListening := true
         KeybindGUI.listeningControl := control
-        this.StartInputHook(funcName, control, promptGui)
+        try this.StartInputHook(funcName, control, promptGui)
+        catch as err {
+            this.StopListening()
+            throw err
+        }
         return true
     }
 
@@ -209,6 +213,19 @@ class KeybindGUI {
         ih.OnEnd := this.OnInputEnd.Bind(this, funcName, control, promptGui)
         KeybindGUI.activeInputHook := ih
         ih.Start()
+    }
+
+    ; Duplicate detection has to use the same identity as runtime registration and
+    ; profile validation. InputHook reports letters with canonical casing, while an
+    ; older profile may contain the same bind in lower case.
+    FindProfileBindingOwner(profile, hotkeyStr, exceptFuncName := "") {
+        identity := HotkeyManager.HotkeyIdentity(hotkeyStr)
+        for funcName, bind in profile.binds {
+            if (funcName != exceptFuncName
+                && HotkeyManager.HotkeyIdentity(bind) = identity)
+                return funcName
+        }
+        return ""
     }
 
     OnInputEnd(funcName, control, promptGui, ih?) {
@@ -232,7 +249,13 @@ class KeybindGUI {
         ; Skip if the key is just a modifier
         if key ~= "^[LR]?(Control|Alt|Shift|Win)$" {
             ; Create and start a new input hook since the old one is ended
-            this.StartInputHook(funcName, control, promptGui)
+            try this.StartInputHook(funcName, control, promptGui)
+            catch as err {
+                this.StopListening()
+                try promptGui.Destroy()
+                try this.ApplyBinds()
+                throw err
+            }
             return
         }
         
@@ -245,30 +268,36 @@ class KeybindGUI {
         
         newBind := modifiers key
         
-        ; Check if this hotkey is already assigned to another function
         currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
-        for otherFunc, otherBind in currentProfile.binds {
-            if (otherFunc != funcName && otherBind = newBind) {
-                MsgBox("This hotkey is already assigned to '" otherFunc "'", "Duplicate Binding", "Icon!")
+        hadBinding := currentProfile.binds.Has(funcName)
+        oldBind := hadBinding ? currentProfile.binds[funcName] : ""
+        bindingChanged := false
+        modifiedRow := 0
+
+        try {
+            ; Check if this hotkey is already assigned to another function
+            owner := this.FindProfileBindingOwner(currentProfile, newBind, funcName)
+            if owner {
+                MsgBox("This hotkey is already assigned to '" owner "'", "Duplicate Binding", "Icon!")
                 this.StopListening()
                 promptGui.Destroy()
                 ; Ensure binds are reapplied even on duplicate binding
                 this.ApplyBinds()
                 return
             }
-        }
-        
-        try {
+
             ; First disable all existing hotkeys
             HotkeyManager.DisableAllHotkeys()
             
             ; Update profile
-            ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName] := newBind
+            currentProfile.binds[funcName] := newBind
+            bindingChanged := true
             
             ; Find and update the ListView row before destroying the prompt
             Loop control.GetCount() {
                 if (control.GetText(A_Index, 1) = funcName) {
                     control.Modify(A_Index,, funcName, this.PrettifyHotkey(newBind))
+                    modifiedRow := A_Index
                     break
                 }
             }
@@ -280,8 +309,19 @@ class KeybindGUI {
             ; Reapply all binds
             this.ApplyBinds()
         } catch as err {
-            ; If anything goes wrong, ensure we reapply the binds
-            this.ApplyBinds()
+            if bindingChanged {
+                if hadBinding
+                    currentProfile.binds[funcName] := oldBind
+                else
+                    currentProfile.binds.Delete(funcName)
+            }
+            if modifiedRow
+                try control.Modify(modifiedRow,, funcName, this.PrettifyHotkey(oldBind))
+            this.StopListening()
+            try promptGui.Destroy()
+            ; Restore the last known-good registrations without masking the original
+            ; control/apply error if recovery itself has a problem.
+            try this.ApplyBinds()
             throw err
         }
     }
@@ -502,21 +542,26 @@ class KeybindGUI {
         }
         
         if (MsgBox("Are you sure you want to delete the custom function '" funcName "'?", "Confirm Delete", "YesNo Icon!") = "Yes") {
-            currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
+            profileName := ProfileManager.currentProfile
+            candidate := ProfileManager.CloneProfile(ProfileManager.profiles[profileName])
             
-            ; Remove from current profile's custom functions
-            currentProfile.customFuncs.Delete(funcName)
+            ; Remove from a candidate and publish it only after the atomic file save.
+            candidate.customFuncs.Delete(funcName)
             
             ; Remove from current profile's bindings if it exists
-            if (currentProfile.binds.Has(funcName)) {
-                currentProfile.binds.Delete(funcName)
+            if (candidate.binds.Has(funcName)) {
+                candidate.binds.Delete(funcName)
             }
-            if (currentProfile.scopes.Has(funcName)) {
-                currentProfile.scopes.Delete(funcName)
+            if (candidate.scopes.Has(funcName)) {
+                candidate.scopes.Delete(funcName)
             }
 
-            ; Save the current profile
-            ProfileManager.SaveProfile(ProfileManager.currentProfile, currentProfile)
+            try ProfileManager.SaveProfile(profileName, candidate)
+            catch as err {
+                MsgBox("The custom function could not be deleted. The previous profile was left unchanged.`n`n" err.Message, "Delete Failed", "Icon!")
+                return
+            }
+            ProfileManager.profiles[profileName] := candidate
 
             ; Just destroy both GUIs and recreate them
             selectorGui.Destroy()
@@ -739,19 +784,19 @@ class KeybindGUI {
     }
 
     SaveModalityAttendings(edits, modGui) {
+        profileName := ProfileManager.currentProfile
+        candidate := ProfileManager.CloneProfile(ProfileManager.profiles[profileName])
         for modality, edit in edits {
-            ProfileManager.SetModalityAttending(modality, Trim(edit.Value))
+            candidate.modalityAttendings[modality] := Trim(edit.Value)
         }
 
         try {
-            ProfileManager.SaveProfile(
-                ProfileManager.currentProfile,
-                ProfileManager.profiles[ProfileManager.currentProfile]
-            )
+            ProfileManager.SaveProfile(profileName, candidate)
         } catch as err {
             MsgBox("The attending assignments could not be saved. The previous file was left unchanged.`n`n" err.Message, "Save Failed", "Icon!")
             return
         }
+        ProfileManager.profiles[profileName] := candidate
         modGui.Destroy()
     }
 }

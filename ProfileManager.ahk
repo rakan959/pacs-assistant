@@ -28,6 +28,22 @@ class ProfileManager {
         }
     }
 
+    ; Deep-enough copy for transactional GUI edits. Every current leaf is an immutable
+    ; string, except custom command records, which are copied explicitly.
+    static CloneProfile(profile) {
+        this.ValidateProfile(profile)
+        clone := this.NewProfile()
+        for funcName, bind in profile.binds
+            clone.binds[funcName] := bind
+        for funcName, config in profile.customFuncs
+            clone.customFuncs[funcName] := {keys: config.keys, window: config.window}
+        for funcName, scope in profile.scopes
+            clone.scopes[funcName] := scope
+        for modality, attending in profile.modalityAttendings
+            clone.modalityAttendings[modality] := attending
+        return clone
+    }
+
     static LoadProfiles() {
         ; Always refresh the in-memory profiles from disk
         previousProfile := this.currentProfile
@@ -36,7 +52,9 @@ class ProfileManager {
 
         if DirExist(this.profilesPath) {
             Loop Files this.profilesPath "\*.ini" {
-                profileName := StrReplace(A_LoopFileName, ".ini")
+                ; Remove only the enumerated extension. StrReplace removed embedded
+                ; occurrences too, so reading.ini.room.ini reloaded as reading.room.
+                profileName := SubStr(A_LoopFileName, 1, -4)
                 try {
                     this.profiles[profileName] := this.LoadProfile(A_LoopFilePath)
                 } catch as err {
@@ -89,6 +107,24 @@ class ProfileManager {
                     }
                 }
             }
+        }
+
+        ; New profiles persist the custom-command library independently of bindings,
+        ; because removing a custom bind intentionally keeps the command available to
+        ; add again. The legacy path above still loads bound custom commands from
+        ; [Functions] Order when this independent order is absent.
+        customFunctionList := StrSplit(IniRead(path, "CustomFunctions", "Order", ""), "|")
+        for funcName in customFunctionList {
+            if (funcName = "")
+                continue
+            this.RequireSafeIniKey(funcName, "function")
+            if (InStr(funcName, "Custom: ") != 1)
+                throw Error("Custom command name is missing the 'Custom: ' prefix")
+            keys := IniRead(path, "CustomFunctions", funcName "_keys", "")
+            window := IniRead(path, "CustomFunctions", funcName "_window", "")
+            if (keys = "")
+                throw Error("Custom command is missing keys: " funcName)
+            profile.customFuncs[funcName] := {keys: keys, window: window}
         }
 
         ; Modality -> attending assignments. Only the modalities named in Order are
@@ -149,7 +185,12 @@ class ProfileManager {
             IniWrite(profile.scopes.Has(funcName) ? profile.scopes[funcName] : "Any", path, "Scopes", funcName)
         }
 
-        ; Save custom function configurations
+        ; Save custom function configurations independently of bindings so an unbound
+        ; command survives and remains available in the Add Function dialog.
+        customFunctionList := ""
+        for funcName, _ in profile.customFuncs
+            customFunctionList .= funcName "|"
+        IniWrite(customFunctionList, path, "CustomFunctions", "Order")
         for funcName, func in profile.customFuncs {
             if (InStr(funcName, "Custom: ") = 1) {
                 IniWrite(func.keys, path, "CustomFunctions", funcName "_keys")
@@ -186,7 +227,7 @@ class ProfileManager {
         }
         for funcName, config in profile.customFuncs {
             this.RequireSafeIniKey(funcName, "function")
-            if (!profile.binds.Has(funcName)
+            if (InStr(funcName, "Custom: ") != 1
                 || !IsObject(config)
                 || !HasProp(config, "keys")
                 || Type(config.keys) != "String"
@@ -327,19 +368,31 @@ class ProfileManager {
             return false  ; Don't allow deleting the last profile
         }
 
-        try {
-            FileDelete(this.ProfilePath(name))
-            this.profiles.Delete(name)
-
-            ; If we deleted the default profile, clear it
-            if (this.defaultProfile = name) {
-                this.defaultProfile := ""
-                IniDelete(this.configPath, "Settings", "DefaultProfile")
+        wasDefault := this.defaultProfile = name
+        if wasDefault {
+            ; Clear the reference before deleting the only copy. If config cannot be
+            ; updated, the operation must remain a no-op rather than report failure
+            ; after the profile has already disappeared.
+            try IniDelete(this.configPath, "Settings", "DefaultProfile")
+            catch {
+                return false
             }
-            return true
-        } catch {
+        }
+
+        try FileDelete(this.ProfilePath(name))
+        catch {
+            if wasDefault {
+                try IniWrite(name, this.configPath, "Settings", "DefaultProfile")
+                catch as rollbackError
+                    OutputDebug("Default profile rollback failed: " rollbackError.Message)
+            }
             return false
         }
+
+        this.profiles.Delete(name)
+        if wasDefault
+            this.defaultProfile := ""
+        return true
     }
 
     static RenameProfile(oldName, newName) {

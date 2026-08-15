@@ -7,7 +7,11 @@ class KeybindGUITest {
         "TestSelectedFunctionPrefersBuiltIn",
         "TestSelectedFunctionSurvivesMissingCustomList",
         "TestPrettifyHotkey",
-        "TestCustomFunctionNameChecksUnboundFunctions"
+        "TestCustomFunctionNameChecksUnboundFunctions",
+        "TestProfileBindingOwnerUsesRuntimeIdentity",
+        "TestCaptureFailureRestoresBindingAndHookState",
+        "TestFailedModalitySavePreservesLiveProfile",
+        "TestFailedCustomDeletePreservesLiveProfile"
     ]
 
     Setup() {
@@ -46,5 +50,165 @@ class KeybindGUITest {
 
         Assert.False(this.gui.CustomFunctionNameAvailable(profile, "Custom: Existing"))
         Assert.True(this.gui.CustomFunctionNameAvailable(profile, "Custom: New"))
+    }
+
+    TestProfileBindingOwnerUsesRuntimeIdentity() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Existing"] := "^s"
+        profile.binds["Editing"] := "^e"
+
+        Assert.Equal(
+            "Existing",
+            this.gui.FindProfileBindingOwner(profile, "^S", "Editing")
+        )
+        Assert.Equal("", this.gui.FindProfileBindingOwner(profile, "^e", "Editing"))
+    }
+
+    TestCaptureFailureRestoresBindingAndHookState() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalFunctions := HotkeyManager.hotkeyFunctions
+        originalListening := KeybindGUI.isListening
+        originalControl := KeybindGUI.listeningControl
+        originalHook := KeybindGUI.activeInputHook
+
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        profile.scopes["Sign Report"] := "Any"
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        hook := FakeCaptureHook("F13")
+        prompt := FakeProfileDialog()
+        KeybindGUI.isListening := true
+        KeybindGUI.listeningControl := FailingListView()
+        KeybindGUI.activeInputHook := hook
+
+        threw := false
+        try this.gui.OnInputEnd("Sign Report", KeybindGUI.listeningControl, prompt, hook)
+        catch {
+            threw := true
+        }
+
+        capturedBind := profile.binds["Sign Report"]
+        capturedListening := KeybindGUI.isListening
+        capturedActiveHook := KeybindGUI.activeInputHook
+        capturedStopped := hook.stopped
+        capturedDestroyed := prompt.destroyed
+
+        HotkeyManager.DisableAllHotkeys()
+        HotkeyManager.hotkeyFunctions := originalFunctions
+        this.gui.StopListening()
+        KeybindGUI.isListening := originalListening
+        KeybindGUI.listeningControl := originalControl
+        KeybindGUI.activeInputHook := originalHook
+        ProfileManager.profiles := originalProfiles
+        ProfileManager.currentProfile := originalCurrent
+
+        Assert.True(threw)
+        Assert.Equal("^s", capturedBind)
+        Assert.False(capturedListening)
+        Assert.Equal(0, capturedActiveHook)
+        Assert.True(capturedStopped)
+        Assert.True(capturedDestroyed)
+    }
+
+    TestFailedModalitySavePreservesLiveProfile() {
+        state := this.PrepareBlockedProfileSave()
+        profile := ProfileManager.NewProfile()
+        profile.modalityAttendings["Neuro"] := "Old Attending"
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        dialog := FakeProfileDialog()
+
+        try {
+            this.gui.SaveModalityAttendings(
+                Map("Neuro", {Value: "New Attending"}),
+                dialog
+            )
+            savedValue := ProfileManager.profiles["Test"].modalityAttendings["Neuro"]
+            destroyed := dialog.destroyed
+        } finally {
+            this.RestoreBlockedProfileSave(state)
+        }
+
+        Assert.Equal("Old Attending", savedValue)
+        Assert.False(destroyed)
+    }
+
+    TestFailedCustomDeletePreservesLiveProfile() {
+        state := this.PrepareBlockedProfileSave()
+        profile := ProfileManager.NewProfile()
+        profile.binds["Custom: Keep"] := "^k"
+        profile.scopes["Custom: Keep"] := "Any"
+        profile.customFuncs["Custom: Keep"] := {keys: "HELLO", window: ""}
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        dialog := FakeProfileDialog()
+        threw := false
+
+        try {
+            try this.gui.DeleteCustomFunction("Custom: Keep", dialog)
+            catch {
+                threw := true
+            }
+            stillConfigured := ProfileManager.profiles["Test"].customFuncs.Has("Custom: Keep")
+            stillBound := ProfileManager.profiles["Test"].binds.Has("Custom: Keep")
+            destroyed := dialog.destroyed
+        } finally {
+            this.RestoreBlockedProfileSave(state)
+        }
+
+        Assert.False(threw)
+        Assert.True(stillConfigured)
+        Assert.True(stillBound)
+        Assert.False(destroyed)
+    }
+
+    PrepareBlockedProfileSave() {
+        state := {
+            profiles: ProfileManager.profiles,
+            current: ProfileManager.currentProfile,
+            profilesPath: ProfileManager.profilesPath,
+            tempRoot: A_Temp "\pacs_gui_profile_" A_TickCount
+        }
+        try DirDelete(state.tempRoot, true)
+        DirCreate(state.tempRoot)
+        FileAppend("not a directory", state.tempRoot "\blocked")
+        ProfileManager.profilesPath := state.tempRoot "\blocked"
+        return state
+    }
+
+    RestoreBlockedProfileSave(state) {
+        ProfileManager.profiles := state.profiles
+        ProfileManager.currentProfile := state.current
+        ProfileManager.profilesPath := state.profilesPath
+        try DirDelete(state.tempRoot, true)
+    }
+}
+
+class FailingListView {
+    GetCount() {
+        throw Error("simulated ListView failure")
+    }
+}
+
+class FakeCaptureHook {
+    __New(endKey) {
+        this.EndKey := endKey
+        this.stopped := false
+    }
+
+    Stop() {
+        this.stopped := true
+    }
+}
+
+class FakeProfileDialog {
+    __New() {
+        this.destroyed := false
+    }
+
+    Destroy() {
+        this.destroyed := true
     }
 }

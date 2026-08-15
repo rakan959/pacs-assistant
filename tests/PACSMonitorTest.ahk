@@ -8,6 +8,7 @@ class PACSMonitorTest {
         "TestHasAccession",
         "TestProcessRowsFindsNewStudies",
         "TestRepeatedAccessionAlertsOnce",
+        "TestInterruptedScanDoesNotConsumeUnalertedAccessions",
         "TestMonitoringUsesTestMode",
         "TestOnSettingsChangedRespectsAutoRefresh",
         "TestRefreshFailureNotificationUsesTextThenTitle",
@@ -80,6 +81,23 @@ class PACSMonitorTest {
         PACSMonitor.testLastNewStudies := []
         PACSMonitor.RefreshAndCheck()
         Assert.Equal(0, PACSMonitor.testLastNewStudies.Length)
+    }
+
+    ; UIA enumeration can fail after some rows have already been read. Accessions from
+    ; that partial pass must remain eligible for the next successful scan.
+    TestInterruptedScanDoesNotConsumeUnalertedAccessions() {
+        rows := [
+            {Name: "CT HEAD WITHOUT CONTRAST 12345678"},
+            {}  ; reading Name raises, simulating a stale UIA row
+        ]
+
+        Assert.Throws(() => PACSMonitor.ProcessRows(rows, true))
+        Assert.False(PACSMonitor.HasAccession("12345678"))
+
+        PACSMonitor.testLastNewStudies := []
+        PACSMonitor.ProcessRows([{Name: "CT HEAD WITHOUT CONTRAST 12345678"}], true)
+        Assert.Equal(1, PACSMonitor.testLastNewStudies.Length)
+        Assert.True(PACSMonitor.HasAccession("12345678"))
     }
 
     TestMonitoringUsesTestMode() {

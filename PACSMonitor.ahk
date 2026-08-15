@@ -282,6 +282,7 @@ class PACSMonitor {
 
     static ProcessRows(rows, isTest := false) {
         newStudies := []
+        pendingAccessions := Map()
 
         for row in rows {
             rowText := row.Name
@@ -298,13 +299,13 @@ class PACSMonitor {
                 studyType := Trim(studyMatch[0])
 
                 for acc in accessions {
-                    ; Claim the accession as it is taken. Marking them only after the
-                    ; whole scan meant an accession appearing in two rows of the same
-                    ; pass was reported - and recorded - twice.
-                    if this.HasAccession(acc)
+                    ; Deduplicate within this pass without mutating durable scan state.
+                    ; A later stale UIA row can still throw; committing here would make
+                    ; earlier accessions look alerted before AlertNewCases has run.
+                    if (this.HasAccession(acc) || pendingAccessions.Has(acc))
                         continue
 
-                    this.MarkAccessionSeen(acc)
+                    pendingAccessions[acc] := true
                     newStudies.Push({
                         studyType: studyType,
                         accession: acc
@@ -321,6 +322,12 @@ class PACSMonitor {
                 this.AlertNewCases(newStudies)
             }
         }
+
+        ; Commit only after the complete traversal and alert path succeed. Retrying a
+        ; failed pass may duplicate a notification; committing early can lose it
+        ; forever, which is the unsafe direction for a clinical worklist alert.
+        for accession, _ in pendingAccessions
+            this.MarkAccessionSeen(accession)
 
         return newStudies
     }

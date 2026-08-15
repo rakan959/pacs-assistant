@@ -5,10 +5,13 @@
 class ProfileManagerTest {
     static Tests := [
         "TestProfileSaveAndLoad",
+        "TestProfileNameContainingIniRoundTrips",
         "TestDefaultProfileTracking",
         "TestProfileRename",
         "TestProfileDeletionRules",
+        "TestFailedDefaultDeletionPreservesProfile",
         "TestCustomFunctionPersistence",
+        "TestUnboundCustomFunctionPersistence",
         "TestScopePersistence",
         "TestScopeDefaultsToAnyWhenAbsent",
         "TestLegacyScopeMigration",
@@ -55,6 +58,20 @@ class ProfileManagerTest {
         Assert.Equal("^d", ProfileManager.profiles["TestProfile"].binds["Toggle Dictation"])
     }
 
+    TestProfileNameContainingIniRoundTrips() {
+        name := "reading.ini.room"
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        ProfileManager.profiles[name] := profile
+        ProfileManager.SaveProfile(name, profile)
+
+        ProfileManager.LoadProfiles()
+
+        Assert.True(ProfileManager.profiles.Has(name))
+        Assert.Equal("^s", ProfileManager.profiles[name].binds["Sign Report"])
+        Assert.Equal(1, ProfileManager.profiles.Count)
+    }
+
     TestDefaultProfileTracking() {
         ProfileManager.profiles["DefaultTest"] := ProfileManager.NewProfile()
         Assert.True(ProfileManager.SetDefaultProfile("DefaultTest"))
@@ -87,6 +104,24 @@ class ProfileManagerTest {
         Assert.True(ProfileManager.profiles.Has("Two"))
     }
 
+    TestFailedDefaultDeletionPreservesProfile() {
+        for name in ["One", "Two"] {
+            ProfileManager.profiles[name] := ProfileManager.NewProfile()
+            ProfileManager.SaveProfile(name, ProfileManager.profiles[name])
+        }
+        Assert.True(ProfileManager.SetDefaultProfile("One"))
+
+        ; Make the config path unwritable as an INI target. Deletion must fail before
+        ; the profile file or in-memory profile is removed.
+        FileDelete(ProfileManager.configPath)
+        DirCreate(ProfileManager.configPath)
+
+        Assert.False(ProfileManager.DeleteProfile("One"))
+        Assert.True(ProfileManager.profiles.Has("One"))
+        Assert.True(FileExist(ProfileManager.ProfilePath("One")) != "")
+        Assert.Equal("One", ProfileManager.defaultProfile)
+    }
+
     TestCustomFunctionPersistence() {
         profile := ProfileManager.NewProfile()
         profile.binds["Custom: Test"] := "^t"
@@ -100,6 +135,20 @@ class ProfileManagerTest {
         loaded := ProfileManager.profiles["CustomProfile"].customFuncs["Custom: Test"]
         Assert.Equal("{Tab}", loaded.keys)
         Assert.Equal("TestWindow", loaded.window)
+    }
+
+    TestUnboundCustomFunctionPersistence() {
+        profile := ProfileManager.NewProfile()
+        profile.customFuncs["Custom: Saved For Later"] := {keys: "{Tab}", window: "PowerScribe"}
+
+        ProfileManager.profiles["CustomLibrary"] := profile
+        ProfileManager.SaveProfile("CustomLibrary", profile)
+        ProfileManager.LoadProfiles()
+
+        loaded := ProfileManager.profiles["CustomLibrary"]
+        Assert.True(loaded.customFuncs.Has("Custom: Saved For Later"))
+        Assert.False(loaded.binds.Has("Custom: Saved For Later"))
+        Assert.Equal("{Tab}", loaded.customFuncs["Custom: Saved For Later"].keys)
     }
 
     TestScopePersistence() {

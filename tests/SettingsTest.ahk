@@ -6,6 +6,7 @@ class SettingsTest {
     static Tests := [
         "TestDefaultSettingsLoaded",
         "TestSetAndGetValues",
+        "TestMalformedPersistedSettingsUseDefaults",
         "TestAlertSoundsAreDistinct",
         "TestLegacyAliasesAreSelectable",
         "TestLegacySoundNamesMigrate",
@@ -54,6 +55,14 @@ class SettingsTest {
         
         Settings.Set("AlertSound", "Asterisk")
         Assert.Equal("Asterisk", Settings.Get("AlertSound"))
+    }
+
+    TestMalformedPersistedSettingsUseDefaults() {
+        IniWrite("-1", Settings.settingsFile, "Settings", "RefreshInterval")
+        IniWrite("not-a-boolean", Settings.settingsFile, "Settings", "AutoUpdate")
+
+        Assert.Equal(Settings.defaultSettings["RefreshInterval"], Settings.Get("RefreshInterval"))
+        Assert.Equal(Settings.defaultSettings["AutoUpdate"], Settings.Get("AutoUpdate"))
     }
     
     ; The alert sounds used to be MessageBeep aliases, which the stock Windows sound
