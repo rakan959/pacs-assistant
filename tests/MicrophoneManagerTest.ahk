@@ -8,16 +8,19 @@ class MicrophoneManagerTest {
         "WaitForSelectionIgnoresDisplayCasing",
         "MicrophoneComboRequiresExactIdentityAndCapability",
         "MicrophoneComboMustBeUniqueWithinTheExactWindow",
+        "UnreadableMicrophoneComboAlongsideValidFailsClosed",
         "PartialMicrophoneNameMustResolveUniquely",
         "ExactMicrophoneNameWinsOverPartialMatches",
         "MicrophoneItemMustBelongToTheExactCombo",
+        "UnreadableMicrophoneItemAlongsideValidDoesNotSelect",
         "SelectionUsesOneExactItemWithoutDirectTextWrite",
         "SelectedItemCannotReplaceTheComboValuePostcondition",
         "AmbiguousPartialSelectionDoesNotMutate",
         "PickerLookupErrorsReachTheBoundedFailureNotification",
         "FinalSelectionFailureNotifiesOnce",
         "OperationalErrorIsRecorded",
-        "PickerReappearanceStartsANewLoginSession"
+        "PickerReappearanceStartsANewLoginSession",
+        "RecycledWindowHandleWithNewProcessStartsANewLoginSession"
     ]
 
     Setup() {
@@ -34,6 +37,7 @@ class MicrophoneManagerTest {
         MicrophoneManager.lastError := ""
         MicrophoneManager.pickerPresent := false
         MicrophoneManager.attemptedWindow := 0
+        MicrophoneManager.attemptedProcessId := 0
     }
 
     WaitForSelectionRequiresTheExactResolvedValue() {
@@ -104,6 +108,18 @@ class MicrophoneManagerTest {
         Assert.Equal(0, result.combo)
     }
 
+    UnreadableMicrophoneComboAlongsideValidFailsClosed() {
+        fixture := MicrophoneFixture(["PowerMic III"])
+        fixture.root.combos.Push(UnreadableMicrophoneCombo(
+            fixture.session.processId,
+            fixture.session.hwnd
+        ))
+
+        result := MicrophoneManager.ResolveMicrophoneComboInRoot(fixture.root)
+        Assert.Equal("error", result.status)
+        Assert.Equal(0, result.combo)
+    }
+
     PartialMicrophoneNameMustResolveUniquely() {
         fixture := MicrophoneFixture(["PowerMic III", "PowerMic Mobile"])
 
@@ -144,6 +160,29 @@ class MicrophoneManagerTest {
             fixture.combo,
             "PowerMic"
         ))
+    }
+
+    UnreadableMicrophoneItemAlongsideValidDoesNotSelect() {
+        fixture := MicrophoneFixture(["PowerMic III"])
+        unreadable := UnreadableMicrophoneItem(
+            fixture.session.processId,
+            fixture.session.hwnd,
+            fixture.combo
+        )
+        fixture.items.Push(unreadable)
+        fixture.combo.items := fixture.items
+        fixture.root.items := fixture.items
+        MicrophoneManager.sessionDriver := fixture.driver
+
+        succeeded := MicrophoneManager.SelectMicrophone(
+            fixture.session,
+            fixture.combo,
+            "PowerMic"
+        )
+
+        Assert.False(succeeded)
+        Assert.Equal(0, fixture.items[1].selectCalls)
+        Assert.True(InStr(MicrophoneManager.lastError, "unreadable microphone item") > 0)
     }
 
     SelectionUsesOneExactItemWithoutDirectTextWrite() {
@@ -242,6 +281,26 @@ class MicrophoneManagerTest {
         Assert.Equal(0, MicrophoneManager.attempts)
     }
 
+    RecycledWindowHandleWithNewProcessStartsANewLoginSession() {
+        MicrophoneManager.attemptedWindow := 100
+        MicrophoneManager.attemptedProcessId := 41
+        MicrophoneManager.attempts := MicrophoneManager.maxAttempts
+        MicrophoneManager.failureNotified := true
+        MicrophoneManager.lastError := "old process failure"
+
+        changed := MicrophoneManager.RecordAttemptedSession({
+            hwnd: 100,
+            processId: 42
+        })
+
+        Assert.True(changed)
+        Assert.Equal(100, MicrophoneManager.attemptedWindow)
+        Assert.Equal(42, MicrophoneManager.attemptedProcessId)
+        Assert.Equal(0, MicrophoneManager.attempts)
+        Assert.False(MicrophoneManager.failureNotified)
+        Assert.Equal("", MicrophoneManager.lastError)
+    }
+
     Teardown() {
         MicrophoneManager.notifier := this.originalNotifier
         MicrophoneManager.sessionDriver := this.originalSessionDriver
@@ -250,6 +309,7 @@ class MicrophoneManagerTest {
         MicrophoneManager.lastError := ""
         MicrophoneManager.pickerPresent := false
         MicrophoneManager.attemptedWindow := 0
+        MicrophoneManager.attemptedProcessId := 0
     }
 }
 
@@ -385,6 +445,20 @@ class FakeMicrophoneCombo {
     }
 }
 
+class UnreadableMicrophoneCombo {
+    __New(processId, windowId) {
+        this.ProcessId := processId
+        this.WinId := windowId
+        this.AutomationId := MicrophoneManager.comboAutomationId
+    }
+
+    Type {
+        get {
+            throw Error("unreadable microphone combo")
+        }
+    }
+}
+
 class FakeMicrophoneExpandPattern {
     __New(combo) {
         this.combo := combo
@@ -419,6 +493,21 @@ class FakeMicrophoneItem {
         if (propertyId = UIA.Property.SelectionItemIsSelected)
             return this.selected
         return ""
+    }
+}
+
+class UnreadableMicrophoneItem {
+    __New(processId, windowId, combo) {
+        this.ProcessId := processId
+        this.WinId := windowId
+        this.Name := "PowerMic III"
+        this.combo := combo
+    }
+
+    Type {
+        get {
+            throw Error("unreadable microphone item")
+        }
     }
 }
 

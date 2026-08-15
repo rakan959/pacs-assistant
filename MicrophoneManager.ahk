@@ -55,6 +55,7 @@ class MicrophoneManager {
     ; Login window currently being worked on, and how many times it has been tried.
     ; Bounded so a mismatched microphone name cannot retry forever.
     static attemptedWindow := 0
+    static attemptedProcessId := 0
     static attempts := 0
     static maxAttempts := 3
     static pickerPresent := false
@@ -84,6 +85,7 @@ class MicrophoneManager {
             this.pollTimer := 0
         }
         this.attemptedWindow := 0
+        this.attemptedProcessId := 0
         this.pickerPresent := false
         this.ResetAttemptState()
     }
@@ -101,6 +103,7 @@ class MicrophoneManager {
             if (resolution.status == "absent") {
                 ; PowerScribe closed - allow the next login to be handled
                 this.attemptedWindow := 0
+                this.attemptedProcessId := 0
                 this.pickerPresent := false
                 this.ResetAttemptState()
                 return
@@ -123,11 +126,7 @@ class MicrophoneManager {
                 throw Error("PowerScribe window resolution returned an invalid unique result")
             session := resolution.session
 
-            if (session.hwnd != this.attemptedWindow) {
-                this.attemptedWindow := session.hwnd
-                this.pickerPresent := false
-                this.ResetAttemptState()
-            }
+            this.RecordAttemptedSession(session)
 
             comboResult := this.ResolveMicrophoneCombo(session)
             if (comboResult.status == "absent") {
@@ -175,6 +174,25 @@ class MicrophoneManager {
         this.attempts := 0
         this.failureNotified := false
         this.lastError := ""
+    }
+
+    ; HWNDs can be recycled across PowerScribe processes without an observed absent
+    ; poll. Treat the concrete HWND/PID pair as the retry-session identity.
+    static RecordAttemptedSession(session) {
+        if (!IsObject(session)
+            || !HasProp(session, "hwnd")
+            || !HasProp(session, "processId")
+            || session.hwnd <= 0
+            || session.processId <= 0)
+            throw Error("PowerScribe login session identity is invalid")
+        if (session.hwnd = this.attemptedWindow
+            && session.processId = this.attemptedProcessId)
+            return false
+        this.attemptedWindow := session.hwnd
+        this.attemptedProcessId := session.processId
+        this.pickerPresent := false
+        this.ResetAttemptState()
+        return true
     }
 
     ; A picker presence interval is one login session. Once it disappears, a later
@@ -225,7 +243,7 @@ class MicrophoneManager {
                 throw Error("microphone picker lookup returned an invalid collection")
             matches := []
             for candidate in candidates {
-                if (this.IsExpectedMicrophoneCombo(root, candidate)
+                if (this.InspectMicrophoneCombo(root, candidate)
                     && !this.ContainsSameElement(matches, candidate))
                     matches.Push(candidate)
             }
@@ -251,9 +269,14 @@ class MicrophoneManager {
     }
 
     static IsExpectedMicrophoneCombo(root, candidate) {
+        try return this.InspectMicrophoneCombo(root, candidate)
+        return false
+    }
+
+    static InspectMicrophoneCombo(root, candidate) {
         if !root || !candidate
             return false
-        try return root.ProcessId > 0
+        return root.ProcessId > 0
             && root.WinId > 0
             && candidate.ProcessId = root.ProcessId
             && candidate.WinId = root.WinId
@@ -261,29 +284,30 @@ class MicrophoneManager {
             && candidate.AutomationId == this.comboAutomationId
             && candidate.IsEnabled
             && candidate.IsExpandCollapsePatternAvailable
-        return false
     }
 
     static IsExpectedMicrophoneItem(root, combo, item) {
+        try return this.InspectMicrophoneItem(root, combo, item)
+        return false
+    }
+
+    static InspectMicrophoneItem(root, combo, item) {
         if (!root
             || !combo
             || !item
-            || !this.IsExpectedMicrophoneCombo(root, combo))
+            || !this.InspectMicrophoneCombo(root, combo))
             return false
-        try {
-            if !(root.ProcessId > 0
-                && root.WinId > 0
-                && item.ProcessId = root.ProcessId
-                && item.WinId = root.WinId
-                && item.Type = UIA.Type.ListItem
-                && item.IsEnabled
-                && item.IsSelectionItemPatternAvailable
-                && Trim(item.Name) != "")
-                return false
-            container := item.SelectionItemPattern.SelectionContainer
-            return this.SameElement(container, combo)
-        }
-        return false
+        if !(root.ProcessId > 0
+            && root.WinId > 0
+            && item.ProcessId = root.ProcessId
+            && item.WinId = root.WinId
+            && item.Type = UIA.Type.ListItem
+            && item.IsEnabled
+            && item.IsSelectionItemPatternAvailable
+            && Trim(item.Name) != "")
+            return false
+        container := item.SelectionItemPattern.SelectionContainer
+        return this.SameElementStrict(container, combo)
     }
 
     static ContainsSameElement(elements, candidate) {
@@ -303,45 +327,81 @@ class MicrophoneManager {
         return false
     }
 
-    static FindMicrophoneItems(root, combo) {
-        items := []
-        try {
-            for item in combo.FindElements({Type: "ListItem"}) {
-                if (this.IsExpectedMicrophoneItem(root, combo, item)
-                    && !this.ContainsSameElement(items, item))
-                    items.Push(item)
-            }
-        }
-        ; Some UI frameworks host the open dropdown beside the ComboBox in the same
-        ; top-level window, so enumerate the exact root as well and deduplicate.
-        try {
-            for item in root.FindElements({Type: "ListItem"}) {
-                if (this.IsExpectedMicrophoneItem(root, combo, item)
-                    && !this.ContainsSameElement(items, item))
-                    items.Push(item)
-            }
-        }
-        return items
+    static SameElementStrict(left, right) {
+        if !left || !right
+            return false
+        if (ObjPtr(left) = ObjPtr(right))
+            return true
+        return UIA.CompareElementsEx(left, right)
     }
 
-    static ResolveMicrophoneItem(root, combo, configuredName) {
+    static ResolveMicrophoneItems(root, combo) {
+        items := []
+        try {
+            if !this.InspectMicrophoneCombo(root, combo)
+                throw Error("the microphone picker no longer has its expected identity")
+            comboItems := combo.FindElements({Type: "ListItem"})
+            if !IsObject(comboItems)
+                throw Error("microphone item lookup returned an invalid collection")
+            for item in comboItems {
+                if (this.InspectMicrophoneItem(root, combo, item)
+                    && !this.ContainsSameElement(items, item))
+                    items.Push(item)
+            }
+            ; Some UI frameworks host the open dropdown beside the ComboBox in the
+            ; same top-level window, so enumerate the exact root as well and dedupe.
+            rootItems := root.FindElements({Type: "ListItem"})
+            if !IsObject(rootItems)
+                throw Error("microphone item lookup returned an invalid collection")
+            for item in rootItems {
+                if (this.InspectMicrophoneItem(root, combo, item)
+                    && !this.ContainsSameElement(items, item))
+                    items.Push(item)
+            }
+        } catch as err {
+            return {status: "error", items: [], error: err.Message}
+        }
+        return items.Length
+            ? {status: "found", items: items, error: ""}
+            : {status: "absent", items: [], error: ""}
+    }
+
+    static ResolveMicrophoneItemResult(root, combo, configuredName) {
         configuredName := Trim(configuredName)
-        if (configuredName = ""
-            || !this.IsExpectedMicrophoneCombo(root, combo))
-            return 0
+        if (configuredName = "")
+            return {status: "absent", selection: 0, error: ""}
+
+        itemResult := this.ResolveMicrophoneItems(root, combo)
+        if (itemResult.status == "error")
+            return {status: "error", selection: 0, error: itemResult.error}
 
         exact := []
         partial := []
-        for item in this.FindMicrophoneItems(root, combo) {
-            fullName := Trim(item.Name)
-            if (StrCompare(fullName, configuredName, false) = 0)
-                exact.Push({item: item, name: fullName})
-            else if InStr(fullName, configuredName, false)
-                partial.Push({item: item, name: fullName})
+        try {
+            for item in itemResult.items {
+                fullName := Trim(item.Name)
+                if (StrCompare(fullName, configuredName, false) = 0)
+                    exact.Push({item: item, name: fullName})
+                else if InStr(fullName, configuredName, false)
+                    partial.Push({item: item, name: fullName})
+            }
+        } catch as err {
+            return {status: "error", selection: 0, error: err.Message}
         }
-        if exact.Length
-            return exact.Length = 1 ? exact[1] : 0
-        return partial.Length = 1 ? partial[1] : 0
+        if exact.Length = 1
+            return {status: "found", selection: exact[1], error: ""}
+        if exact.Length > 1
+            return {status: "ambiguous", selection: 0, error: "multiple exact microphone items were found"}
+        if partial.Length = 1
+            return {status: "found", selection: partial[1], error: ""}
+        if partial.Length > 1
+            return {status: "ambiguous", selection: 0, error: "the microphone name matches multiple devices"}
+        return {status: "absent", selection: 0, error: ""}
+    }
+
+    static ResolveMicrophoneItem(root, combo, configuredName) {
+        result := this.ResolveMicrophoneItemResult(root, combo, configuredName)
+        return result.status == "found" ? result.selection : 0
     }
 
     static RevalidateCombo(session, expectedCombo) {
@@ -395,11 +455,14 @@ class MicrophoneManager {
         current := this.RevalidateCombo(session, combo)
         if !current
             return false
-        resolved := this.ResolveMicrophoneItem(current.root, current.combo, micName)
-        if !resolved {
+        itemResult := this.ResolveMicrophoneItemResult(current.root, current.combo, micName)
+        if (itemResult.status == "error")
+            this.RecordOperationalError(itemResult.error)
+        if !(itemResult.status == "found") {
             this.CollapseVerifiedCombo(session, combo)
             return false
         }
+        resolved := itemResult.selection
 
         if this.WaitForSelection(session, resolved.name, 0) {
             this.CollapseVerifiedCombo(session, combo)
@@ -411,7 +474,14 @@ class MicrophoneManager {
         current := this.RevalidateCombo(session, combo)
         if !current
             return false
-        liveResolved := this.ResolveMicrophoneItem(current.root, current.combo, micName)
+        liveResult := this.ResolveMicrophoneItemResult(current.root, current.combo, micName)
+        if (liveResult.status == "error")
+            this.RecordOperationalError(liveResult.error)
+        if !(liveResult.status == "found") {
+            this.CollapseVerifiedCombo(session, combo)
+            return false
+        }
+        liveResolved := liveResult.selection
         if (!liveResolved
             || !(liveResolved.name == resolved.name)
             || !this.SameElement(liveResolved.item, resolved.item)) {
