@@ -51,6 +51,7 @@ $releaseValidatorPath = Join-Path $repoRoot 'scripts/ValidateExistingRelease.ps1
 $releaseTagCommitValidatorPath = Join-Path $repoRoot 'scripts/AssertReleaseTagCommit.ps1'
 $releaseFinderPath = Join-Path $repoRoot 'scripts/FindReleaseByTag.ps1'
 $ownedDraftValidatorPath = Join-Path $repoRoot 'scripts/ValidateOwnedDraftRelease.ps1'
+$publishFailureClassifierPath = Join-Path $repoRoot 'scripts/ClassifyReleaseAfterPublishFailure.ps1'
 $releaseValidator = if (Test-Path -LiteralPath $releaseValidatorPath -PathType Leaf) {
     Get-Content -Raw -LiteralPath $releaseValidatorPath
 } else {
@@ -173,6 +174,74 @@ if (-not (Test-Path -LiteralPath $ownedDraftValidatorPath -PathType Leaf)) {
         }
     }
 }
+
+if (-not (Test-Path -LiteralPath $publishFailureClassifierPath -PathType Leaf)) {
+    $failures.Add('Publish response-loss recovery must be implemented by scripts/ClassifyReleaseAfterPublishFailure.ps1.')
+} else {
+    $workflowDraft = [pscustomobject]@{
+        id = 44
+        draft = $true
+        prerelease = $false
+        tag_name = 'v2.0.0'
+        name = 'v2.0.0'
+        author = [pscustomobject]@{ login = 'github-actions[bot]' }
+    }
+    $publishedRelease = $workflowDraft.PSObject.Copy()
+    $publishedRelease.draft = $false
+
+    $draftDisposition = & $publishFailureClassifierPath `
+        -Release $workflowDraft `
+        -CreatedDraftId 44 `
+        -ReleaseTag 'v2.0.0' `
+        -ExpectedPrerelease $false
+    if ($draftDisposition -cne 'cleanup-draft') {
+        $failures.Add('A re-read workflow-owned draft must be the only publish-failure state eligible for deletion.')
+    }
+
+    $publishedDisposition = & $publishFailureClassifierPath `
+        -Release $publishedRelease `
+        -CreatedDraftId 44 `
+        -ReleaseTag 'v2.0.0' `
+        -ExpectedPrerelease $false
+    if ($publishedDisposition -cne 'published') {
+        $failures.Add('A response-loss re-read must preserve a release that GitHub already published.')
+    }
+
+    $differentDisposition = & $publishFailureClassifierPath `
+        -Release $workflowDraft `
+        -CreatedDraftId 45 `
+        -ReleaseTag 'v2.0.0' `
+        -ExpectedPrerelease $false
+    if ($differentDisposition -cne 'leave') {
+        $failures.Add('Publish-failure recovery must never mutate a different release database ID.')
+    }
+
+    $absentDisposition = & $publishFailureClassifierPath `
+        -Release $null `
+        -CreatedDraftId 44 `
+        -ReleaseTag 'v2.0.0' `
+        -ExpectedPrerelease $false
+    if ($absentDisposition -cne 'leave') {
+        $failures.Add('An absent release after publication failure must be left for a resumable rerun.')
+    }
+
+    $foreignWorkflowDraft = $workflowDraft.PSObject.Copy()
+    $foreignWorkflowDraft.author = [pscustomobject]@{ login = 'human-maintainer' }
+    try {
+        & $publishFailureClassifierPath `
+            -Release $foreignWorkflowDraft `
+            -CreatedDraftId 44 `
+            -ReleaseTag 'v2.0.0' `
+            -ExpectedPrerelease $false
+        $failures.Add('Publish-failure cleanup must reject a same-ID draft not owned by GitHub Actions.')
+    } catch {
+        if ($_.Exception.Message -notmatch 'author') {
+            $failures.Add('Foreign publish-failure draft classification failed for the wrong reason.')
+        }
+    }
+}
+
+Assert-Matches $workflow 'scripts/ClassifyReleaseAfterPublishFailure\.ps1' 'Release publication failures must re-read and classify server state before cleanup.'
 Assert-Matches $readme '(?i)immutable releases' 'Release documentation must require GitHub release immutability.'
 Assert-Matches $readme '(?i)tag ruleset.*restrict.*updates.*deletions' 'Release documentation must require protected release tags because ref comparison and publication are not atomic.'
 Assert-NotMatches ($appControl + $keybindGui) '``n``n' 'User-facing diagnostics must use real AHK newline escapes, not render literal backtick-n text.'

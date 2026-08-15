@@ -384,15 +384,49 @@ jobs:
             } catch {
               $publicationError = $_
               if ($createdDraftId -gt 0 -and -not $published) {
-                $cleanupOutput = @(& gh api `
-                  --method DELETE `
-                  --header 'Accept: application/vnd.github+json' `
-                  --header 'X-GitHub-Api-Version: 2022-11-28' `
-                  "repos/$env:GITHUB_REPOSITORY/releases/$createdDraftId" 2>&1)
-                if ($LASTEXITCODE -ne 0) {
-                  Write-Warning "Draft cleanup also failed: $($cleanupOutput -join ' ')"
+                $disposition = 'leave'
+                try {
+                  # The edit request may have reached GitHub even when the CLI lost
+                  # its success response. Re-read server state before any deletion:
+                  # a matching published release is success, while only the same
+                  # workflow-owned object still proven to be a draft may be cleaned.
+                  $failedRelease = Find-ReleaseByTag
+                  $disposition = & scripts/ClassifyReleaseAfterPublishFailure.ps1 `
+                    -Release $failedRelease `
+                    -CreatedDraftId $createdDraftId `
+                    -ReleaseTag $env:RELEASE_TAG `
+                    -ExpectedPrerelease $expectedPrerelease
+
+                  if ($disposition -eq 'published') {
+                    $actualTagCommit = Resolve-ReleaseTagCommit $encodedTag
+                    & scripts/ValidateExistingRelease.ps1 `
+                      -Release $failedRelease `
+                      -ReleaseTag $env:RELEASE_TAG `
+                      -ExpectedPrerelease $expectedPrerelease `
+                      -ExpectedCommitSha $env:EXPECTED_COMMIT `
+                      -ActualTagCommitSha $actualTagCommit `
+                      -Assets $assets
+                    $published = $true
+                    Write-Host "Release '$env:RELEASE_TAG' was published despite the lost CLI response; server state matches the complete release contract."
+                  }
+                } catch {
+                  Write-Warning "Release state could not be reconciled safely after publication failure: $($_.Exception.Message)"
+                  $disposition = 'leave'
+                }
+
+                if ($disposition -eq 'cleanup-draft') {
+                  $cleanupOutput = @(& gh api `
+                    --method DELETE `
+                    --header 'Accept: application/vnd.github+json' `
+                    --header 'X-GitHub-Api-Version: 2022-11-28' `
+                    "repos/$env:GITHUB_REPOSITORY/releases/$createdDraftId" 2>&1)
+                  if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "Draft cleanup also failed: $($cleanupOutput -join ' ')"
+                  }
                 }
               }
-              throw $publicationError
+              if (-not $published) {
+                throw $publicationError
+              }
             }
           }
