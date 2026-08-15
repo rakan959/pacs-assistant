@@ -232,6 +232,43 @@ class AppControl {
         return {found: true, stopped: windowStopped ? true : false}
     }
 
+    static PacsRestartTargetSpecs() {
+        return [
+            {target: "Command - "},
+            {target: "WinDbg:"},
+            {target: "Vue PACS"},
+            {
+                target: "Explorer Portal ahk_exe msedge.exe",
+                label: "Explorer Portal",
+                windowOnly: true
+            },
+            ; closeWithSavePrompt handles the report dialog first. The hard-stop
+            ; fallback must address the known executable because the window can
+            ; disappear while its background process remains alive.
+            {target: "Nuance.PowerScribe360.exe", label: "PowerScribe"},
+            {target: "Hyperspace"},
+            {target: "mp.exe"},
+            {target: "NativeBridge.exe"}
+        ]
+    }
+
+    static StopTargetSpecs(specs) {
+        anyStopped := false
+        failedTargets := []
+        for spec in specs {
+            target := spec.target
+            result := this.StopTarget(
+                target,
+                HasProp(spec, "windowOnly") && spec.windowOnly
+            )
+            if result.found
+                anyStopped := true
+            if !result.stopped
+                failedTargets.Push(HasProp(spec, "label") ? spec.label : target)
+        }
+        return {anyStopped: anyStopped, failedTargets: failedTargets}
+    }
+
     static LaunchVuePacs(directory) {
         try {
             ; Only the installed Windows shortcut is a valid launch target. A broad
@@ -348,7 +385,6 @@ clickSaveChangesButton(hwnd) {
 
 restartPACS() {
     anyClosed := false
-    failedTargets := []
 
     ; Close PowerScribe gracefully first so an in-progress report can be saved. The
     ; hard kill below still runs as a fallback if it does not exit in time.
@@ -357,30 +393,9 @@ restartPACS() {
             anyClosed := true
     }
 
-    for spec in [
-        {target: "Command - "},
-        {target: "WinDbg:"},
-        {target: "Vue PACS"},
-        {
-            target: "Explorer Portal ahk_exe msedge.exe",
-            label: "Explorer Portal",
-            windowOnly: true
-        },
-        {target: "PowerScribe"},
-        {target: "Hyperspace"},
-        {target: "mp.exe"},
-        {target: "NativeBridge.exe"}
-    ] {
-        target := spec.target
-        result := AppControl.StopTarget(
-            target,
-            HasProp(spec, "windowOnly") && spec.windowOnly
-        )
-        if result.found
-            anyClosed := true
-        if !result.stopped
-            failedTargets.Push(HasProp(spec, "label") ? spec.label : target)
-    }
+    stopResult := AppControl.StopTargetSpecs(AppControl.PacsRestartTargetSpecs())
+    anyClosed := anyClosed || stopResult.anyStopped
+    failedTargets := stopResult.failedTargets
 
     if failedTargets.Length {
         names := ""

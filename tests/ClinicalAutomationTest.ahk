@@ -31,6 +31,7 @@ class ClinicalAutomationTest {
         "RestartLookupUncertaintyCancelsStop",
         "WindowOwnershipUncertaintyCancelsStop",
         "SharedHostWindowStopDoesNotTerminateOwner",
+        "RestartStopsPowerScribeByExactProcessName",
         "PacsLauncherRejectsNonShortcutMatch",
         "PacsLauncherAcceptsInstalledShortcut",
         "ReportSelectionUsesOnlyReportShapedText",
@@ -359,6 +360,19 @@ class ClinicalAutomationTest {
         Assert.Equal(0, driver.stopProcessCalls)
     }
 
+    RestartStopsPowerScribeByExactProcessName() {
+        expected := "Nuance.PowerScribe360.exe"
+        driver := ExactNamedProcessLifecycleDriver(expected)
+        AppControl.lifecycleDriver := driver
+
+        result := AppControl.StopTargetSpecs(AppControl.PacsRestartTargetSpecs())
+
+        Assert.True(result.anyStopped)
+        Assert.Equal(0, result.failedTargets.Length)
+        Assert.Equal(1, driver.stoppedTargets.Length)
+        Assert.Equal(expected, driver.stoppedTargets[1])
+    }
+
     PacsLauncherRejectsNonShortcutMatch() {
         root := A_Temp "\pacs_launch_" A_TickCount "_" Random(1000, 9999)
         DirCreate(root)
@@ -674,5 +688,33 @@ class SharedHostWindowLifecycleDriver {
     StopProcess(*) {
         this.stopProcessCalls++
         return true
+    }
+}
+
+class ExactNamedProcessLifecycleDriver {
+    __New(expectedTarget) {
+        this.expectedTarget := expectedTarget
+        this.processAvailable := true
+        this.lastLookupTarget := ""
+        this.stoppedTargets := []
+    }
+
+    FindProcess(target) {
+        this.lastLookupTarget := target
+        return target = this.expectedTarget && this.processAvailable ? 4242 : 0
+    }
+
+    StopProcess(*) {
+        this.processAvailable := false
+        this.stoppedTargets.Push(this.lastLookupTarget)
+        return true
+    }
+
+    ProcessExists(*) {
+        return this.processAvailable
+    }
+
+    FindWindow(*) {
+        return 0
     }
 }
