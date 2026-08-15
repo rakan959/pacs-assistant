@@ -14,6 +14,7 @@ class PACSMonitorTest {
         "TestRefreshButtonRequiresSemanticIdentity",
         "TestRefreshButtonMustBeUniqueWithinThePortal",
         "TestRefreshAndScanUseOneCapturedPortalSession",
+        "TestAmbiguousPortalWindowsAreReportedAsScanFailure",
         "TestStudyListFallbackRequiresExpectedTypeAndProcess",
         "TestStudyListDoesNotUseGenericFirstMatch",
         "TestOnSettingsChangedRespectsAutoRefresh",
@@ -161,6 +162,29 @@ class PACSMonitorTest {
         Assert.Equal(0, driver.restoreCalls)
         Assert.Equal(1, button.clickCalls)
         Assert.Equal(0, button.controlClickCalls)
+    }
+
+    TestAmbiguousPortalWindowsAreReportedAsScanFailure() {
+        originalTestMode := PACSMonitor.testMode
+        originalDriver := PACSMonitor.driver
+        driver := AmbiguousPortalMonitorDriver()
+
+        try {
+            PACSMonitor.testMode := false
+            PACSMonitor.driver := driver
+            loop PACSMonitor.scanFailureThreshold
+                PACSMonitor.RefreshAndCheck()
+            failures := PACSMonitor.consecutiveScanFailures
+            lastError := PACSMonitor.lastError
+        } finally {
+            PACSMonitor.driver := originalDriver
+            PACSMonitor.testMode := originalTestMode
+        }
+
+        Assert.Equal(PACSMonitor.scanFailureThreshold, failures)
+        Assert.True(InStr(lastError, "multiple exact Explorer Portal windows") > 0)
+        Assert.Equal(1, this.notifications.Length)
+        Assert.Equal("PACS background monitoring failed", this.notifications[1].title)
     }
 
     TestStudyListFallbackRequiresExpectedTypeAndProcess() {
@@ -375,7 +399,7 @@ class PinnedPortalMonitorDriver {
 
     ResolvePortalSession() {
         this.resolveCalls++
-        return this.session
+        return {status: "unique", session: this.session}
     }
 
     SessionIsLive(session) {
@@ -405,6 +429,12 @@ class PinnedPortalMonitorDriver {
     }
 
     WaitForRefresh() {
+    }
+}
+
+class AmbiguousPortalMonitorDriver {
+    ResolvePortalSession() {
+        return {status: "ambiguous", session: 0}
     }
 }
 

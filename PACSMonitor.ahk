@@ -5,9 +5,16 @@
 
 class NativePACSMonitorDriver {
     ResolvePortalSession() {
-        return AppControl.ResolveUniqueExactWindow(
+        try sessions := AppControl.ResolveExactWindows(
             AppControl.ExplorerPortalWindowSpec()
         )
+        catch as err
+            return {status: "error", session: 0, error: err.Message}
+        if !sessions.Length
+            return {status: "absent", session: 0}
+        if sessions.Length > 1
+            return {status: "ambiguous", session: 0}
+        return {status: "unique", session: sessions[1]}
     }
 
     SessionIsLive(session) {
@@ -324,9 +331,29 @@ class PACSMonitor {
         try {
             ; Resolve one exact portal session once. Every later root/action/read is
             ; pinned to its HWND/PID instead of resolving the title again.
-            session := this.driver.ResolvePortalSession()
-            if !session
+            resolution := this.driver.ResolvePortalSession()
+            if (!IsObject(resolution) || !HasProp(resolution, "status")) {
+                this.RecordScanFailure("portal window resolution returned an invalid result")
                 return
+            }
+            if (resolution.status == "absent")
+                return
+            if (resolution.status == "ambiguous") {
+                this.RecordScanFailure("multiple exact Explorer Portal windows are open")
+                return
+            }
+            if (resolution.status == "error") {
+                detail := HasProp(resolution, "error") ? resolution.error : "unknown lookup error"
+                this.RecordScanFailure("Explorer Portal lookup failed: " detail)
+                return
+            }
+            if (!(resolution.status == "unique")
+                || !HasProp(resolution, "session")
+                || !resolution.session) {
+                this.RecordScanFailure("portal window resolution returned an invalid unique result")
+                return
+            }
+            session := resolution.session
 
             ; Skip refresh if Explorer Portal is the active window
             if this.driver.IsActive(session)
