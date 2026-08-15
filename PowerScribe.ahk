@@ -121,15 +121,44 @@ class PowerScribe {
     }
 
     /**
-     * Chooses only report-shaped text. Returning an unrelated UI value is worse than
-     * returning nothing because it silently falls through to the MSK routing rule.
+     * Chooses report text only when every discovered report-shaped control agrees.
+     * A history/prior-report pane can expose another EXAMINATION block in the same
+     * window; choosing the first one could route the current study to its attending.
      */
     static SelectReportText(candidates, fallbackText := "") {
+        reports := []
         for text in candidates {
             if this.LooksLikeReport(text)
-                return text
+                this.AddDistinctReport(reports, text)
         }
-        return this.LooksLikeReport(fallbackText) ? fallbackText : ""
+        if this.LooksLikeReport(fallbackText)
+            this.AddDistinctReport(reports, fallbackText)
+        return reports.Length = 1 ? reports[1] : ""
+    }
+
+    static AddDistinctReport(reports, text) {
+        normalized := Trim(text)
+        for existing in reports {
+            if (StrCompare(Trim(existing), normalized, false) = 0)
+                return
+        }
+        reports.Push(text)
+    }
+
+    static IsExpectedReportControl(root, control) {
+        if !root || !control
+            return false
+        try {
+            rootProcess := root.ProcessId
+            rootWindow := root.WinId
+            return rootProcess > 0
+                && control.ProcessId = rootProcess
+                && rootWindow > 0
+                && control.WinId = rootWindow
+                && (control.Type = UIA.Type.Document || control.Type = UIA.Type.Edit)
+        } catch {
+            return false
+        }
     }
 
     static SendKeys(keys) {
@@ -256,6 +285,8 @@ readReportText() {
         }
 
         for el in elements {
+            if !PowerScribe.IsExpectedReportControl(root, el)
+                continue
             text := ""
             try text := UIAValue.Read(el)
             if (text = "")
@@ -264,9 +295,14 @@ readReportText() {
         }
     }
 
-    ; Positional fallback for the case where nothing matched by type
+    ; A positional result is another candidate, never an override. It must resolve
+    ; to the same exact PowerScribe window and agree with the unique typed report.
     fallbackText := ""
-    try fallbackText := UIAValue.Read(root.ElementFromPath(PowerScribe.reportPath))
+    try {
+        fallbackElement := root.ElementFromPath(PowerScribe.reportPath)
+        if PowerScribe.IsExpectedReportControl(root, fallbackElement)
+            fallbackText := UIAValue.Read(fallbackElement)
+    }
 
     return PowerScribe.SelectReportText(candidates, fallbackText)
 }

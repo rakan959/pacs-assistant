@@ -33,6 +33,7 @@ class ClinicalAutomationTest {
         "PacsLauncherRejectsNonShortcutMatch",
         "PacsLauncherAcceptsInstalledShortcut",
         "ReportSelectionUsesOnlyReportShapedText",
+        "ReportSelectionRejectsMultipleReportCandidates",
         "ReportSelectionRejectsUnrelatedFallbackText"
     ]
 
@@ -391,6 +392,23 @@ class ClinicalAutomationTest {
         ]
 
         Assert.Equal(report, PowerScribe.SelectReportText(candidates, "unrelated fallback"))
+    }
+
+    ReportSelectionRejectsMultipleReportCandidates() {
+        Assert.Equal(
+            "",
+            PowerScribe.SelectReportText([
+                "EXAMINATION: MRI BRAIN`nFINDINGS: Current report.",
+                "EXAMINATION: CT CHEST`nFINDINGS: Prior report."
+            ])
+        )
+        Assert.Equal(
+            "",
+            PowerScribe.SelectReportText(
+                ["EXAMINATION: MRI BRAIN"],
+                "EXAMINATION: CT CHEST"
+            )
+        )
     }
 
     ReportSelectionRejectsUnrelatedFallbackText() {
