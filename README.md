@@ -7,7 +7,7 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 ### Quick commands (bind to any key)
 - Toggle Dictation, Draft Report, Sign Report
 - Select Next/Previous Field, Delete Previous/Next Word
-- Open/Force Restart PACS (asks PowerScribe to save first, answering the save prompt)
+- Open/Force Restart PACS (asks PowerScribe to close; any save prompt must be completed manually, and an unverified close cancels the restart)
 - Paste Wet Read (optional LF→CRLF conversion; choose Ctrl+V, UIA Value, or ControlSetText paste)
 - Toggle PowerScribe / EPIC windows, Next/Previous Series
 - Set PowerScribe Microphone

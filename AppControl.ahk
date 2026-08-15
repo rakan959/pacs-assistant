@@ -30,6 +30,30 @@ class NativeWindowDriver {
     Pause(milliseconds) {
         Sleep(milliseconds)
     }
+
+    ListWindowsByExecutable(executable) {
+        return WinGetList("ahk_exe " executable)
+    }
+
+    GetTitle(hwnd) {
+        return WinGetTitle("ahk_id " hwnd)
+    }
+
+    GetProcessName(hwnd) {
+        return WinGetProcessName("ahk_id " hwnd)
+    }
+
+    GetProcessId(hwnd) {
+        return WinGetPID("ahk_id " hwnd)
+    }
+
+    GetMinMax(target) {
+        return WinGetMinMax(target)
+    }
+
+    Minimize(target) {
+        WinMinimize(target)
+    }
 }
 
 /**
@@ -82,12 +106,15 @@ class NativeAppLifecycleDriver {
  * Starting, stopping and switching the clinical applications.
  */
 class AppControl {
-    ; A window title or body that looks like an unsaved-changes prompt
-    static savePromptPattern := "i)(save|unsaved)"
     static activationTimeoutSeconds := 2
     static maxMatchingProcesses := 32
     static powerScribeExecutable := "Nuance.PowerScribe360.exe"
     static powerScribeReportingTitle := "PowerScribe 360 | Reporting"
+    static vuePacsExecutable := "mp.exe"
+    static vuePacsTitle := "Vue PACS"
+    static vuePacsClientTitle := "Vue PACS Client"
+    static explorerPortalExecutable := "msedge.exe"
+    static explorerPortalTitle := "Explorer Portal"
     static windowDriver := NativeWindowDriver()
     static lifecycleDriver := NativeAppLifecycleDriver()
 
@@ -112,6 +139,129 @@ class AppControl {
             if !this.windowDriver.IsActive(winTitle)
                 return false
             this.windowDriver.SendKeys(keys)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    static ExactWindowSpec(title, executable) {
+        if !(Type(title) == "String") || title = ""
+            throw ValueError("Exact window title is required")
+        if !(Type(executable) == "String") || executable = ""
+            throw ValueError("Exact window executable is required")
+        return {title: title, exe: executable}
+    }
+
+    static PowerScribeWindowSpec() {
+        return this.ExactWindowSpec(
+            this.powerScribeReportingTitle,
+            this.powerScribeExecutable
+        )
+    }
+
+    static VuePacsWindowSpec() {
+        return this.ExactWindowSpec(this.vuePacsTitle, this.vuePacsExecutable)
+    }
+
+    static VuePacsClientWindowSpec() {
+        return this.ExactWindowSpec(this.vuePacsClientTitle, this.vuePacsExecutable)
+    }
+
+    static ExplorerPortalWindowSpec() {
+        return this.ExactWindowSpec(
+            this.explorerPortalTitle,
+            this.explorerPortalExecutable
+        )
+    }
+
+    /**
+     * Enumerates by executable, then exact-compares the title and captures the
+     * concrete HWND/PID. Global A_TitleMatchMode never participates.
+     */
+    static ResolveExactWindows(spec) {
+        if !IsObject(spec) || !HasProp(spec, "title") || !HasProp(spec, "exe")
+            throw TypeError("Exact window spec is required")
+        this.ExactWindowSpec(spec.title, spec.exe)
+
+        sessions := []
+        seen := Map()
+        for hwnd in this.windowDriver.ListWindowsByExecutable(spec.exe) {
+            if (hwnd <= 0 || seen.Has(hwnd))
+                continue
+            seen[hwnd] := true
+            title := this.windowDriver.GetTitle(hwnd)
+            executable := this.windowDriver.GetProcessName(hwnd)
+            processId := this.windowDriver.GetProcessId(hwnd)
+            if (title == spec.title && executable = spec.exe && processId > 0) {
+                sessions.Push({
+                    hwnd: hwnd,
+                    target: "ahk_id " hwnd,
+                    processId: processId,
+                    title: spec.title,
+                    exe: spec.exe
+                })
+            }
+        }
+        return sessions
+    }
+
+    static ResolveUniqueExactWindow(spec) {
+        sessions := this.ResolveExactWindows(spec)
+        return sessions.Length = 1 ? sessions[1] : 0
+    }
+
+    static ExactSessionIsUniqueAndLive(session) {
+        if !session || !HasProp(session, "title") || !HasProp(session, "exe")
+            return false
+        try sessions := this.ResolveExactWindows(
+            this.ExactWindowSpec(session.title, session.exe)
+        )
+        catch
+            return false
+        return sessions.Length = 1
+            && sessions[1].hwnd = session.hwnd
+            && sessions[1].processId = session.processId
+    }
+
+    static SendKeysToExactWindow(spec, keys) {
+        try session := this.ResolveUniqueExactWindow(spec)
+        catch
+            return false
+        if !session || !this.windowDriver.Activate(
+            session.target,
+            this.activationTimeoutSeconds
+        )
+            return false
+        return this.SendKeysToActiveExactWindow(session, keys)
+    }
+
+    static SendKeysToActiveExactWindow(session, keys) {
+        try {
+            if !this.ExactSessionIsUniqueAndLive(session)
+                return false
+            if !this.windowDriver.IsActive(session.target)
+                return false
+            this.windowDriver.SendKeys(keys)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    static ToggleExactWindow(spec) {
+        try session := this.ResolveUniqueExactWindow(spec)
+        catch
+            return false
+        if !session
+            return false
+        try {
+            if (this.windowDriver.GetMinMax(session.target) = -1)
+                return this.windowDriver.Activate(
+                    session.target,
+                    this.activationTimeoutSeconds
+                )
+            this.windowDriver.Minimize(session.target)
             return true
         } catch {
             return false
@@ -175,51 +325,47 @@ class AppControl {
     }
 
     static CloseWindowTarget(target) {
-        driver := this.lifecycleDriver
-        try hwnd := driver.FindWindow(target)
-        catch as err
-            return {found: false, stopped: false, error: err.Message}
-        if !hwnd
-            return {found: false, stopped: true}
+        if !IsObject(target)
+            return {found: false, stopped: false, error: "Exact window spec is required"}
+        return this.CloseExactWindowTarget(target)
+    }
 
-        ; Shared-host windows (currently Explorer Portal in Edge) are closed and
-        ; verified by HWND only. Keep resolving the exact title/executable until
-        ; every matching window is gone, bounded against a respawning provider.
+    static CloseExactWindowTarget(spec) {
+        foundWindow := false
         stoppedWindows := 0
         loop {
-            if (stoppedWindows >= this.maxMatchingProcesses) {
-                return {
-                    found: true,
-                    stopped: false,
-                    error: "Too many matching windows remained after bounded closure"
-                }
-            }
-            try windowStopped := driver.CloseWindow(hwnd)
+            try sessions := this.ResolveExactWindows(spec)
             catch as err
-                return {found: true, stopped: false, error: err.Message}
-            if !windowStopped
-                return {found: true, stopped: false}
-            stoppedWindows++
+                return {found: foundWindow, stopped: false, error: err.Message}
+            if !sessions.Length
+                return {found: foundWindow, stopped: true}
+            foundWindow := true
 
-            try hwnd := driver.FindWindow(target)
-            catch as err
-                return {found: true, stopped: false, error: err.Message}
-            if !hwnd
-                return {found: true, stopped: true}
+            for session in sessions {
+                if (stoppedWindows >= this.maxMatchingProcesses) {
+                    return {
+                        found: true,
+                        stopped: false,
+                        error: "Too many matching windows remained after bounded closure"
+                    }
+                }
+                try windowStopped := this.lifecycleDriver.CloseWindow(session.hwnd)
+                catch as err
+                    return {found: true, stopped: false, error: err.Message}
+                if !windowStopped
+                    return {found: true, stopped: false}
+                stoppedWindows++
+            }
         }
     }
 
     static PacsRestartTargetSpecs() {
         return [
             {
-                target: "Explorer Portal ahk_exe msedge.exe",
+                target: this.ExplorerPortalWindowSpec(),
                 label: "Explorer Portal",
                 kind: "window"
             },
-            ; closeWithSavePrompt handles the report dialog first. The hard-stop
-            ; fallback must address the known executable because the window can
-            ; disappear while its background process remains alive.
-            {target: this.powerScribeExecutable, label: "PowerScribe", kind: "process"},
             {target: "mp.exe", kind: "process"},
             {target: "NativeBridge.exe", kind: "process"}
         ]
@@ -266,117 +412,161 @@ class AppControl {
     }
 }
 
+class NativeGracefulCloseDriver {
+    FindWindow(target) {
+        return WinExist(target)
+    }
+
+    GetProcessId(hwnd) {
+        return WinGetPID("ahk_id " hwnd)
+    }
+
+    RequestClose(hwnd) {
+        WinClose("ahk_id " hwnd)
+    }
+
+    ProcessExists(pid) {
+        return ProcessExist(pid) != 0
+    }
+
+    NowMilliseconds() {
+        return DllCall("GetTickCount64", "UInt64")
+    }
+
+    Pause(milliseconds) {
+        Sleep(milliseconds)
+    }
+}
+
 /**
- * Asks a window to close and answers the "save changes?" prompt if one appears.
- * Killing the process outright discards an in-progress report without ever showing
- * that prompt, which is why a restart has to go through here first.
+ * Asks the exact reporting window to close and waits for its process to exit. A
+ * save dialog is intentionally left for the user: without a captured stable dialog
+ * identity, automatically clicking a generic Yes/Save control could action an
+ * unrelated same-process dialog.
  * @param winTitle Window to close
- * @param timeoutMs How long to keep answering prompts before giving up
+ * @param timeoutMs How long to wait for the user/save flow before giving up
  * @returns true if the owning process exited, false if it is still running
  */
-closeWithSavePrompt(winTitle, timeoutMs := 8000) {
-    if !WinExist(winTitle)
-        return true
-
-    hwnd := WinExist(winTitle)
-    try {
-        pid := WinGetPID("ahk_id " hwnd)
-    } catch {
+closeWithSavePrompt(winTitle, timeoutMs := 8000, driver := 0, expectedPid := 0) {
+    driver := driver ? driver : NativeGracefulCloseDriver()
+    try hwnd := driver.FindWindow(winTitle)
+    catch
         return false
-    }
-
-    try {
-        WinClose("ahk_id " hwnd)
-    } catch {
-        return false
-    }
-
-    deadline := A_TickCount + timeoutMs
-    while (A_TickCount < deadline) {
-        if !ProcessExist(pid)
+    if !hwnd {
+        if !expectedPid
             return true
-
-        dialog := findSaveChangesDialog(pid, hwnd)
-        if dialog
-            clickSaveChangesButton(dialog)
-
-        Sleep(150)
+        try return !driver.ProcessExists(expectedPid)
+        return false
     }
-
-    return !ProcessExist(pid)
-}
-
-/**
- * Finds a dialog belonging to a process that is asking about unsaved changes.
- * @returns the dialog's window handle, or 0 if there isn't one
- */
-findSaveChangesDialog(pid, mainHwnd) {
     try {
-        windows := WinGetList("ahk_pid " pid)
+        pid := driver.GetProcessId(hwnd)
     } catch {
-        return 0
+        return false
     }
+    if (expectedPid && pid != expectedPid)
+        return false
 
-    for hwnd in windows {
-        if (hwnd = mainHwnd)
-            continue
-
-        title := ""
-        body := ""
-        try title := WinGetTitle("ahk_id " hwnd)
-        try body := WinGetText("ahk_id " hwnd)
-
-        if (title ~= AppControl.savePromptPattern || body ~= AppControl.savePromptPattern)
-            return hwnd
-    }
-    return 0
-}
-
-/**
- * Clicks Yes/Save on an unsaved-changes dialog.
- * @returns true if a button was clicked
- */
-clickSaveChangesButton(hwnd) {
-    ; Standard Win32 dialog buttons
     try {
-        for ctrl in WinGetControls("ahk_id " hwnd) {
-            if !InStr(ctrl, "Button")
-                continue
-
-            caption := ""
-            try caption := ControlGetText(ctrl, "ahk_id " hwnd)
-
-            ; Strip the accelerator ampersand before matching ("&Yes" -> "Yes")
-            if (StrReplace(caption, "&") ~= "i)^\s*(yes|save)\s*$") {
-                ControlClick(ctrl, "ahk_id " hwnd)
-                return true
-            }
-        }
+        driver.RequestClose(hwnd)
+    } catch {
+        return false
     }
 
-    ; Fall back to UIA for owner-drawn dialogs that expose no Win32 controls
-    try {
-        el := UIA.ElementFromHandle("ahk_id " hwnd)
-        btn := el.FindElement([{Type: "Button", Name: "Yes"}, {Type: "Button", Name: "Save"}])
-        btn.Click()
-        return true
+    deadline := driver.NowMilliseconds() + timeoutMs
+    while (driver.NowMilliseconds() < deadline) {
+        if !driver.ProcessExists(pid)
+            return true
+        driver.Pause(150)
     }
 
+    try return !driver.ProcessExists(pid)
     return false
 }
 
-restartPACS() {
-    anyClosed := false
-
-    ; Close PowerScribe gracefully first so an in-progress report can be saved. The
-    ; hard kill below still runs as a fallback if it does not exit in time.
-    powerScribeTarget := AppControl.PacsGracefulCloseTarget()
-    if WinExist(powerScribeTarget) {
-        if closeWithSavePrompt(powerScribeTarget)
-            anyClosed := true
+class NativePacsRestartDriver {
+    FindPowerScribeWindows() {
+        return AppControl.ResolveExactWindows(AppControl.PowerScribeWindowSpec())
     }
 
-    stopResult := AppControl.StopTargetSpecs(AppControl.PacsRestartTargetSpecs())
+    FindPowerScribeProcess() {
+        return AppControl.lifecycleDriver.FindProcess(AppControl.powerScribeExecutable)
+    }
+
+    ClosePowerScribe(session) {
+        return closeWithSavePrompt(session.target, 8000, 0, session.processId)
+    }
+
+    StopTargets() {
+        return AppControl.StopTargetSpecs(AppControl.PacsRestartTargetSpecs())
+    }
+
+    Pause(milliseconds) {
+        Sleep(milliseconds)
+    }
+
+    Launch() {
+        return AppControl.LaunchVuePacs(A_DesktopCommon)
+            || AppControl.LaunchVuePacs(A_Desktop)
+    }
+}
+
+restartPACS(driver := 0) {
+    driver := driver ? driver : NativePacsRestartDriver()
+    anyClosed := false
+
+    ; PowerScribe is never a force-kill target. A failed/slow save or an unverified
+    ; running process aborts the restart rather than risking an in-progress report.
+    try powerScribeWindows := driver.FindPowerScribeWindows()
+    catch as err {
+        MsgBox(
+            "PowerScribe window identity could not be verified. The restart was cancelled.`n`n" err.Message,
+            "PACS Restart Cancelled",
+            "Icon!"
+        )
+        return false
+    }
+    if (powerScribeWindows.Length > 1) {
+        MsgBox(
+            "Multiple PowerScribe reporting windows were found. Close them manually before restarting PACS.",
+            "PACS Restart Cancelled",
+            "Icon!"
+        )
+        return false
+    }
+    if (powerScribeWindows.Length = 1) {
+        try closedSafely := driver.ClosePowerScribe(powerScribeWindows[1])
+        catch
+            closedSafely := false
+        if !closedSafely {
+            MsgBox(
+                "PowerScribe did not close after its save prompt. The restart was cancelled to protect the in-progress report.",
+                "PACS Restart Cancelled",
+                "Icon!"
+            )
+            return false
+        }
+        anyClosed := true
+    } else {
+        try powerScribePid := driver.FindPowerScribeProcess()
+        catch as err {
+            MsgBox(
+                "PowerScribe process state could not be verified. The restart was cancelled.`n`n" err.Message,
+                "PACS Restart Cancelled",
+                "Icon!"
+            )
+            return false
+        }
+        if powerScribePid {
+            MsgBox(
+                "PowerScribe is running without a uniquely verified reporting window. Close it manually before restarting PACS.",
+                "PACS Restart Cancelled",
+                "Icon!"
+            )
+            return false
+        }
+    }
+
+    stopResult := driver.StopTargets()
     anyClosed := anyClosed || stopResult.anyStopped
     failedTargets := stopResult.failedTargets
 
@@ -393,11 +583,11 @@ restartPACS() {
     }
 
     if anyClosed {
-        Sleep(500)
+        driver.Pause(500)
     }
 
     ; The shortcut sits on either the all-users desktop or this user's own
-    if !(AppControl.LaunchVuePacs(A_DesktopCommon) || AppControl.LaunchVuePacs(A_Desktop)) {
+    if !driver.Launch() {
         MsgBox "ERROR: PACS not found..."
         return false
     }

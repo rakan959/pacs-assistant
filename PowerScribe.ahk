@@ -4,13 +4,17 @@
 #Include UIAValue.ahk
 
 class NativePowerScribeSessionDriver {
-    Capture(selector) {
-        if !AppControl.ActivateWindow(selector)
-            return 0
-        try hwnd := WinActive(selector)
+    Capture(*) {
+        try session := AppControl.ResolveUniqueExactWindow(
+            AppControl.PowerScribeWindowSpec()
+        )
         catch
             return 0
-        return this.SessionFromHandle(hwnd)
+        if !session || !AppControl.ActivateWindow(session.target)
+            return 0
+        if !AppControl.ExactSessionIsUniqueAndLive(session)
+            return 0
+        return session
     }
 
     SessionFromHandle(hwnd) {
@@ -18,11 +22,9 @@ class NativePowerScribeSessionDriver {
             return 0
         target := "ahk_id " hwnd
         try {
-            if !WinExist(target)
-                return 0
-            title := WinGetTitle(target)
-            executable := WinGetProcessName(target)
-            processId := WinGetPID(target)
+            title := AppControl.windowDriver.GetTitle(hwnd)
+            executable := AppControl.windowDriver.GetProcessName(hwnd)
+            processId := AppControl.windowDriver.GetProcessId(hwnd)
         } catch {
             return 0
         }
@@ -30,7 +32,13 @@ class NativePowerScribeSessionDriver {
             || StrCompare(executable, AppControl.powerScribeExecutable, false) != 0
             || processId <= 0)
             return 0
-        return {hwnd: hwnd, target: target, processId: processId}
+        return {
+            hwnd: hwnd,
+            target: target,
+            processId: processId,
+            title: AppControl.powerScribeReportingTitle,
+            exe: AppControl.powerScribeExecutable
+        }
     }
 
     IsLive(session) {
@@ -41,6 +49,7 @@ class NativePowerScribeSessionDriver {
             return false
         current := this.SessionFromHandle(session.hwnd)
         return current
+            && AppControl.ExactSessionIsUniqueAndLive(current)
             && current.hwnd = session.hwnd
             && current.processId = session.processId
             && current.target == session.target
@@ -282,7 +291,10 @@ class PowerScribe {
     }
 
     static SendKeys(keys) {
-        return AppControl.SendKeysToWindow(this.windowTitle, keys)
+        return AppControl.SendKeysToExactWindow(
+            AppControl.PowerScribeWindowSpec(),
+            keys
+        )
     }
 
     static CaptureReport() {

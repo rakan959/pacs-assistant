@@ -10,7 +10,7 @@ class PACSCommandsTest {
         "TestModalityClassification",
         "TestModalityNamesCoverEveryRule",
         "TestLooksLikeReport",
-        "TestPowerScribeToggleUsesExactTarget"
+        "TestPowerScribeToggleUsesExactSpec"
     ]
 
     TestBuiltInCommandsExist() {
@@ -93,7 +93,9 @@ class PACSCommandsTest {
         Assert.False(PowerScribe.LooksLikeReport("Search"))
     }
 
-    TestPowerScribeToggleUsesExactTarget() {
-        Assert.Equal(PowerScribe.windowTitle, PACSCommands.PowerScribeToggleTarget())
+    TestPowerScribeToggleUsesExactSpec() {
+        spec := PACSCommands.PowerScribeToggleTarget()
+        Assert.Equal(AppControl.powerScribeReportingTitle, spec.title)
+        Assert.Equal(AppControl.powerScribeExecutable, spec.exe)
     }
 }

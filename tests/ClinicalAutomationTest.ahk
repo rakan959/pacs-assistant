@@ -8,8 +8,10 @@ class ClinicalAutomationTest {
         "ActivationFailureDoesNotSend",
         "ActivationCanSucceedButFocusCheckStopsSend",
         "TargetedSendActivatesBeforeSending",
-        "PacsSeriesCommandsConstrainExecutable",
+        "ExactWindowResolverRejectsSubstringAndDuplicateMatches",
+        "PacsSeriesCommandsUseExactHwndTarget",
         "BuiltInClinicalCommandUsesConfirmedTarget",
+        "NativePowerScribeCaptureRejectsImpostorAndDuplicate",
         "TargetedCustomCommandUsesConfirmedTarget",
         "AttendingTargetRequiresSemanticControlIdentity",
         "NativeAttendingWriteRefusesLostControlFocus",
@@ -42,7 +44,11 @@ class ClinicalAutomationTest {
         "WindowCloseUncertaintyCancelsStop",
         "SharedHostWindowStopDoesNotTerminateOwner",
         "ProcessTargetNeverFallsThroughToSameTitleWindow",
-        "RestartStopsPowerScribeByExactProcessName",
+        "RestartSpecsNeverHardStopPowerScribe",
+        "RestartAbortsWhenPowerScribeSaveIsUnverified",
+        "RestartAbortsForUnverifiedPowerScribeProcess",
+        "GracefulCloseTimesOutAcross32BitTickWrap",
+        "GracefulCloseRequiresCapturedProcessIdentity",
         "RestartTargetsUseExactClinicalIdentities",
         "PacsLauncherRejectsNonShortcutMatch",
         "PacsLauncherAcceptsInstalledShortcut",
@@ -101,28 +107,88 @@ class ClinicalAutomationTest {
         Assert.Equal("{Right}", driver.calls[3].value)
     }
 
-    PacsSeriesCommandsConstrainExecutable() {
-        driver := FakeWindowDriver()
+    ExactWindowResolverRejectsSubstringAndDuplicateMatches() {
+        exact := {hwnd: 501, title: "Vue PACS Client", exe: "mp.exe", pid: 42}
+        suffix := {hwnd: 502, title: "Vue PACS Client Extra", exe: "mp.exe", pid: 42}
+        spec := AppControl.ExactWindowSpec("Vue PACS Client", "mp.exe")
+
+        AppControl.windowDriver := FakeExactWindowDriver([exact, suffix])
+        Assert.Equal(501, AppControl.ResolveUniqueExactWindow(spec).hwnd)
+
+        AppControl.windowDriver := FakeExactWindowDriver([suffix])
+        Assert.Equal(0, AppControl.ResolveUniqueExactWindow(spec))
+
+        AppControl.windowDriver := FakeExactWindowDriver([exact, {
+            hwnd: 503,
+            title: "Vue PACS Client",
+            exe: "mp.exe",
+            pid: 43
+        }])
+        Assert.Equal(0, AppControl.ResolveUniqueExactWindow(spec))
+    }
+
+    PacsSeriesCommandsUseExactHwndTarget() {
+        driver := FakeExactWindowDriver([{
+            hwnd: 501,
+            title: "Vue PACS Client",
+            exe: "mp.exe",
+            pid: 42
+        }])
         AppControl.windowDriver := driver
 
         PACSCommands.commands["Next Series"].Call()
 
-        expected := "Vue PACS Client ahk_exe mp.exe"
+        expected := "ahk_id 501"
         Assert.Equal(expected, driver.calls[1].value)
         Assert.Equal(expected, driver.calls[2].value)
         Assert.Equal("{Right}", driver.calls[3].value)
     }
 
     BuiltInClinicalCommandUsesConfirmedTarget() {
-        driver := FakeWindowDriver()
+        driver := FakeExactWindowDriver([{
+            hwnd: 601,
+            title: AppControl.powerScribeReportingTitle,
+            exe: AppControl.powerScribeExecutable,
+            pid: 77
+        }])
         AppControl.windowDriver := driver
 
         PACSCommands.commands["Sign Report"].Call()
 
         Assert.Equal("activate", driver.calls[1].kind)
-        Assert.Equal(PowerScribe.windowTitle, driver.calls[1].value)
+        Assert.Equal("ahk_id 601", driver.calls[1].value)
         Assert.Equal("active", driver.calls[2].kind)
         Assert.Equal("{F12}", driver.calls[3].value)
+    }
+
+    NativePowerScribeCaptureRejectsImpostorAndDuplicate() {
+        exact := {
+            hwnd: 601,
+            title: AppControl.powerScribeReportingTitle,
+            exe: AppControl.powerScribeExecutable,
+            pid: 77
+        }
+        suffix := {
+            hwnd: 602,
+            title: AppControl.powerScribeReportingTitle " Extra",
+            exe: AppControl.powerScribeExecutable,
+            pid: 77
+        }
+        nativeDriver := NativePowerScribeSessionDriver()
+
+        AppControl.windowDriver := FakeExactWindowDriver([exact, suffix])
+        Assert.Equal(601, nativeDriver.Capture(PowerScribe.windowTitle).hwnd)
+
+        AppControl.windowDriver := FakeExactWindowDriver([suffix])
+        Assert.Equal(0, nativeDriver.Capture(PowerScribe.windowTitle))
+
+        AppControl.windowDriver := FakeExactWindowDriver([exact, {
+            hwnd: 603,
+            title: AppControl.powerScribeReportingTitle,
+            exe: AppControl.powerScribeExecutable,
+            pid: 78
+        }])
+        Assert.Equal(0, nativeDriver.Capture(PowerScribe.windowTitle))
     }
 
     TargetedCustomCommandUsesConfirmedTarget() {
@@ -496,8 +562,12 @@ class ClinicalAutomationTest {
     WindowCloseUncertaintyCancelsStop() {
         driver := FakeAppLifecycleDriver("close-error")
         AppControl.lifecycleDriver := driver
+        AppControl.windowDriver := driver
 
-        result := AppControl.StopTarget("Vue PACS", "window")
+        result := AppControl.StopTarget(
+            AppControl.ExactWindowSpec("Vue PACS", "mp.exe"),
+            "window"
+        )
 
         Assert.True(result.found)
         Assert.False(result.stopped)
@@ -508,9 +578,10 @@ class ClinicalAutomationTest {
     SharedHostWindowStopDoesNotTerminateOwner() {
         driver := SharedHostWindowLifecycleDriver()
         AppControl.lifecycleDriver := driver
+        AppControl.windowDriver := driver
 
         result := AppControl.StopTarget(
-            "Explorer Portal ahk_exe msedge.exe",
+            AppControl.ExplorerPortalWindowSpec(),
             "window"
         )
 
@@ -520,6 +591,8 @@ class ClinicalAutomationTest {
         Assert.Equal(2, driver.closeCalls)
         Assert.Equal(0, driver.killCalls)
         Assert.Equal(0, driver.stopProcessCalls)
+        Assert.Equal(1, driver.windows.Length)
+        Assert.Equal(51515, driver.windows[1])
     }
 
     ProcessTargetNeverFallsThroughToSameTitleWindow() {
@@ -535,36 +608,68 @@ class ClinicalAutomationTest {
         Assert.Equal(0, driver.stopProcessCalls)
     }
 
-    RestartStopsPowerScribeByExactProcessName() {
-        expected := "Nuance.PowerScribe360.exe"
-        driver := ExactNamedProcessLifecycleDriver(expected)
-        AppControl.lifecycleDriver := driver
+    RestartSpecsNeverHardStopPowerScribe() {
+        for spec in AppControl.PacsRestartTargetSpecs() {
+            Assert.False(
+                spec.kind = "process" && spec.target = AppControl.powerScribeExecutable,
+                "PowerScribe must not be hard-killed after an unverified save"
+            )
+        }
+    }
 
-        result := AppControl.StopTargetSpecs(AppControl.PacsRestartTargetSpecs())
+    RestartAbortsWhenPowerScribeSaveIsUnverified() {
+        driver := FakePacsRestartDriver([{
+            hwnd: 601,
+            target: "ahk_id 601",
+            processId: 77
+        }], 77, false)
 
-        Assert.True(result.anyStopped)
-        Assert.Equal(0, result.failedTargets.Length)
-        Assert.Equal(1, driver.stoppedTargets.Length)
-        Assert.Equal(expected, driver.stoppedTargets[1])
+        Assert.False(restartPACS(driver))
+        Assert.Equal(1, driver.closeCalls)
+        Assert.Equal(0, driver.stopCalls)
+        Assert.Equal(0, driver.launchCalls)
+    }
+
+    RestartAbortsForUnverifiedPowerScribeProcess() {
+        driver := FakePacsRestartDriver([], 77, true)
+
+        Assert.False(restartPACS(driver))
+        Assert.Equal(0, driver.closeCalls)
+        Assert.Equal(0, driver.stopCalls)
+        Assert.Equal(0, driver.launchCalls)
+    }
+
+    GracefulCloseTimesOutAcross32BitTickWrap() {
+        driver := FakeGracefulCloseDriver(0xFFFFFFFF - 50, 77)
+
+        Assert.False(closeWithSavePrompt("ahk_id 601", 300, driver, 77))
+        Assert.Equal(1, driver.closeRequests)
+        Assert.True(driver.pauseCalls >= 2)
+    }
+
+    GracefulCloseRequiresCapturedProcessIdentity() {
+        driver := FakeGracefulCloseDriver(1000, 88)
+
+        Assert.False(closeWithSavePrompt("ahk_id 601", 300, driver, 77))
+        Assert.Equal(0, driver.closeRequests)
     }
 
     RestartTargetsUseExactClinicalIdentities() {
         specs := AppControl.PacsRestartTargetSpecs()
-        foundPowerScribe := false
 
         for spec in specs {
             Assert.True(HasProp(spec, "kind"))
             if (spec.kind = "window") {
-                Assert.True(InStr(spec.target, " ahk_exe ") > 0)
+                Assert.True(IsObject(spec.target))
+                Assert.True(HasProp(spec.target, "title"))
+                Assert.True(HasProp(spec.target, "exe"))
                 continue
             }
             Assert.Equal("process", spec.kind)
             Assert.True(RegExMatch(spec.target, "i)^[^\\/:*?`"<>|]+\.exe$") > 0)
-            if (spec.target = AppControl.powerScribeExecutable)
-                foundPowerScribe := true
+            Assert.NotEqual(AppControl.powerScribeExecutable, spec.target)
         }
 
-        Assert.True(foundPowerScribe)
         Assert.Equal(
             "PowerScribe 360 | Reporting ahk_exe " AppControl.powerScribeExecutable,
             PowerScribe.windowTitle
@@ -675,6 +780,113 @@ class FakeWindowDriver {
 
     Pause(milliseconds) {
         this.calls.Push({kind: "pause", value: milliseconds})
+    }
+}
+
+class FakeExactWindowDriver extends FakeWindowDriver {
+    __New(windows) {
+        super.__New()
+        this.windows := windows.Clone()
+    }
+
+    ListWindowsByExecutable(executable) {
+        handles := []
+        for window in this.windows {
+            if (window.exe = executable)
+                handles.Push(window.hwnd)
+        }
+        return handles
+    }
+
+    Window(hwnd) {
+        for window in this.windows {
+            if (window.hwnd = hwnd)
+                return window
+        }
+        throw Error("unknown fake window")
+    }
+
+    GetTitle(hwnd) {
+        return this.Window(hwnd).title
+    }
+
+    GetProcessName(hwnd) {
+        return this.Window(hwnd).exe
+    }
+
+    GetProcessId(hwnd) {
+        return this.Window(hwnd).pid
+    }
+}
+
+class FakePacsRestartDriver {
+    __New(powerScribeWindows, powerScribePid, closeResult) {
+        this.powerScribeWindows := powerScribeWindows
+        this.powerScribePid := powerScribePid
+        this.closeResult := closeResult
+        this.closeCalls := 0
+        this.stopCalls := 0
+        this.launchCalls := 0
+    }
+
+    FindPowerScribeWindows() {
+        return this.powerScribeWindows
+    }
+
+    FindPowerScribeProcess() {
+        return this.powerScribePid
+    }
+
+    ClosePowerScribe(*) {
+        this.closeCalls++
+        return this.closeResult
+    }
+
+    StopTargets(*) {
+        this.stopCalls++
+        return {anyStopped: false, failedTargets: []}
+    }
+
+    Pause(*) {
+    }
+
+    Launch() {
+        this.launchCalls++
+        return true
+    }
+}
+
+class FakeGracefulCloseDriver {
+    __New(now, processId) {
+        this.now := now
+        this.processId := processId
+        this.closeRequests := 0
+        this.pauseCalls := 0
+    }
+
+    FindWindow(*) {
+        return 601
+    }
+
+    GetProcessId(*) {
+        return this.processId
+    }
+
+    RequestClose(*) {
+        this.closeRequests++
+    }
+
+    ProcessExists(*) {
+        return true
+    }
+
+    NowMilliseconds() {
+        return this.now
+    }
+
+    Pause(milliseconds) {
+        this.pauseCalls++
+        this.now += milliseconds
     }
 }
 
@@ -856,6 +1068,22 @@ class FakeAppLifecycleDriver {
         return 0
     }
 
+    ListWindowsByExecutable(*) {
+        return this.mode = "close-error" ? [31337] : []
+    }
+
+    GetTitle(*) {
+        return "Vue PACS"
+    }
+
+    GetProcessName(*) {
+        return "mp.exe"
+    }
+
+    GetProcessId(*) {
+        return 4242
+    }
+
     GetWindowProcessId(hwnd) {
         return 0
     }
@@ -965,7 +1193,7 @@ class UncertainRecheckLifecycleDriver {
 
 class SharedHostWindowLifecycleDriver {
     __New() {
-        this.windows := [31337, 41414]
+        this.windows := [31337, 41414, 51515]
         this.processLookupCalls := 0
         this.closeCalls := 0
         this.killCalls := 0
@@ -981,6 +1209,22 @@ class SharedHostWindowLifecycleDriver {
         return this.windows.Length ? this.windows[1] : 0
     }
 
+    ListWindowsByExecutable(*) {
+        return this.windows.Clone()
+    }
+
+    GetTitle(hwnd) {
+        return hwnd = 51515 ? "Explorer Portal Extra" : "Explorer Portal"
+    }
+
+    GetProcessName(*) {
+        return "msedge.exe"
+    }
+
+    GetProcessId(*) {
+        return 4242
+    }
+
     GetWindowProcessId(*) {
         return 4242
     }
@@ -989,9 +1233,14 @@ class SharedHostWindowLifecycleDriver {
         return true
     }
 
-    CloseWindow(*) {
+    CloseWindow(hwnd) {
         this.closeCalls++
-        this.windows.RemoveAt(1)
+        for index, candidate in this.windows {
+            if (candidate = hwnd) {
+                this.windows.RemoveAt(index)
+                break
+            }
+        }
         return true
     }
 
@@ -1038,33 +1287,5 @@ class SameTitleWindowLifecycleDriver {
     StopProcess(*) {
         this.stopProcessCalls++
         return true
-    }
-}
-
-class ExactNamedProcessLifecycleDriver {
-    __New(expectedTarget) {
-        this.expectedTarget := expectedTarget
-        this.processAvailable := true
-        this.lastLookupTarget := ""
-        this.stoppedTargets := []
-    }
-
-    FindProcess(target) {
-        this.lastLookupTarget := target
-        return target = this.expectedTarget && this.processAvailable ? 4242 : 0
-    }
-
-    StopProcess(*) {
-        this.processAvailable := false
-        this.stoppedTargets.Push(this.lastLookupTarget)
-        return true
-    }
-
-    ProcessExists(*) {
-        return this.processAvailable
-    }
-
-    FindWindow(*) {
-        return 0
     }
 }

@@ -15,15 +15,15 @@ class PACSCommands {
         "Sign Report", (*) => sendPs("{F12}"),
         "Open/Force Restart PACS", (*) => restartPACS(),
         "Paste Wet Read", (*) => wetRead(),
-        "Toggle PowerScribe Window", (*) => toggleWindow(PACSCommands.PowerScribeToggleTarget()),
+        "Toggle PowerScribe Window", (*) => AppControl.ToggleExactWindow(PACSCommands.PowerScribeToggleTarget()),
         "Toggle EPIC Window", (*) => toggleWindow("Hyperspace"),
-        "Next Series", (*) => AppControl.SendKeysToWindow("Vue PACS Client ahk_exe mp.exe", "{Right}"),
-        "Previous Series", (*) => AppControl.SendKeysToWindow("Vue PACS Client ahk_exe mp.exe", "{Left}"),
+        "Next Series", (*) => AppControl.SendKeysToExactWindow(AppControl.VuePacsClientWindowSpec(), "{Right}"),
+        "Previous Series", (*) => AppControl.SendKeysToExactWindow(AppControl.VuePacsClientWindowSpec(), "{Left}"),
         "Set PowerScribe Microphone", (*) => MicrophoneManager.ApplyNow()
     )
 
     static PowerScribeToggleTarget() {
-        return PowerScribe.windowTitle
+        return AppControl.PowerScribeWindowSpec()
     }
 
     static CreateCustomKeybind(keys, targetWindow := "") {
