@@ -631,6 +631,136 @@ class KeybindGUI {
         return false
     }
 
+    ConfirmDestructiveAction(message, title) {
+        if this.HasOwnProp("confirmationDriver")
+            return this.confirmationDriver.Confirm(message, title)
+        return MsgBox(message, title, "YesNo Icon!") = "Yes"
+    }
+
+    NotifyUser(message, title, options := "") {
+        if this.HasOwnProp("notificationDriver")
+            return this.notificationDriver.Notify(message, title, options)
+        return MsgBox(message, title, options)
+    }
+
+    RestoreRuntimeAndNotify(originalProfile, message, title) {
+        restoreError := ""
+        restored := this.RestoreRuntimeProfile(originalProfile, &restoreError)
+        if !restored {
+            message .= "`n`nThe previous runtime bindings could not be fully restored: " restoreError
+                . ". Restart PACS Assistant before relying on its shortcuts."
+        }
+        this.NotifyUser(message, title, "Icon!")
+        return restored
+    }
+
+    CaptureFunctionRemovalState(listView) {
+        try row := listView.GetNext(0)
+        catch
+            return 0
+        if !row
+            return 0
+
+        profileName := ProfileManager.currentProfile
+        if (profileName = "" || !ProfileManager.profiles.Has(profileName))
+            return 0
+        profile := ProfileManager.profiles[profileName]
+
+        try {
+            funcName := listView.GetText(row, 1)
+            if (!profile.binds.Has(funcName)
+                || this.FindUniqueFunctionRow(listView, funcName) != row)
+                return 0
+            return {
+                profileName: profileName,
+                profilePointer: ObjPtr(profile),
+                profileRevision: ProfileManager.GetProfileRevision(profileName),
+                functionName: funcName,
+                bind: profile.binds[funcName],
+                hasScope: profile.scopes.Has(funcName),
+                scope: profile.scopes.Has(funcName) ? profile.scopes[funcName] : "",
+                row: row,
+                rowBind: listView.GetText(row, 2),
+                rowScope: listView.GetText(row, 3)
+            }
+        }
+        return 0
+    }
+
+    FunctionRemovalStateIsCurrent(state, listView) {
+        if (!state
+            || !(ProfileManager.currentProfile == state.profileName)
+            || !ProfileManager.profiles.Has(state.profileName)
+            || ProfileManager.GetProfileRevision(state.profileName) != state.profileRevision)
+            return false
+
+        profile := ProfileManager.profiles[state.profileName]
+        if (ObjPtr(profile) != state.profilePointer
+            || !profile.binds.Has(state.functionName)
+            || !(profile.binds[state.functionName] == state.bind)
+            || profile.scopes.Has(state.functionName) != state.hasScope)
+            return false
+        if (state.hasScope && !(profile.scopes[state.functionName] == state.scope))
+            return false
+
+        try return listView.GetNext(0) = state.row
+            && this.FindUniqueFunctionRow(listView, state.functionName) = state.row
+            && listView.GetText(state.row, 1) == state.functionName
+            && listView.GetText(state.row, 2) == state.rowBind
+            && listView.GetText(state.row, 3) == state.rowScope
+        return false
+    }
+
+    CaptureCustomDeletionState(funcName, selectorGui) {
+        if !this.DialogProfileIsCurrent(selectorGui)
+            return 0
+        profileName := selectorGui.profileName
+        profile := ProfileManager.profiles[profileName]
+        if !profile.customFuncs.Has(funcName)
+            return 0
+        config := profile.customFuncs[funcName]
+        if (!IsObject(config)
+            || !HasProp(config, "keys")
+            || !HasProp(config, "window"))
+            return 0
+        return {
+            profileName: profileName,
+            profilePointer: ObjPtr(profile),
+            profileRevision: ProfileManager.GetProfileRevision(profileName),
+            functionName: funcName,
+            configPointer: ObjPtr(config),
+            keys: config.keys,
+            window: config.window,
+            hasBind: profile.binds.Has(funcName),
+            bind: profile.binds.Has(funcName) ? profile.binds[funcName] : "",
+            hasScope: profile.scopes.Has(funcName),
+            scope: profile.scopes.Has(funcName) ? profile.scopes[funcName] : ""
+        }
+    }
+
+    CustomDeletionStateIsCurrent(state, selectorGui) {
+        if (!state
+            || !this.DialogProfileIsCurrent(selectorGui)
+            || !(selectorGui.profileName == state.profileName)
+            || ProfileManager.GetProfileRevision(state.profileName) != state.profileRevision)
+            return false
+        profile := ProfileManager.profiles[state.profileName]
+        if (ObjPtr(profile) != state.profilePointer
+            || !profile.customFuncs.Has(state.functionName))
+            return false
+        config := profile.customFuncs[state.functionName]
+        return IsObject(config)
+            && ObjPtr(config) = state.configPointer
+            && HasProp(config, "keys")
+            && config.keys == state.keys
+            && HasProp(config, "window")
+            && config.window == state.window
+            && profile.binds.Has(state.functionName) = state.hasBind
+            && (!state.hasBind || profile.binds[state.functionName] == state.bind)
+            && profile.scopes.Has(state.functionName) = state.hasScope
+            && (!state.hasScope || profile.scopes[state.functionName] == state.scope)
+    }
+
     ApplyProfileCandidate(candidate, originalProfile, operationName) {
         applyError := ""
         try {
@@ -828,9 +958,31 @@ class KeybindGUI {
             MsgBox("Only custom functions can be deleted.", "Error", "Icon!")
             return
         }
+
+        deletionState := this.CaptureCustomDeletionState(funcName, selectorGui)
+        if !deletionState {
+            this.NotifyUser(
+                "The selected custom function changed. Reopen Add Function before deleting it.",
+                "Function Changed",
+                "Icon!"
+            )
+            return false
+        }
         
-        if (MsgBox("Are you sure you want to delete the custom function '" funcName "'?", "Confirm Delete", "YesNo Icon!") = "Yes") {
-            profileName := selectorGui.profileName
+        if this.ConfirmDestructiveAction(
+            "Are you sure you want to delete the custom function '" funcName "'?",
+            "Confirm Delete"
+        ) {
+            if !this.CustomDeletionStateIsCurrent(deletionState, selectorGui) {
+                this.NotifyUser(
+                    "The selected custom function changed while confirmation was open. Reopen Add Function before deleting it.",
+                    "Function Changed",
+                    "Icon!"
+                )
+                return false
+            }
+
+            profileName := deletionState.profileName
             originalProfile := ProfileManager.profiles[profileName]
             candidate := ProfileManager.CloneProfile(originalProfile)
             
@@ -850,15 +1002,19 @@ class KeybindGUI {
             if !this.ApplyProfileCandidate(candidate, originalProfile, "custom-function deletion")
                 return false
 
+            if !this.CustomDeletionStateIsCurrent(deletionState, selectorGui) {
+                this.RestoreRuntimeAndNotify(
+                    originalProfile,
+                    "The selected custom function changed before deletion completed. The previous profile was retained.",
+                    "Function Changed"
+                )
+                return false
+            }
+
             try ProfileManager.SaveProfile(profileName, candidate)
             catch as err {
-                restoreError := ""
-                restored := this.RestoreRuntimeProfile(originalProfile, &restoreError)
                 message := "The custom function could not be deleted. The previous profile was left unchanged.`n`n" err.Message
-                if !restored
-                    message .= "`n`nThe previous runtime bindings could not be fully restored: " restoreError
-                        . ". Restart PACS Assistant before relying on its shortcuts."
-                MsgBox(message, "Delete Failed", "Icon!")
+                this.RestoreRuntimeAndNotify(originalProfile, message, "Delete Failed")
                 return false
             }
             ProfileManager.profiles[profileName] := candidate
@@ -994,14 +1150,27 @@ class KeybindGUI {
     }
 
     RemoveFunction(listView) {
-        if (listView.GetNext(0) = 0) {
+        removalState := this.CaptureFunctionRemovalState(listView)
+        if !removalState {
             MsgBox("Please select a function to remove.", "Error", "Icon!")
             return
         }
         
-        funcName := listView.GetText(listView.GetNext(0), 1)
-        if (MsgBox("Remove '" funcName "' from the profile?", "Confirm Remove", "YesNo Icon!") = "Yes") {
-            profileName := ProfileManager.currentProfile
+        funcName := removalState.functionName
+        if this.ConfirmDestructiveAction(
+            "Remove '" funcName "' from the profile?",
+            "Confirm Remove"
+        ) {
+            if !this.FunctionRemovalStateIsCurrent(removalState, listView) {
+                this.NotifyUser(
+                    "The selected function changed while confirmation was open. Reopen the removal prompt before making another change.",
+                    "Function Changed",
+                    "Icon!"
+                )
+                return false
+            }
+
+            profileName := removalState.profileName
             originalProfile := ProfileManager.profiles[profileName]
             candidate := ProfileManager.CloneProfile(originalProfile)
             candidate.binds.Delete(funcName)
@@ -1011,15 +1180,21 @@ class KeybindGUI {
             if !this.ApplyProfileCandidate(candidate, originalProfile, "function removal")
                 return false
 
-            row := listView.GetNext(0)
-            try listView.Delete(row)
+            if !this.FunctionRemovalStateIsCurrent(removalState, listView) {
+                this.RestoreRuntimeAndNotify(
+                    originalProfile,
+                    "The selected function changed before removal completed. The previous profile was retained.",
+                    "Function Changed"
+                )
+                return false
+            }
+
+            try listView.Delete(removalState.row)
             catch as err {
-                restoreError := ""
-                this.RestoreRuntimeProfile(originalProfile, &restoreError)
-                MsgBox(
+                this.RestoreRuntimeAndNotify(
+                    originalProfile,
                     "The function row could not be removed, so the previous profile was retained.`n`n" err.Message,
-                    "Function Removal Failed",
-                    "Icon!"
+                    "Function Removal Failed"
                 )
                 return false
             }

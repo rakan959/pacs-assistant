@@ -26,7 +26,10 @@ class KeybindGUITest {
         "TestStaleRenameDialogCannotRenameAnotherProfile",
         "TestFailedCustomDeletePreservesLiveProfile",
         "TestRemoveFunctionKeepsProfileAndRowWhenNativeOffFails",
-        "TestCustomDeleteRollsBackWhenLaterRegistrationFails"
+        "TestCustomDeleteRollsBackWhenLaterRegistrationFails",
+        "TestStaleRemoveConfirmationCannotDeleteReplacementRow",
+        "TestStaleCustomDeleteCannotDeleteRecreatedCommand",
+        "TestRowDeleteAndRuntimeRestoreFailureRequiresRestartWarning"
     ]
 
     Setup() {
@@ -712,6 +715,115 @@ class KeybindGUITest {
         Assert.True(dialogKept)
     }
 
+    TestStaleRemoveConfirmationCannotDeleteReplacementRow() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F23"
+        profile.scopes["Sign Report"] := "Any"
+        profile.binds["Draft Report"] := "^F24"
+        profile.scopes["Draft Report"] := "Any"
+        listView := RemovableListView("Sign Report", "Ctrl + F23", "Any window")
+        gui := {base: PassiveRuntimeKeybindGUI.Prototype}
+        gui.applyCalls := 0
+        gui.confirmationDriver := RemoveRaceConfirmationDriver(profile, listView)
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            result := gui.RemoveFunction(listView)
+            liveProfile := ProfileManager.profiles["Test"]
+            keptSign := liveProfile.binds.Has("Sign Report")
+                && liveProfile.binds["Sign Report"] == "^F22"
+            keptDraft := liveProfile.binds.Has("Draft Report")
+            rowOne := listView.GetText(1, 1)
+            rowTwo := listView.GetText(2, 1)
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.False(result)
+        Assert.True(keptSign)
+        Assert.True(keptDraft)
+        Assert.Equal("Draft Report", rowOne)
+        Assert.Equal("Sign Report", rowTwo)
+        Assert.Equal(0, gui.applyCalls)
+    }
+
+    TestStaleCustomDeleteCannotDeleteRecreatedCommand() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        tempRoot := A_Temp "\pacs_stale_custom_delete_" A_TickCount
+        profile := ProfileManager.NewProfile()
+        profile.binds["Custom: Keep"] := "^F23"
+        profile.scopes["Custom: Keep"] := "Any"
+        profile.customFuncs["Custom: Keep"] := {keys: "OLD", window: ""}
+        dialog := FakeProfileDialog("Test")
+        gui := {base: PassiveRuntimeKeybindGUI.Prototype, gui: ""}
+        gui.applyCalls := 0
+        gui.confirmationDriver := RecreateCustomConfirmationDriver(profile)
+        threw := false
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            try result := gui.DeleteCustomFunction("Custom: Keep", dialog)
+            catch {
+                threw := true
+                result := false
+            }
+            liveProfile := ProfileManager.profiles["Test"]
+            keptRecreated := liveProfile.customFuncs.Has("Custom: Keep")
+                && liveProfile.customFuncs["Custom: Keep"].keys == "NEW"
+                && liveProfile.binds.Has("Custom: Keep")
+                && liveProfile.binds["Custom: Keep"] == "^F22"
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profilesPath := originalProfilesPath
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.False(result)
+        Assert.False(threw)
+        Assert.True(keptRecreated)
+        Assert.Equal(0, gui.applyCalls)
+    }
+
+    TestRowDeleteAndRuntimeRestoreFailureRequiresRestartWarning() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F23"
+        profile.scopes["Sign Report"] := "Any"
+        listView := ThrowingDeleteListView("Sign Report", "Ctrl + F23", "Any window")
+        notifications := CapturingNotificationDriver()
+        gui := {base: FailedRestoreKeybindGUI.Prototype}
+        gui.applyCalls := 0
+        gui.confirmationDriver := AlwaysConfirmDriver()
+        gui.notificationDriver := notifications
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            result := gui.RemoveFunction(listView)
+            keptBind := ProfileManager.profiles["Test"].binds.Has("Sign Report")
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.False(result)
+        Assert.True(keptBind)
+        Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
+        Assert.True(InStr(notifications.message, "simulated restore failure") > 0)
+    }
+
     PrepareBlockedProfileSave() {
         state := {
             profiles: ProfileManager.profiles,
@@ -779,6 +891,74 @@ class RemovableListView extends FunctionalListView {
 
     Delete(row) {
         this.rows.RemoveAt(row)
+    }
+}
+
+class ThrowingDeleteListView extends RemovableListView {
+    Delete(*) {
+        throw Error("simulated ListView delete failure")
+    }
+}
+
+class PassiveRuntimeKeybindGUI extends KeybindGUI {
+    applyCalls := 0
+
+    ApplyProfileCandidate(*) {
+        this.applyCalls++
+        return true
+    }
+
+    ResizeColumns(*) {
+    }
+}
+
+class FailedRestoreKeybindGUI extends PassiveRuntimeKeybindGUI {
+    RestoreRuntimeProfile(profile, &errorText) {
+        errorText := "simulated restore failure"
+        return false
+    }
+}
+
+class AlwaysConfirmDriver {
+    Confirm(*) {
+        return true
+    }
+}
+
+class RemoveRaceConfirmationDriver extends AlwaysConfirmDriver {
+    __New(profile, listView) {
+        this.profile := profile
+        this.listView := listView
+    }
+
+    Confirm(*) {
+        this.profile.binds["Sign Report"] := "^F22"
+        this.listView.rows.InsertAt(1, ["Draft Report", "Ctrl + F24", "Any window"])
+        return true
+    }
+}
+
+class RecreateCustomConfirmationDriver extends AlwaysConfirmDriver {
+    __New(profile) {
+        this.profile := profile
+    }
+
+    Confirm(*) {
+        this.profile.customFuncs.Delete("Custom: Keep")
+        this.profile.customFuncs["Custom: Keep"] := {keys: "NEW", window: ""}
+        this.profile.binds["Custom: Keep"] := "^F22"
+        return true
+    }
+}
+
+class CapturingNotificationDriver {
+    __New() {
+        this.message := ""
+    }
+
+    Notify(message, *) {
+        this.message := message
+        return "OK"
     }
 }
 
