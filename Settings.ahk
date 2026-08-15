@@ -386,10 +386,10 @@ class Settings {
         sound := this.NormalizeSoundName(sound)
 
         if (sound = "Custom File") {
-            file := IsSet(customFile) ? customFile : this.Get("CustomSoundFile")
-            if (file != "" && FileExist(file)) {
+            soundPath := IsSet(customFile) ? customFile : this.Get("CustomSoundFile")
+            if (soundPath != "" && FileExist(soundPath)) {
                 try {
-                    SoundPlay(file)
+                    SoundPlay(soundPath)
                     return true
                 }
             }
@@ -415,9 +415,9 @@ class Settings {
 
     ; Browse for custom sound file
     static BrowseSound(editControl) {
-        file := FileSelect(3,, "Select Sound File", "Sound Files (*.wav; *.mp3)")
-        if file
-            editControl.Value := file
+        selectedPath := FileSelect(3,, "Select Sound File", "Sound Files (*.wav; *.mp3)")
+        if selectedPath
+            editControl.Value := selectedPath
     }
 
     ; Test selected sound

@@ -1,6 +1,6 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Ignore
-#Warn All, Off
+#Warn All, StdOut
 
 #Include KeybindGUI.ahk
 #Include Settings.ahk

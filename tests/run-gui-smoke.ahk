@@ -13,7 +13,13 @@
 
 global TestsRun := 0
 global TestsFailed := 0
-global TempDir := A_Temp "\pacs-assistant-gui-smoke"
+global RunPid := DllCall("GetCurrentProcessId")
+global TempDir := A_Temp "\pacs-assistant-gui-smoke-" RunPid "-" DllCall("GetTickCount64", "UInt64") "-" Random(100000, 999999)
+global OpenedWindows := []
+global SmokeKB := 0
+global OriginalConfigPath := ""
+global OriginalProfilesPath := ""
+global OriginalSettingsPath := ""
 
 Out(text) {
     FileAppend(text "`n", "*")
@@ -42,11 +48,58 @@ Assert(condition, label) {
     Out("  FAIL " label)
 }
 
-; Closes a window by title and lets its event handlers run
-CloseWindow(title) {
-    if WinExist(title) {
-        WinClose(title)
+OpenAndCaptureWindow(title, action) {
+    global OpenedWindows
+    before := Map()
+    for hwnd in WinGetList(title)
+        before[hwnd] := true
+    action.Call()
+    Sleep(75)
+    created := []
+    for hwnd in WinGetList(title) {
+        if !before.Has(hwnd)
+            created.Push(hwnd)
+    }
+    if (created.Length != 1)
+        throw Error("Expected one new '" title "' window, found " created.Length)
+    OpenedWindows.Push(created[1])
+    return created[1]
+}
+
+; Close only the exact HWND created by this smoke run.
+CloseWindow(hwnd) {
+    if (hwnd > 0 && WinExist("ahk_id " hwnd)) {
+        WinClose("ahk_id " hwnd)
         Sleep(150)
+    }
+}
+
+Cleanup(*) {
+    global TempDir, OpenedWindows, SmokeKB, RunPid
+    global OriginalConfigPath, OriginalProfilesPath, OriginalSettingsPath
+    try HotkeyManager.DisableAllHotkeys()
+    try UpdateChecker.StopAutoCheck()
+    for hwnd in OpenedWindows
+        try CloseWindow(hwnd)
+    if SmokeKB
+        try SmokeKB.gui.Destroy()
+    if (OriginalConfigPath != "")
+        ProfileManager.configPath := OriginalConfigPath
+    if (OriginalProfilesPath != "")
+        ProfileManager.profilesPath := OriginalProfilesPath
+    if (OriginalSettingsPath != "")
+        Settings.settingsFile := OriginalSettingsPath
+    try SetWorkingDir(A_ScriptDir)
+
+    ; The recursive cleanup target is private to this PID/run and must remain a
+    ; direct child of the system temp directory.
+    try {
+        tempParent := RTrim(AppControl.NormalizePath(A_Temp), "\") "\"
+        resolved := AppControl.NormalizePath(TempDir)
+        expectedName := "pacs-assistant-gui-smoke-" RunPid "-"
+        if (InStr(resolved, tempParent, true) = 1
+            && InStr(SubStr(resolved, StrLen(tempParent) + 1), expectedName, true) = 1)
+            DirDelete(resolved, true)
     }
 }
 
@@ -59,16 +112,19 @@ FindListView(guiObj) {
 }
 
 Main() {
-    global TestsRun, TestsFailed, TempDir
+    global TestsRun, TestsFailed, TempDir, SmokeKB
+    global OriginalConfigPath, OriginalProfilesPath, OriginalSettingsPath
 
-    try DirDelete(TempDir, true)
     DirCreate(TempDir)
     DirCreate(TempDir "\profiles")
     SetWorkingDir(TempDir)
-    originalConfigPath := ProfileManager.configPath
-    originalProfilesPath := ProfileManager.profilesPath
+    OriginalConfigPath := ProfileManager.configPath
+    OriginalProfilesPath := ProfileManager.profilesPath
+    OriginalSettingsPath := Settings.settingsFile
     ProfileManager.configPath := TempDir "\config.ini"
     ProfileManager.profilesPath := TempDir "\profiles"
+    Settings.settingsFile := TempDir "\settings.ini"
+    Settings.SaveAllSettings()
 
     ; A profile with a built-in bind, a scoped bind and a custom function.
     ; F13/F14 do not exist on a normal keyboard, so applying these binds cannot
@@ -96,6 +152,7 @@ Main() {
     ; Build an instance without running the constructor, which would go and check
     ; GitHub for updates
     kb := {base: KeybindGUI.Prototype, gui: ""}
+    SmokeKB := kb
 
     Check("main window builds", () => kb.CreateMainGUI())
 
@@ -109,15 +166,33 @@ Main() {
         AssertScope(lv, "Sign Report", "Any window")
 
         lv.Modify(1, "Select Focus")
-        Check("scope dialog builds", () => kb.ShowScopeDialog(lv))
-        CloseWindow("PACS Assistant - Keybind Scope")
+        scopeHwnd := 0
+        Check("scope dialog builds", () => (
+            scopeHwnd := OpenAndCaptureWindow(
+                "PACS Assistant - Keybind Scope",
+                () => kb.ShowScopeDialog(lv)
+            )
+        ))
+        CloseWindow(scopeHwnd)
     }
 
-    Check("modality attendings dialog builds", () => kb.ShowModalityAttendingsDialog())
-    CloseWindow("PACS Assistant - Modality Attendings")
+    modalityHwnd := 0
+    Check("modality attendings dialog builds", () => (
+        modalityHwnd := OpenAndCaptureWindow(
+            "PACS Assistant - Modality Attendings",
+            () => kb.ShowModalityAttendingsDialog()
+        )
+    ))
+    CloseWindow(modalityHwnd)
 
-    Check("settings dialog builds", () => Settings.ShowDialog())
-    CloseWindow("PACS Assistant - Settings")
+    settingsHwnd := 0
+    Check("settings dialog builds", () => (
+        settingsHwnd := OpenAndCaptureWindow(
+            "PACS Assistant - Settings",
+            () => Settings.ShowDialog()
+        )
+    ))
+    CloseWindow(settingsHwnd)
 
     updateInfo := {
         hasUpdate: true,
@@ -125,15 +200,27 @@ Main() {
         latestVersion: "v2.1.0",
         releaseNotes: "Smoke-test release"
     }
-    Check("update dialog builds", () => UpdateChecker.ShowUpdateDialog(updateInfo))
-    CloseWindow("PACS Assistant - Update Available")
-    Assert(!WinExist("PACS Assistant - Update Available"), "closing update dialog commits preferences and closes")
+    updateHwnd := 0
+    Check("update dialog builds", () => (
+        updateHwnd := OpenAndCaptureWindow(
+            "PACS Assistant - Update Available",
+            () => UpdateChecker.ShowUpdateDialog(updateInfo)
+        )
+    ))
+    CloseWindow(updateHwnd)
+    Assert(!WinExist("ahk_id " updateHwnd), "closing update dialog commits preferences and closes")
     UpdateChecker.StopAutoCheck()
 
     registeredBeforeSwitch := HotkeyManager.activeHotkeys.Count
-    Check("profile selector builds", () => kb.OpenProfileSelector())
+    selectorHwnd := 0
+    Check("profile selector builds", () => (
+        selectorHwnd := OpenAndCaptureWindow(
+            "PACS Assistant - Profile Selection",
+            () => kb.OpenProfileSelector()
+        )
+    ))
     Assert(HotkeyManager.activeHotkeys.Count = 0, "profile selection suspends the prior profile hotkeys")
-    CloseWindow("PACS Assistant - Profile Selection")
+    CloseWindow(selectorHwnd)
     Assert(HotkeyManager.activeHotkeys.Count = registeredBeforeSwitch, "closing profile selection restores the current profile")
     lv := FindListView(kb.gui)
 
@@ -142,24 +229,19 @@ Main() {
     if (lv != 0) {
         registeredBeforeCapture := HotkeyManager.activeHotkeys.Count
         Assert(registeredBeforeCapture > 0, "profile hotkeys are active before keybind capture")
-        Check("keybind prompt builds", () => kb.PromptKeybind("Sign Report", lv))
+        captureHwnd := 0
+        Check("keybind prompt builds", () => (
+            captureHwnd := OpenAndCaptureWindow(
+                "PACS Assistant - Set Keybind",
+                () => kb.PromptKeybind("Sign Report", lv)
+            )
+        ))
         Assert(HotkeyManager.activeHotkeys.Count = 0, "keybind capture disables live clinical hotkeys")
-        CloseWindow("PACS Assistant - Set Keybind")
+        CloseWindow(captureHwnd)
         Assert(KeybindGUI.isListening = false, "closing the keybind prompt stops listening")
         Assert(KeybindGUI.activeInputHook = 0, "closing the keybind prompt tears down the input hook")
         Assert(HotkeyManager.activeHotkeys.Count = registeredBeforeCapture, "closing the keybind prompt restores profile hotkeys")
     }
-
-    ; Leave no hotkeys registered behind
-    HotkeyManager.DisableAllHotkeys()
-    UpdateChecker.StopAutoCheck()
-    try kb.gui.Destroy()
-
-    ProfileManager.configPath := originalConfigPath
-    ProfileManager.profilesPath := originalProfilesPath
-    SetWorkingDir(A_ScriptDir)
-    try DirDelete(TempDir, true)
-    try FileDelete(A_ScriptDir "\settings.ini")
 
     Out("")
     Out(TestsFailed = 0
@@ -179,4 +261,5 @@ AssertScope(listView, funcName, expected) {
     Assert(false, "'" funcName "' is in the list")
 }
 
+OnExit(Cleanup)
 Main()

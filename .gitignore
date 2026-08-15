@@ -10,6 +10,7 @@
 # Config file containing user settings
 config.ini
 settings.ini
+settings.ini.tmp-*
 
 # Test scratch: Settings creates its ini next to whichever script runs
 tests/settings.ini
