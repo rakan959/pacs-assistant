@@ -27,12 +27,15 @@ class ClinicalAutomationTest {
         "WindowCloseCarriesAndRevalidatesCapturedSession",
         "WindowCloseRecheckRejectsNewDuplicate",
         "AmbiguousSharedHostWindowsAreNotClosed",
+        "RestartTargetPreflightPreventsPartialShutdown",
+        "RestartStopsAfterRuntimeTargetFailure",
         "RestartRejectsBareProcessTermination",
         "RestartSpecsNeverHardStopPowerScribe",
         "RestartAbortsWhenPowerScribeSaveIsUnverified",
         "RestartAbortsForUnverifiedPowerScribeProcess",
         "RestartAbortsWhenAnotherPowerScribeProcessSurvivesGracefulClose",
         "RestartPreparationFailureHasNoClinicalSideEffects",
+        "RestartPreparationRejectsAmbiguousTargets",
         "RestartPreparationCapturesHiddenTrustedVueProcesses",
         "RestartAbortsWhenTargetReappearsBeforeLaunch",
         "RestartStopBoundaryFailureCancelsLaunch",
@@ -427,6 +430,63 @@ class ClinicalAutomationTest {
         Assert.Equal(3, driver.windows.Length)
     }
 
+    RestartTargetPreflightPreventsPartialShutdown() {
+        specs := [
+            {
+                target: AppControl.ExactWindowSpec("First Target", "first.exe"),
+                label: "First Target",
+                kind: "window"
+            },
+            {
+                target: AppControl.ExactWindowSpec("Second Target", "second.exe"),
+                label: "Second Target",
+                kind: "window"
+            }
+        ]
+        AppControl.windowDriver := FakeExactWindowDriver([
+            {hwnd: 101, title: "First Target", exe: "first.exe", pid: 11},
+            {hwnd: 102, title: "First Target", exe: "first.exe", pid: 12},
+            {hwnd: 201, title: "Second Target", exe: "second.exe", pid: 21}
+        ])
+        lifecycle := CountingCloseLifecycleDriver()
+        AppControl.lifecycleDriver := lifecycle
+
+        result := AppControl.StopTargetSpecs(specs)
+
+        Assert.False(result.anyStopped)
+        Assert.Equal(1, result.failedTargets.Length)
+        Assert.Equal("First Target", result.failedTargets[1])
+        Assert.Equal(0, lifecycle.closeCalls)
+    }
+
+    RestartStopsAfterRuntimeTargetFailure() {
+        specs := [
+            {
+                target: AppControl.ExactWindowSpec("First Target", "first.exe"),
+                label: "First Target",
+                kind: "window"
+            },
+            {
+                target: AppControl.ExactWindowSpec("Second Target", "second.exe"),
+                label: "Second Target",
+                kind: "window"
+            }
+        ]
+        AppControl.windowDriver := FakeExactWindowDriver([
+            {hwnd: 101, title: "First Target", exe: "first.exe", pid: 11},
+            {hwnd: 201, title: "Second Target", exe: "second.exe", pid: 21}
+        ])
+        lifecycle := CountingCloseLifecycleDriver(true)
+        AppControl.lifecycleDriver := lifecycle
+
+        result := AppControl.StopTargetSpecs(specs)
+
+        Assert.False(result.anyStopped)
+        Assert.Equal(1, result.failedTargets.Length)
+        Assert.Equal("First Target", result.failedTargets[1])
+        Assert.Equal(1, lifecycle.closeCalls)
+    }
+
     RestartRejectsBareProcessTermination() {
         driver := SameTitleWindowLifecycleDriver()
         AppControl.lifecycleDriver := driver
@@ -498,6 +558,39 @@ class ClinicalAutomationTest {
         Assert.Equal(0, driver.closeCalls)
         Assert.Equal(0, driver.stopCalls)
         Assert.Equal(0, driver.launchCalls)
+    }
+
+    RestartPreparationRejectsAmbiguousTargets() {
+        trustedPath := A_Temp "\Philips\Vue\mp.exe"
+        AppControl.windowDriver := FakeExactWindowDriver([
+            {
+                hwnd: 501,
+                title: AppControl.vuePacsTitle,
+                exe: AppControl.vuePacsExecutable,
+                pid: 42
+            },
+            {
+                hwnd: 601,
+                title: AppControl.explorerPortalTitle,
+                exe: AppControl.explorerPortalExecutable,
+                pid: 51
+            },
+            {
+                hwnd: 602,
+                title: AppControl.explorerPortalTitle,
+                exe: AppControl.explorerPortalExecutable,
+                pid: 52
+            }
+        ])
+        AppControl.lifecycleDriver := FakeProcessInventoryLifecycleDriver(
+            Map(42, trustedPath),
+            [{processId: 42, name: AppControl.vuePacsExecutable, path: trustedPath}]
+        )
+
+        Assert.Throws(
+            () => NativePacsRestartDriver().PrepareRestart(),
+            "Explorer Portal"
+        )
     }
 
     RestartPreparationCapturesHiddenTrustedVueProcesses() {
@@ -1075,6 +1168,20 @@ class FakeProcessInventoryLifecycleDriver {
 
     ListProcessesByExecutable(*) {
         return this.processes
+    }
+}
+
+class CountingCloseLifecycleDriver {
+    __New(failAll := false) {
+        this.failAll := failAll
+        this.closeCalls := 0
+    }
+
+    CloseWindow(*) {
+        this.closeCalls++
+        if this.failAll
+            throw Error("simulated close failure")
+        return true
     }
 }
 

@@ -489,20 +489,72 @@ class AppControl {
         return "ahk_exe " this.powerScribeExecutable
     }
 
+    /**
+     * Resolves every restart target without mutating it. The restart is an
+     * all-target transaction: known ambiguity or lookup failure must be found
+     * before PowerScribe or any PACS window is closed.
+     */
+    static PreflightTargetSpecs(specs) {
+        failedTargets := []
+        if (Type(specs) != "Array")
+            return {clear: false, failedTargets: ["restart target list"]}
+
+        for spec in specs {
+            label := this.RestartTargetLabel(spec)
+            if (!IsObject(spec)
+                || !HasProp(spec, "kind")
+                || spec.kind != "window"
+                || !HasProp(spec, "target")
+                || !IsObject(spec.target)) {
+                failedTargets.Push(label)
+                continue
+            }
+
+            try sessions := this.ResolveExactWindows(spec.target)
+            catch {
+                failedTargets.Push(label)
+                continue
+            }
+            if (Type(sessions) != "Array" || sessions.Length > 1)
+                failedTargets.Push(label)
+        }
+        return {
+            clear: failedTargets.Length = 0,
+            failedTargets: failedTargets
+        }
+    }
+
+    static RestartTargetLabel(spec) {
+        if (IsObject(spec)
+            && HasProp(spec, "label")
+            && Type(spec.label) = "String"
+            && spec.label != "")
+            return spec.label
+        return "restart target"
+    }
+
     static StopTargetSpecs(specs) {
+        preflight := this.PreflightTargetSpecs(specs)
+        if !preflight.clear {
+            return {
+                anyStopped: false,
+                failedTargets: preflight.failedTargets
+            }
+        }
+
         anyStopped := false
         failedTargets := []
         for spec in specs {
             target := spec.target
-            if !HasProp(spec, "kind") {
-                failedTargets.Push(HasProp(spec, "label") ? spec.label : target)
-                continue
-            }
             result := this.StopTarget(target, spec.kind)
-            if result.found
+            if (result.found && result.stopped)
                 anyStopped := true
-            if !result.stopped
-                failedTargets.Push(HasProp(spec, "label") ? spec.label : target)
+            if !result.stopped {
+                failedTargets.Push(this.RestartTargetLabel(spec))
+                ; Once the transaction is partial, do not close additional
+                ; clinical clients. The caller will cancel rather than launch.
+                break
+            }
         }
         return {anyStopped: anyStopped, failedTargets: failedTargets}
     }
@@ -679,6 +731,15 @@ class NativePacsRestartDriver {
         ; Establish the installed Vue identity and complete pre-restart process set
         ; before any clinical window is closed. The restart cannot safely infer an
         ; installation from an arbitrary same-named shortcut target.
+        preflight := AppControl.PreflightTargetSpecs(
+            AppControl.PacsRestartTargetSpecs()
+        )
+        if !preflight.clear {
+            names := ""
+            for label in preflight.failedTargets
+                names .= (names = "" ? "" : ", ") label
+            throw Error("Restart target identity could not be verified: " names)
+        }
         this.priorVueProcessIds := this.CaptureVueProcessIds()
         return true
     }
@@ -811,7 +872,7 @@ restartPACS(driver := 0) {
     try prepared := driver.PrepareRestart()
     catch as err {
         MsgBox(
-            "The installed Vue PACS client could not be verified. The restart was cancelled before closing any clinical window.`n`n" err.Message,
+            "The Vue PACS installation or restart target identities could not be verified. The restart was cancelled before closing any clinical window.`n`n" err.Message,
             "PACS Restart Cancelled",
             "Icon!"
         )
@@ -819,7 +880,7 @@ restartPACS(driver := 0) {
     }
     if !prepared {
         MsgBox(
-            "The installed Vue PACS client could not be verified. The restart was cancelled before closing any clinical window.",
+            "The Vue PACS installation or restart target identities could not be verified. The restart was cancelled before closing any clinical window.",
             "PACS Restart Cancelled",
             "Icon!"
         )
