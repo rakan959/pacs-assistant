@@ -36,7 +36,6 @@ class WetReadTest {
         "NativeControlWithoutHandleIsUnsupported",
         "NativeControlWriteHasNoFocusSideEffect",
         "NativeForwardVerificationRejectsCaseOnlyDifference",
-        "NativeRollbackVerificationRejectsCaseOnlyDifference",
         "RoutingFailureReportsTheActualCause",
         "StickyOpenerFailureAlsoReportsAttendingOutcome",
         "ThrowingStickyOpenerStillReportsAttendingOutcome",
@@ -454,13 +453,6 @@ class WetReadTest {
         Assert.True(driver.WaitForValue(1, "New Wet Read", 150))
     }
 
-    NativeRollbackVerificationRejectsCaseOnlyDifference() {
-        driver := FakeNativeWetReadValueDriver("previous note")
-
-        Assert.False(driver.WaitForValue(1, "Previous Note", 150))
-        Assert.True(driver.WaitForValue(1, "previous note", 150))
-    }
-
     RoutingFailureReportsTheActualCause() {
         message := AttendingFailureMessage(
             "EXAMINATION: CT CHEST",
@@ -605,7 +597,6 @@ class FakeWetReadDriver {
         this.controlSupported := true
         this.controlCalls := 0
         this.throwOnRead := false
-        this.throwOnUiaValue := ""
         this.concurrentValueAfterWait := ""
     }
 
@@ -618,8 +609,6 @@ class FakeWetReadDriver {
 
     WriteUIA(field, value) {
         this.uiaCalls++
-        if (value = this.throwOnUiaValue)
-            throw Error("simulated UIA restore failure")
         if (!this.uiaSupported || (this.uiaSupportedCalls > 0 && this.uiaCalls > this.uiaSupportedCalls))
             return false
         this.fieldValue := value = this.failedText ? "partial value" : value

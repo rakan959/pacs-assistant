@@ -327,7 +327,7 @@ class NativeWetReadControlDriver {
 
 /**
  * Native side effects for the wet-read paste transaction. Keeping them behind this
- * small interface makes rollback behavior deterministic under test.
+ * small interface makes failure behavior deterministic under test.
  */
 class NativeWetReadDriver {
     __New(
@@ -451,8 +451,7 @@ class NativeWetReadDriver {
         hwnd := 0
         try hwnd := field.NativeWindowHandle
         ; ControlSetText requires a concrete ControlID in AutoHotkey v2. An empty
-        ; identifier raises before mutation, so report this mode as unsupported rather
-        ; than entering rollback and claiming an untouched note could not be restored.
+        ; identifier raises before mutation, so report this mode as unsupported.
         if !hwnd
             return false
         ; The HWND-targeted write does not require focus. A best-effort ControlFocus
@@ -480,8 +479,8 @@ class NativeWetReadDriver {
 }
 
 /**
- * Replaces a sticky-note value through a verified direct-write primitive and
- * restores the previous note if verification fails.
+ * Replaces a sticky-note value through one verified direct-write primitive. It does
+ * not retry or speculatively restore after an unexpected value appears.
  */
 class WetReadPasteEngine {
     static verifyTimeoutMs := 2000
