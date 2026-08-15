@@ -381,7 +381,8 @@ class ClinicalAutomationTest {
         Assert.True(result.found)
         Assert.True(result.stopped)
         Assert.Equal(0, driver.processLookupCalls)
-        Assert.Equal(2, driver.killCalls)
+        Assert.Equal(2, driver.closeCalls)
+        Assert.Equal(0, driver.killCalls)
         Assert.Equal(0, driver.stopProcessCalls)
     }
 
@@ -712,6 +713,7 @@ class SharedHostWindowLifecycleDriver {
     __New() {
         this.windows := [31337, 41414]
         this.processLookupCalls := 0
+        this.closeCalls := 0
         this.killCalls := 0
         this.stopProcessCalls := 0
     }
@@ -733,10 +735,15 @@ class SharedHostWindowLifecycleDriver {
         return true
     }
 
-    KillWindow(*) {
-        this.killCalls++
+    CloseWindow(*) {
+        this.closeCalls++
         this.windows.RemoveAt(1)
         return true
+    }
+
+    KillWindow(*) {
+        this.killCalls++
+        return false
     }
 
     StopProcess(*) {

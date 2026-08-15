@@ -68,6 +68,14 @@ class NativeAppLifecycleDriver {
         return !this.ProcessExists(pid)
     }
 
+    CloseWindow(hwnd) {
+        try WinClose("ahk_id " hwnd, , 2)
+        catch {
+            return !this.WindowExists(hwnd)
+        }
+        return !this.WindowExists(hwnd)
+    }
+
     KillWindow(hwnd) {
         try WinKill("ahk_id " hwnd)
         catch {
@@ -188,10 +196,12 @@ class AppControl {
                     return {
                         found: true,
                         stopped: false,
-                        error: "Too many matching windows remained after bounded termination"
+                        error: "Too many matching windows remained after bounded closure"
                     }
                 }
-                try windowStopped := driver.KillWindow(hwnd)
+                ; WinKill may terminate a hung window's owning process. Shared-host
+                ; targets must use the non-escalating close primitive exclusively.
+                try windowStopped := driver.CloseWindow(hwnd)
                 catch as err
                     return {found: true, stopped: false, error: err.Message}
                 if !windowStopped
