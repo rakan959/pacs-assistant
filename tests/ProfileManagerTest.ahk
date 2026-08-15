@@ -9,6 +9,7 @@ class ProfileManagerTest {
         "TestDefaultProfileTracking",
         "TestProfileRename",
         "TestProfileCaseOnlyRename",
+        "TestLoadCanonicalizesCaseDriftedDefaultProfile",
         "TestCaseOnlyRenameDoubleMoveFailureRemainsReloadable",
         "TestInterruptedCaseOnlyRenameIsRecoveredOnStartup",
         "TestInterruptedCaseOnlyRenameNeverOverwritesConflictingProfile",
@@ -100,6 +101,7 @@ class ProfileManagerTest {
 
     TestDefaultProfileTracking() {
         ProfileManager.profiles["DefaultTest"] := ProfileManager.NewProfile()
+        ProfileManager.SaveProfile("DefaultTest", ProfileManager.profiles["DefaultTest"])
         Assert.True(ProfileManager.SetDefaultProfile("DefaultTest"))
         ProfileManager.LoadProfiles()
         Assert.Equal("DefaultTest", ProfileManager.defaultProfile)
@@ -138,6 +140,24 @@ class ProfileManagerTest {
         Assert.True(ProfileManager.currentProfile == "night")
         Assert.True(ProfileManager.defaultProfile == "night")
         Assert.True(IniRead(ProfileManager.configPath, "Settings", "DefaultProfile") == "night")
+    }
+
+    TestLoadCanonicalizesCaseDriftedDefaultProfile() {
+        ; A crash after the case-only file move but before config publication can
+        ; leave the persisted default using the old casing. Windows still has one
+        ; profile identity, so startup must bind that default to the canonical
+        ; filename instead of silently dropping the selection.
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        ProfileManager.profiles["night"] := profile
+        ProfileManager.SaveProfile("night", profile)
+        ProfileManager.defaultProfile := "Night"
+
+        ProfileManager.LoadProfiles()
+
+        Assert.True(ProfileManager.defaultProfile == "night")
+        Assert.True(ProfileManager.currentProfile == "night")
+        Assert.True(ProfileManager.profiles.Has("night"))
     }
 
     TestCaseOnlyRenameDoubleMoveFailureRemainsReloadable() {

@@ -81,13 +81,37 @@ class ProfileManager {
         }
 
         ; Prefer the configured default, otherwise preserve the current selection if
-        ; it still exists. Never leave currentProfile pointing at a skipped file.
-        if (this.defaultProfile != "" && this.profiles.Has(this.defaultProfile))
-            this.currentProfile := this.defaultProfile
-        else if (previousProfile != "" && this.profiles.Has(previousProfile))
-            this.currentProfile := previousProfile
+        ; it still exists. A process interruption during a case-only rename can leave
+        ; the file at its new casing while config still contains the old casing; bind
+        ; that Windows file identity back to the canonical loaded Map key.
+        canonicalDefault := this.ResolveLoadedProfileName(this.defaultProfile)
+        canonicalPrevious := this.ResolveLoadedProfileName(previousProfile)
+        this.defaultProfile := canonicalDefault
+        if (canonicalDefault != "")
+            this.currentProfile := canonicalDefault
+        else if (canonicalPrevious != "")
+            this.currentProfile := canonicalPrevious
         else
             this.currentProfile := ""
+    }
+
+    static ResolveLoadedProfileName(requestedName) {
+        if (requestedName == "")
+            return ""
+        if this.profiles.Has(requestedName)
+            return requestedName
+
+        resolved := ""
+        for profileName, _ in this.profiles {
+            if (profileName = requestedName) {
+                ; Windows cannot normally persist two case-only variants in one
+                ; directory. Refuse to guess if an injected/non-native store does.
+                if (resolved != "")
+                    return ""
+                resolved := profileName
+            }
+        }
+        return resolved
     }
 
     static RecoverInterruptedCaseRenames() {
@@ -761,9 +785,7 @@ class ProfileManager {
         )
         catch as err
             return err.Message
-        this.defaultProfile := configured != "" && this.profiles.Has(configured)
-            ? configured
-            : ""
+        this.defaultProfile := this.ResolveLoadedProfileName(configured)
         return ""
     }
 

@@ -514,9 +514,13 @@ class KeybindGUI {
     }
 
     CloseNewProfilePrompt(inputGui) {
+        if !this.GuiIsLive(inputGui)
+            return false
         if !this.BeginProfileMutationTransaction("close the new-profile dialog")
             return false
         try {
+            if !this.GuiIsLive(inputGui)
+                return false
             try inputGui.Destroy()
             if (ProfileManager.profiles.Count > 0) {
                 this.ShowProfileSelector()
@@ -528,10 +532,14 @@ class KeybindGUI {
 
     CreateProfile(name, inputGui) {
         name := Trim(name)
+        if !this.GuiIsLive(inputGui)
+            return false
         if !this.BeginProfileMutationTransaction("create a profile")
             return false
         inputDisabled := false
         try {
+            if !this.GuiIsLive(inputGui)
+                return false
             try {
                 inputGui.Opt("+Disabled")
                 inputDisabled := true
@@ -543,6 +551,8 @@ class KeybindGUI {
                 )
                 return false
             }
+            if !this.GuiIsLive(inputGui)
+                return false
             if this.CreateProfileRecord(name) {
                 ProfileManager.currentProfile := name
                 inputGui.Destroy()

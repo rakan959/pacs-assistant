@@ -69,6 +69,7 @@ class KeybindGUITest {
         "TestStaleProfileDeleteCannotDeleteRecreatedProfile",
         "TestProfileSelectorCloseCannotInterruptDefaultProfileTransaction",
         "TestProfileCreationCloseCannotInterruptStorageTransaction",
+        "TestDestroyedNewProfileDialogCannotDispatchQueuedActions",
         "TestUiPresentationLeaseBlocksClinicalEntry",
         "TestDestroyedProfileSelectorCannotDispatchQueuedActions",
         "TestProfileDeletionOwnsSelectorAcrossConfirmation"
@@ -612,6 +613,40 @@ class KeybindGUITest {
         Assert.Equal(0, gui.selectorCalls)
         Assert.Equal(0, gui.exitCalls)
         Assert.Equal("New", capturedCurrent)
+    }
+
+    TestDestroyedNewProfileDialogCannotDispatchQueuedActions() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        inputGui := FakeProfileDialog()
+        gui := {
+            base: QueuedNewProfileGUI.Prototype,
+            mainWindowCalls: 0,
+            selectorCalls: 0,
+            exitCalls: 0,
+            createRecordCalls: 0
+        }
+
+        try {
+            ProfileManager.profiles := Map("Existing", ProfileManager.NewProfile())
+            ProfileManager.currentProfile := "Existing"
+            inputGui.Destroy()
+
+            closeResult := gui.CloseNewProfilePrompt(inputGui)
+            createResult := gui.CreateProfile("Queued", inputGui)
+            queuedExists := ProfileManager.profiles.Has("Queued")
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.False(closeResult)
+        Assert.False(createResult)
+        Assert.False(queuedExists)
+        Assert.Equal(0, gui.createRecordCalls)
+        Assert.Equal(0, gui.mainWindowCalls)
+        Assert.Equal(0, gui.selectorCalls)
+        Assert.Equal(0, gui.exitCalls)
     }
 
     TestUiPresentationLeaseBlocksClinicalEntry() {
@@ -1973,7 +2008,7 @@ class KeybindGUITest {
         originalRecovery := ProfileManager.recoveryRequired
         originalLastError := ProfileManager.lastError
         notifications := CapturingNotificationDriver()
-        gui := {base: KeybindGUI.Prototype, notificationDriver: notifications}
+        gui := {base: ProfileSelectorTransactionGUI.Prototype, notificationDriver: notifications}
         dialog := FakeProfileDialog()
 
         try {
@@ -3434,6 +3469,19 @@ class ReentrantProfileCreationGUI extends ProfileSelectorTransactionGUI {
         this.closeAttempted := true
         this.observedDisabled := this.inputGui.disabled
         this.closeResult := this.CloseNewProfilePrompt(this.inputGui)
+        ProfileManager.profiles[name] := ProfileManager.NewProfile()
+        return true
+    }
+
+    RequestExit() {
+        this.exitCalls++
+        return true
+    }
+}
+
+class QueuedNewProfileGUI extends ProfileSelectorTransactionGUI {
+    CreateProfileRecord(name) {
+        this.createRecordCalls++
         ProfileManager.profiles[name] := ProfileManager.NewProfile()
         return true
     }
