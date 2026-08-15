@@ -130,7 +130,7 @@ class PACSMonitor {
      * caller is allowed to click it.
      */
     static IsExpectedRefreshButton(root, candidate) {
-        if !this.IsSameProcess(root, candidate)
+        if !this.IsSameWindowContext(root, candidate)
             return false
 
         try {
@@ -171,7 +171,7 @@ class PACSMonitor {
     }
 
     static IsExpectedStudyList(root, candidate) {
-        if !this.IsSameProcess(root, candidate)
+        if !this.IsSameWindowContext(root, candidate)
             return false
 
         try {
@@ -184,13 +184,17 @@ class PACSMonitor {
         }
     }
 
-    static IsSameProcess(root, candidate) {
+    static IsSameWindowContext(root, candidate) {
         if !root || !candidate
             return false
 
         try {
             rootProcess := root.ProcessId
-            return rootProcess > 0 && candidate.ProcessId = rootProcess
+            rootWindow := root.WinId
+            return rootProcess > 0
+                && candidate.ProcessId = rootProcess
+                && rootWindow > 0
+                && candidate.WinId = rootWindow
         } catch {
             return false
         }

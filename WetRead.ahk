@@ -52,6 +52,9 @@ class NativeWetReadDriver {
             rootProcess := root.ProcessId
             if (rootProcess <= 0 || field.ProcessId != rootProcess)
                 return false
+            rootWindow := root.WinId
+            if (rootWindow <= 0 || field.WinId != rootWindow)
+                return false
             if (field.Type != UIA.Type.Document && field.Type != UIA.Type.Edit)
                 return false
             if !field.IsEnabled

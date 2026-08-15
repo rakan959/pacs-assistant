@@ -221,11 +221,13 @@ class WetReadTest {
         valid := FakeStickyTargetElement(UIA.Type.Document, 42, true)
         wrongType := FakeStickyTargetElement(UIA.Type.Button, 42, true)
         wrongProcess := FakeStickyTargetElement(UIA.Type.Edit, 99, true)
+        wrongWindow := FakeStickyTargetElement(UIA.Type.Edit, 42, true, 200)
         noCapability := FakeStickyTargetElement(UIA.Type.Edit, 42, false)
 
         Assert.True(NativeWetReadDriver.IsExpectedNoteField(root, valid))
         Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongType))
         Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongProcess))
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongWindow))
         Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, noCapability))
     }
 
@@ -393,9 +395,10 @@ class FakeWetReadField {
 }
 
 class FakeStickyTargetElement {
-    __New(type, processId, readable := false) {
+    __New(type, processId, readable := false, windowId := 100) {
         this.Type := type
         this.ProcessId := processId
+        this.WinId := windowId
         this.IsEnabled := true
         this.IsValuePatternAvailable := readable
         this.IsLegacyIAccessiblePatternAvailable := false

@@ -92,11 +92,13 @@ class PACSMonitorTest {
         wrongType := FakePACSTargetElement(UIA.Type.Edit, 42, "Refresh", "refreshButton", true)
         wrongMeaning := FakePACSTargetElement(UIA.Type.Button, 42, "Delete", "deleteButton", true)
         wrongProcess := FakePACSTargetElement(UIA.Type.Button, 99, "Refresh", "refreshButton", true)
+        wrongWindow := FakePACSTargetElement(UIA.Type.Button, 42, "Refresh", "refreshButton", true, 200)
 
         Assert.True(PACSMonitor.IsExpectedRefreshButton(root, valid))
         Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongType))
         Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongMeaning))
         Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongProcess))
+        Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongWindow))
     }
 
     TestStudyListFallbackRequiresExpectedTypeAndProcess() {
@@ -113,6 +115,10 @@ class PACSMonitorTest {
         Assert.False(PACSMonitor.IsExpectedStudyList(
             root,
             FakePACSTargetElement(UIA.Type.List, 99)
+        ))
+        Assert.False(PACSMonitor.IsExpectedStudyList(
+            root,
+            FakePACSTargetElement(UIA.Type.List, 42, "", "", false, 200)
         ))
     }
 
@@ -215,9 +221,10 @@ class PACSMonitorTest {
 }
 
 class FakePACSTargetElement {
-    __New(type, processId, name := "", automationId := "", invoke := false) {
+    __New(type, processId, name := "", automationId := "", invoke := false, windowId := 100) {
         this.Type := type
         this.ProcessId := processId
+        this.WinId := windowId
         this.Name := name
         this.AutomationId := automationId
         this.IsInvokePatternAvailable := invoke
