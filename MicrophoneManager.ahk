@@ -164,8 +164,8 @@ class MicrophoneManager {
         if (micName = "")
             return false
 
-        ; Already on the wanted microphone. Read through UIAValue: a combo box with no
-        ; ValuePattern would otherwise raise an uncatchable destructor error (issue #32).
+        ; Already on the wanted microphone. Read through UIAValue so a combo box with
+        ; no ValuePattern is handled as an unsupported capability rather than an error.
         if this.WaitForSelection(combo, micName, 0)
             return true
 

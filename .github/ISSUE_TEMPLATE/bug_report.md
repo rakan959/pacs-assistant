@@ -1,38 +1,44 @@
 ---
 name: Bug report
-about: Create a report to help us improve
+about: Report a reproducible PACS Assistant problem
 title: ''
 labels: ''
 assignees: ''
-
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+## Patient privacy
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+Do not include protected health information. Redact patient names, dates of birth,
+accession numbers, medical-record numbers, report text, and identifying screenshots.
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+## What happened?
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+Describe the actual behavior, including any error message or tray notification.
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
+## How can it be reproduced?
 
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Browser [e.g. stock browser, safari]
- - Version [e.g. 22]
+1. Start from:
+2. Perform:
+3. Observe:
 
-**Additional context**
-Add any other context about the problem here.
+State whether the problem is consistent or intermittent. For hotkey problems, include
+the configured key, command, and scope. For wet-read problems, include the selected
+paste method without including clinical text.
+
+## What did you expect?
+
+Describe the intended behavior.
+
+## Environment
+
+- PACS Assistant version:
+- Install type: release executable / running from source
+- Windows version:
+- PACS product and version:
+- PowerScribe version:
+- AutoHotkey version (source installs only):
+
+## Additional context
+
+Include non-sensitive screenshots or debugger output if useful. Redact all clinical and
+account information before attaching anything.

@@ -5,10 +5,9 @@
 /**
  * Stands in for a UIA element.
  *
- * A real element with no ValuePattern cannot be used here: touching .Value on one is
- * exactly the thing under test, and it raises an error from a destructor that no try
- * can catch, which would take the suite down with it. The stub reports the same
- * properties a real element would and records whether .Value was touched.
+ * A real element with no ValuePattern cannot be used in a deterministic unit test.
+ * The stub reports the same capability properties and records whether .Value was
+ * touched, which verifies that the adapter checks support before invoking a pattern.
  */
 class FakeElement {
     __New(value := "", legacyValue := "", hasValuePattern := true) {
@@ -63,9 +62,8 @@ class UIAValueTest {
         Assert.False(UIAValue.CanWrite({}))
     }
 
-    ; Issue #32: the Sticky Notes field has no ValuePattern, and writing to .Value
-    ; anyway produced an uncatchable destructor error. The write must be refused
-    ; before it touches .Value at all.
+    ; The Sticky Notes field has no ValuePattern. Refuse the unsupported operation
+    ; before touching .Value, independent of how UIA-v2 reports that condition.
     TestWriteRefusesWhenPatternMissing() {
         el := FakeElement("", "", false)
         Assert.False(UIAValue.Write(el, "wet read"))

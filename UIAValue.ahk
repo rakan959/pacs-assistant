@@ -5,19 +5,14 @@
  * Safe access to a UIA element's value.
  *
  * Reading or writing `element.Value` goes through UIA-v2's ValuePattern accessor,
- * and that accessor is unsafe on an element that does not support the pattern:
+ * which throws when an element does not support the pattern. UIA-v2 v1.1.3 fixed
+ * the destructor failure that originally made this unsafe (issue #32), but pattern
+ * support is still a capability boundary rather than an exceptional application
+ * failure. The Sticky Notes field, for example, does not support ValuePattern.
  *
- *     GetPattern()  ComCall(16, ...) succeeds but yields a null pattern pointer
- *     __New(0)      throws ValueError before it defines this.ptr
- *     __Delete()    later calls Release(), which reads the ptr that was never set
- *
- * The ValueError is catchable, but the destructor error is not - AutoHotkey reports
- * it separately ("__Delete will now return"), so a surrounding try does nothing and
- * an error dialog lands in the middle of a clinical workflow. That is issue #32,
- * hit on the Sticky Notes field, which does not support ValuePattern.
- *
- * Reads therefore go through plain property lookups, which never build a pattern
- * object, and writes are gated on the pattern actually being available.
+ * Reads therefore go through plain property lookups, and writes are gated on the
+ * pattern actually being available. This also keeps the clinical adapter stable if
+ * UIA-v2 changes its unsupported-pattern error behavior again.
  */
 class UIAValue {
     /**
