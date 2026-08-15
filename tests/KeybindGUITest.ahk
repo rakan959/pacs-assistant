@@ -69,7 +69,9 @@ class KeybindGUITest {
         "TestStaleProfileDeleteCannotDeleteRecreatedProfile",
         "TestProfileSelectorCloseCannotInterruptDefaultProfileTransaction",
         "TestProfileCreationCloseCannotInterruptStorageTransaction",
-        "TestUiPresentationLeaseBlocksClinicalEntry"
+        "TestUiPresentationLeaseBlocksClinicalEntry",
+        "TestDestroyedProfileSelectorCannotDispatchQueuedActions",
+        "TestProfileDeletionOwnsSelectorAcrossConfirmation"
     ]
 
     Setup() {
@@ -555,6 +557,7 @@ class KeybindGUITest {
             ProfileManager.currentProfile := "Night"
             ProfileManager.defaultProfile := ""
             ProfileManager.storageDriver := driver
+            gui.RegisterProfileSelector(selector)
             result := gui.SetDefaultProfile("Night", selector)
             capturedDefault := ProfileManager.defaultProfile
         } finally {
@@ -636,6 +639,107 @@ class KeybindGUITest {
             KeybindGUI.EndUiPresentation()
             PACSCommands.commandAvailabilityProbe := originalProbe
         }
+    }
+
+    TestDestroyedProfileSelectorCannotDispatchQueuedActions() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        selector := ReentrantSelectorDialog()
+        confirmation := CountingRejectConfirmationDriver()
+        gui := {
+            base: ProfileSelectorTransactionGUI.Prototype,
+            mainWindowCalls: 0,
+            selectorCalls: 0,
+            promptCalls: 0,
+            dialogCalls: 0,
+            exitCalls: 0,
+            confirmationDriver: confirmation
+        }
+
+        try {
+            ProfileManager.profiles := Map(
+                "A", ProfileManager.NewProfile(),
+                "B", ProfileManager.NewProfile()
+            )
+            ProfileManager.currentProfile := "A"
+            gui.RegisterProfileSelector(selector)
+
+            Assert.True(gui.CloseProfileSelector(selector))
+            selectResult := gui.SelectProfile("B", selector)
+            newResult := gui.OpenNewProfilePrompt(selector)
+            renameResult := gui.PromptRenameProfile("B", selector)
+            deleteResult := gui.DeleteProfile("B", selector)
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.False(selectResult)
+        Assert.False(newResult)
+        Assert.False(renameResult)
+        Assert.False(deleteResult)
+        Assert.Equal(1, gui.mainWindowCalls)
+        Assert.Equal(0, gui.promptCalls)
+        Assert.Equal(0, gui.dialogCalls)
+        Assert.Equal(0, gui.selectorCalls)
+        Assert.Equal(0, confirmation.calls)
+    }
+
+    TestProfileDeletionOwnsSelectorAcrossConfirmation() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalDefault := ProfileManager.defaultProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        originalRevisions := ProfileManager.profileRevisions
+        tempRoot := A_Temp "\pacs_selector_delete_" A_TickCount
+        selector := ReentrantSelectorDialog()
+        gui := {
+            base: ProfileSelectorTransactionGUI.Prototype,
+            mainWindowCalls: 0,
+            selectorCalls: 0,
+            promptCalls: 0,
+            dialogCalls: 0,
+            exitCalls: 0
+        }
+        confirmation := ReentrantProfileDeleteConfirmationDriver(
+            (*) => gui.CloseProfileSelector(selector),
+            selector
+        )
+        gui.confirmationDriver := confirmation
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profileRevisions := Map()
+            ProfileManager.profiles := Map(
+                "A", ProfileManager.NewProfile(),
+                "B", ProfileManager.NewProfile()
+            )
+            ProfileManager.currentProfile := "A"
+            ProfileManager.defaultProfile := ""
+            ProfileManager.SaveProfile("A", ProfileManager.profiles["A"])
+            ProfileManager.SaveProfile("B", ProfileManager.profiles["B"])
+            gui.RegisterProfileSelector(selector)
+
+            result := gui.DeleteProfile("B", selector)
+            bStillExists := ProfileManager.profiles.Has("B")
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.defaultProfile := originalDefault
+            ProfileManager.profilesPath := originalProfilesPath
+            ProfileManager.profileRevisions := originalRevisions
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.True(result)
+        Assert.True(confirmation.observedDisabled)
+        Assert.False(confirmation.closeResult)
+        Assert.False(bStillExists)
+        Assert.Equal(1, selector.destroyCalls)
+        Assert.Equal(0, gui.mainWindowCalls)
+        Assert.Equal(1, gui.selectorCalls)
     }
 
     TestTrayExitUsesTheSameClinicalAndCaptureGate() {
@@ -2545,6 +2649,7 @@ class KeybindGUITest {
             ProfileManager.SaveProfile("A", oldProfile)
             ProfileManager.SaveProfile("B", otherProfile)
             gui.confirmationDriver := RecreateProfileConfirmationDriver("A")
+            gui.RegisterProfileSelector(selector)
 
             result := gui.DeleteProfile("A", selector)
             keptReplacement := ProfileManager.profiles.Has("A")
@@ -3083,6 +3188,10 @@ class CallbackProfileLeaveDriver extends FixedProfileLeaveDriver {
 }
 
 class ProfileDeleteTestGUI extends KeybindGUI {
+    GuiIsLive(gui) {
+        return IsObject(gui) && (!HasProp(gui, "destroyed") || !gui.destroyed)
+    }
+
     ShowProfileSelector() {
     }
 }
@@ -3266,6 +3375,10 @@ class ReentrantDefaultProfileStorageDriver {
 }
 
 class ProfileSelectorTransactionGUI extends KeybindGUI {
+    GuiIsLive(gui) {
+        return IsObject(gui) && (!HasProp(gui, "destroyed") || !gui.destroyed)
+    }
+
     HasMainWindow() {
         return false
     }
@@ -3276,6 +3389,42 @@ class ProfileSelectorTransactionGUI extends KeybindGUI {
 
     ShowProfileSelector() {
         this.selectorCalls++
+        return true
+    }
+
+    PromptNewProfile() {
+        this.promptCalls++
+        return true
+    }
+
+    NewProfileDialog(*) {
+        this.dialogCalls++
+        return FakeProfileDialog()
+    }
+}
+
+class CountingRejectConfirmationDriver {
+    __New() {
+        this.calls := 0
+    }
+
+    Confirm(*) {
+        this.calls++
+        return false
+    }
+}
+
+class ReentrantProfileDeleteConfirmationDriver {
+    __New(callback, selector) {
+        this.callback := callback
+        this.selector := selector
+        this.observedDisabled := false
+        this.closeResult := true
+    }
+
+    Confirm(*) {
+        this.observedDisabled := this.selector.disabled
+        this.closeResult := this.callback.Call()
         return true
     }
 }

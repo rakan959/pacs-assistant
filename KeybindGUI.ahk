@@ -8,6 +8,7 @@
 
 class KeybindGUI {
     gui := ""
+    profileSelectorGui := 0
     static isListening := false
     static listeningControl := ""
     static activeInputHook := 0
@@ -381,6 +382,10 @@ class KeybindGUI {
     }
 
     ShowProfileSelector() {
+        if this.ProfileSelectorIsCurrent(this.profileSelectorGui) {
+            try WinActivate("ahk_id " this.profileSelectorGui.Hwnd)
+            return this.profileSelectorGui
+        }
         selectorGui := Gui(, "PACS Assistant - Profile Selection")
         selectorGui.Add("Text",, "Select profile:")
         
@@ -413,8 +418,46 @@ class KeybindGUI {
         selectorGui.Add("Text", "y+10", "* = Default Profile")
         
         selectorGui.OnEvent("Close", (*) => this.CloseProfileSelector(selectorGui))
-        selectorGui.Show()
+        this.RegisterProfileSelector(selectorGui)
+        try selectorGui.Show()
+        catch as err {
+            this.RetireProfileSelector(selectorGui)
+            throw err
+        }
         return selectorGui
+    }
+
+    RegisterProfileSelector(selectorGui) {
+        if !IsObject(selectorGui)
+            throw TypeError("Profile selector must be a GUI object")
+        this.profileSelectorGui := selectorGui
+        return selectorGui
+    }
+
+    ProfileSelectorIsCurrent(selectorGui) {
+        return IsObject(selectorGui)
+            && IsObject(this.profileSelectorGui)
+            && ObjPtr(selectorGui) = ObjPtr(this.profileSelectorGui)
+            && this.GuiIsLive(selectorGui)
+    }
+
+    RequireCurrentProfileSelector(selectorGui) {
+        if this.ProfileSelectorIsCurrent(selectorGui)
+            return true
+        this.NotifyUnavailable(
+            "The profile selector changed or closed before that action ran. Reopen it and try again.",
+            "Profile Selector Changed",
+            "Icon!"
+        )
+        return false
+    }
+
+    RetireProfileSelector(selectorGui) {
+        if (IsObject(this.profileSelectorGui)
+            && IsObject(selectorGui)
+            && ObjPtr(this.profileSelectorGui) = ObjPtr(selectorGui))
+            this.profileSelectorGui := 0
+        try selectorGui.Destroy()
     }
 
     DefaultProfileListIndex(profileNames, defaultProfile) {
@@ -429,10 +472,14 @@ class KeybindGUI {
     }
 
     CloseProfileSelector(selectorGui) {
+        if !this.RequireCurrentProfileSelector(selectorGui)
+            return false
         if !this.BeginProfileMutationTransaction("close the profile selector")
             return false
         try {
-            try selectorGui.Destroy()
+            if !this.RequireCurrentProfileSelector(selectorGui)
+                return false
+            this.RetireProfileSelector(selectorGui)
             if this.HasMainWindow()
                 return true
             if (ProfileManager.currentProfile != "" && ProfileManager.profiles.Has(ProfileManager.currentProfile)) {
@@ -444,10 +491,14 @@ class KeybindGUI {
     }
 
     OpenNewProfilePrompt(selectorGui) {
+        if !this.RequireCurrentProfileSelector(selectorGui)
+            return false
         if !this.BeginProfileMutationTransaction("open the new-profile dialog")
             return false
         try {
-            selectorGui.Destroy()
+            if !this.RequireCurrentProfileSelector(selectorGui)
+                return false
+            this.RetireProfileSelector(selectorGui)
             return this.PromptNewProfile()
         } finally this.EndProfileMutationTransaction()
     }
@@ -516,19 +567,25 @@ class KeybindGUI {
     CreateProfileRecord(name) => ProfileManager.CreateProfile(name)
 
     SelectProfile(name, selectorGui) {
+        if !this.RequireCurrentProfileSelector(selectorGui)
+            return false
         if (name = "" || !ProfileManager.profiles.Has(name))
             return false
         if !this.BeginProfileMutationTransaction("select a profile")
             return false
         try {
+            if !this.RequireCurrentProfileSelector(selectorGui)
+                return false
             ProfileManager.currentProfile := name
-            selectorGui.Destroy()
+            this.RetireProfileSelector(selectorGui)
             this.CreateMainGUI()
             return true
         } finally this.EndProfileMutationTransaction()
     }
 
     SetDefaultProfile(name, selectorGui) {
+        if !this.RequireCurrentProfileSelector(selectorGui)
+            return false
         if (name = "") {
             MsgBox("Please select a profile first.", "Error", "Icon!")
             return
@@ -538,6 +595,8 @@ class KeybindGUI {
             return false
         selectorDisabled := false
         try {
+            if !this.RequireCurrentProfileSelector(selectorGui)
+                return false
             try {
                 selectorGui.Opt("+Disabled")
                 selectorDisabled := true
@@ -550,7 +609,7 @@ class KeybindGUI {
                 return false
             }
             if (ProfileManager.SetDefaultProfile(name)) {
-                selectorGui.Destroy()
+                this.RetireProfileSelector(selectorGui)
                 this.ShowProfileSelector()  ; Refresh the selector to show updated default
                 return true
             }
@@ -568,54 +627,76 @@ class KeybindGUI {
     }
 
     DeleteProfile(name, selectorGui) {
-        if !this.ProfileMutationAllowed("delete a profile")
+        if !this.RequireCurrentProfileSelector(selectorGui)
             return false
         if (name = "") {
             MsgBox("Please select a profile first.", "Error", "Icon!")
             return
         }
 
-        deletionState := this.CaptureProfileDeletionState(name)
-        if !deletionState {
-            MsgBox("The selected profile is no longer available.", "Profile Changed", "Icon!")
+        if !this.BeginProfileMutationTransaction("delete a profile")
             return false
-        }
-
-        if this.ConfirmDestructiveAction(
-            "Are you sure you want to delete profile '" name "'?",
-            "Confirm Delete"
-        ) {
-            if !this.BeginProfileMutationTransaction("delete a profile")
+        selectorDisabled := false
+        try {
+            if !this.RequireCurrentProfileSelector(selectorGui)
                 return false
             try {
-                if !this.ProfileDeletionStateIsCurrent(deletionState) {
-                    this.NotifyUser(
-                        "The selected profile changed while confirmation was open. Reopen the profile selector before deleting it.",
-                        "Profile Changed",
-                        "Icon!"
-                    )
-                    return false
-                }
-                if (ProfileManager.DeleteProfile(name)) {
-                    if (name = ProfileManager.currentProfile) {
-                        ; If we deleted the current profile, switch to another one
-                        for newName, _ in ProfileManager.profiles {
-                            if (newName != name) {
-                                ProfileManager.currentProfile := newName
-                                break
-                            }
-                        }
-                    }
-                    selectorGui.Destroy()
-                    this.ShowProfileSelector()  ; Refresh the selector
-                    return true
-                }
+                selectorGui.Opt("+Disabled")
+                selectorDisabled := true
+            } catch {
                 this.NotifyUser(
-                    this.ProfileStorageFailureText("Cannot delete the last remaining profile."),
+                    "The profile selector could not be locked for deletion. Reopen it and try again.",
                     "Profile Delete Failed",
                     "Icon!"
                 )
-            } finally this.EndProfileMutationTransaction()
+                return false
+            }
+            deletionState := this.CaptureProfileDeletionState(name)
+            if !deletionState {
+                this.NotifyUser(
+                    "The selected profile is no longer available.",
+                    "Profile Changed",
+                    "Icon!"
+                )
+                return false
+            }
+            if !this.ConfirmDestructiveAction(
+                "Are you sure you want to delete profile '" name "'?",
+                "Confirm Delete"
+            )
+                return false
+            if (!this.RequireCurrentProfileSelector(selectorGui)
+                || !this.ProfileDeletionStateIsCurrent(deletionState)) {
+                this.NotifyUser(
+                    "The selected profile changed while confirmation was open. Reopen the profile selector before deleting it.",
+                    "Profile Changed",
+                    "Icon!"
+                )
+                return false
+            }
+            if (ProfileManager.DeleteProfile(name)) {
+                if (name = ProfileManager.currentProfile) {
+                    ; If we deleted the current profile, switch to another one
+                    for newName, _ in ProfileManager.profiles {
+                        if (newName != name) {
+                            ProfileManager.currentProfile := newName
+                            break
+                        }
+                    }
+                }
+                this.RetireProfileSelector(selectorGui)
+                this.ShowProfileSelector()  ; Refresh the selector
+                return true
+            }
+            this.NotifyUser(
+                this.ProfileStorageFailureText("Cannot delete the last remaining profile."),
+                "Profile Delete Failed",
+                "Icon!"
+            )
+        } finally {
+            if (selectorDisabled && this.ProfileSelectorIsCurrent(selectorGui))
+                try selectorGui.Opt("-Disabled")
+            this.EndProfileMutationTransaction()
         }
         return false
     }
@@ -1653,6 +1734,8 @@ class KeybindGUI {
     PromptRenameProfile(name, parentGui := 0) {
         if !this.ProfileMutationAllowed("rename a profile")
             return false
+        if (parentGui && !this.RequireCurrentProfileSelector(parentGui))
+            return false
         if (name = "") {
             MsgBox("Please select a profile first.", "Error", "Icon!")
             return false
@@ -1665,21 +1748,34 @@ class KeybindGUI {
             && !this.ResolveDirtyProfileBeforeLeaving(true))
             return false
 
-        renameGui := this.NewProfileDialog(
-            "PACS Assistant - Rename Profile",
-            name,
-            parentGui
-        )
-        if !this.CaptureRenameDialogState(renameGui, name) {
-            renameGui.Destroy()
-            return false
+        selectorTransaction := false
+        if parentGui {
+            if !this.BeginProfileMutationTransaction("open the profile rename dialog")
+                return false
+            selectorTransaction := true
         }
-        renameGui.Add("Text",, "Enter new name for profile '" name "':")
-        nameEdit := renameGui.Add("Edit", "w200", name)
-        renameGui.Add("Button",, "OK").OnEvent("Click", (*) => this.RenameProfile(name, nameEdit.Value, renameGui, parentGui))
-        renameGui.Add("Button", "x+10", "Cancel").OnEvent("Click", (*) => renameGui.Destroy())
-        renameGui.Show()
-        return true
+        try {
+            if (parentGui && !this.RequireCurrentProfileSelector(parentGui))
+                return false
+            renameGui := this.NewProfileDialog(
+                "PACS Assistant - Rename Profile",
+                name,
+                parentGui
+            )
+            if !this.CaptureRenameDialogState(renameGui, name) {
+                renameGui.Destroy()
+                return false
+            }
+            renameGui.Add("Text",, "Enter new name for profile '" name "':")
+            nameEdit := renameGui.Add("Edit", "w200", name)
+            renameGui.Add("Button",, "OK").OnEvent("Click", (*) => this.RenameProfile(name, nameEdit.Value, renameGui, parentGui))
+            renameGui.Add("Button", "x+10", "Cancel").OnEvent("Click", (*) => renameGui.Destroy())
+            renameGui.Show()
+            return true
+        } finally {
+            if selectorTransaction
+                this.EndProfileMutationTransaction()
+        }
     }
 
     CaptureRenameDialogState(renameGui, name) {
@@ -1754,7 +1850,7 @@ class KeybindGUI {
             && ProfileManager.GetProfileRevision(oldName) = renameGui.profileRevision
         if valid {
             valid := parentGui
-                ? this.GuiIsLive(parentGui)
+                ? this.ProfileSelectorIsCurrent(parentGui)
                 : ProfileManager.currentProfile = oldName
         }
         if valid
