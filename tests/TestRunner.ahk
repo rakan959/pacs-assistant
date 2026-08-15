@@ -20,27 +20,62 @@ class TestRunner {
         this.ReportResults()
     }
     
-    static RunTestClass(testClass) {
-        instance := testClass()
-        if (HasProp(testClass, "Tests")) {
-            for methodName in testClass.Tests {
-                if (HasMethod(instance, "Setup"))
-                    instance.Setup()
-                this.RunTest(instance, methodName)
-                if (HasMethod(instance, "Teardown"))
-                    instance.Teardown()
-            }
+    static RunTestClass(testClass, report := true) {
+        if (!HasProp(testClass, "Tests"))
+            return
+
+        try instance := testClass()
+        catch as err {
+            for methodName in testClass.Tests
+                this.RecordResult(testClass.Prototype.__Class, methodName, err, report)
+            return
+        }
+
+        for methodName in testClass.Tests {
+            this.RunTest(instance, methodName, report)
         }
     }
     
-    static RunTest(instance, methodName) {
+    static RunTest(instance, methodName, report := true) {
+        failure := false
+        setupComplete := false
+
         try {
+            if (HasMethod(instance, "Setup"))
+                instance.Setup()
+            setupComplete := true
             instance.%methodName%()
-            this.successes++
-            FileAppend(Format("PASS {1}.{2}`n", instance.__Class, methodName), "*")
         } catch as err {
+            failure := err
+        }
+
+        if (setupComplete && HasMethod(instance, "Teardown")) {
+            try instance.Teardown()
+            catch as teardownError {
+                if (failure) {
+                    failure := Error(Format(
+                        "{1}; teardown failed: {2}",
+                        failure.Message,
+                        teardownError.Message
+                    ))
+                } else {
+                    failure := teardownError
+                }
+            }
+        }
+
+        this.RecordResult(instance.__Class, methodName, failure, report)
+    }
+
+    static RecordResult(className, methodName, failure := false, report := true) {
+        if (failure) {
             this.failures++
-            FileAppend(Format("FAIL {1}.{2}: {3}`n", instance.__Class, methodName, err.Message), "*")
+            if (report)
+                FileAppend(Format("FAIL {1}.{2}: {3}`n", className, methodName, failure.Message), "*")
+        } else {
+            this.successes++
+            if (report)
+                FileAppend(Format("PASS {1}.{2}`n", className, methodName), "*")
         }
     }
     
@@ -73,13 +108,17 @@ class Assert {
     }
     
     static Throws(func, expectedError := "", message := "") {
+        caughtError := false
         try {
             func()
-            throw Error(message ? message : "Expected function to throw an error")
         } catch as err {
+            caughtError := err
             if (expectedError && !InStr(err.Message, expectedError))
                 throw Error(message ? message : Format("Expected error containing '{1}' but got '{2}'", expectedError, err.Message))
         }
+
+        if (!caughtError)
+            throw Error(message ? message : "Expected function to throw an error")
     }
 }
 
