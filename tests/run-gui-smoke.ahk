@@ -148,13 +148,16 @@ Main() {
     ProfileManager.profiles := Map()
     ProfileManager.LoadProfiles()
     ProfileManager.currentProfile := "Smoke"
+    ProfileManager.defaultProfile := "Smoke"
 
-    ; Build an instance without running the constructor, which would go and check
-    ; GitHub for updates
-    kb := {base: KeybindGUI.Prototype, gui: ""}
+    ; Exercise the real instance layout. Constructing an object from only the
+    ; prototype bypasses instance-property initializers and can make the smoke test
+    ; fail on fields that every production KeybindGUI instance owns.
+    kb := 0
+    Check("main window builds", () => (kb := KeybindGUI()))
+    if !kb
+        throw Error("The main KeybindGUI instance could not be constructed")
     SmokeKB := kb
-
-    Check("main window builds", () => kb.CreateMainGUI())
 
     lv := FindListView(kb.gui)
     Assert(lv != 0, "main window has a keybind list")
@@ -248,7 +251,7 @@ Main() {
         ? "PASS - " TestsRun " checks"
         : "FAIL - " TestsFailed " of " TestsRun " checks failed")
 
-    ExitApp(TestsFailed = 0 ? 0 : 1)
+    return TestsFailed = 0 ? 0 : 1
 }
 
 AssertScope(listView, funcName, expected) {
@@ -262,4 +265,10 @@ AssertScope(listView, funcName, expected) {
 }
 
 OnExit(Cleanup)
-Main()
+exitCode := 1
+try exitCode := Main()
+catch as err {
+    Out("FATAL -- " err.Message " (" err.File ":" err.Line ")")
+    exitCode := 1
+}
+ExitApp(exitCode)

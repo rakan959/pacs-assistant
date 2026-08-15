@@ -65,6 +65,7 @@ $pacsMonitor = Get-Content -Raw (Join-Path $repoRoot 'PACSMonitor.ahk')
 $updateChecker = Get-Content -Raw (Join-Path $repoRoot 'UpdateChecker.ahk')
 $appControl = Get-Content -Raw (Join-Path $repoRoot 'AppControl.ahk')
 $keybindGui = Get-Content -Raw (Join-Path $repoRoot 'KeybindGUI.ahk')
+$guiSmoke = Get-Content -Raw (Join-Path $repoRoot 'tests/run-gui-smoke.ahk')
 $noticesPath = Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md'
 $autoHotkeyLicensePath = Join-Path $repoRoot 'licenses/AutoHotkey-v2.0.26.txt'
 
@@ -294,6 +295,8 @@ Assert-NotMatches $main '(?m)^#SingleInstance\s+Force\s*$' 'Force replacement by
 Assert-Matches $main 'OnExit\(\(exitReason, exitCode\) => kbGUI\.HandleProcessExit\(exitReason, exitCode\)\)' 'Tray and external exits must use the authoritative shutdown coordinator.'
 Assert-Matches $main 'UpdateChecker\.shutdownCoordinator\s*:=\s*kbGUI' 'Self-update must use the same shutdown coordinator as normal exit.'
 Assert-Matches $main '(?s)PACSCommands\.commandAvailabilityProbe\s*:=.*?KeybindGUI\.uiPresentationTransactionActive' 'Clinical commands must reject an activating-dialog presentation transaction.'
+Assert-NotMatches $guiSmoke '\{\s*base:\s*KeybindGUI\.Prototype' 'The GUI smoke test must construct a real KeybindGUI instance so instance-property initialization is exercised.'
+Assert-Matches $guiSmoke '(?s)try\s+exitCode\s*:=\s*Main\(\).*?catch as err\s*\{.*?ExitApp\(exitCode\)' 'The GUI smoke test must convert fatal harness errors into a nonzero process exit.'
 Assert-Matches $main 'Settings\.dialogAcquire\s*:=\s*ObjBindMethod\(KeybindGUI,\s*"TryBeginUiPresentation"\)' 'Settings presentation must acquire the shared UI transaction.'
 Assert-Matches $main 'Settings\.dialogRelease\s*:=\s*ObjBindMethod\(KeybindGUI,\s*"EndUiPresentation"\)' 'Settings presentation must release the shared UI transaction.'
 Assert-Matches $main 'UpdateChecker\.dialogAcquire\s*:=\s*ObjBindMethod\(KeybindGUI,\s*"TryBeginUiPresentation"\)' 'Update presentation must acquire the shared UI transaction.'
