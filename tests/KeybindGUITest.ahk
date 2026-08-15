@@ -16,8 +16,10 @@ class KeybindGUITest {
         "TestProfileSwitchPreparationStopsActiveCapture",
         "TestProfileSwitchAbortsWhenCaptureCannotStop",
         "TestCaptureFailureRestoresBindingAndHookState",
+        "TestStaleKeyCaptureCannotReinsertRemovedFunction",
         "TestRejectedCapturedKeyRestoresPriorBinding",
         "TestRejectedScopeChangeRestoresPriorScope",
+        "TestStaleScopeDialogCannotModifyAReplacementRow",
         "TestFailedModalitySavePreservesLiveProfile",
         "TestStaleModalityDialogCannotWriteAnotherProfile",
         "TestOlderModalityDialogCannotOverwriteNewerSave",
@@ -197,6 +199,12 @@ class KeybindGUITest {
         KeybindGUI.isListening := true
         KeybindGUI.listeningControl := FailingListView()
         KeybindGUI.activeInputHook := hook
+        Assert.True(this.gui.CaptureFunctionDialogState(
+            prompt,
+            "Sign Report",
+            KeybindGUI.listeningControl,
+            1
+        ))
 
         threw := false
         try this.gui.OnInputEnd("Sign Report", KeybindGUI.listeningControl, prompt, hook)
@@ -227,6 +235,60 @@ class KeybindGUITest {
         Assert.True(capturedDestroyed)
     }
 
+    TestStaleKeyCaptureCannotReinsertRemovedFunction() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalListening := KeybindGUI.isListening
+        originalControl := KeybindGUI.listeningControl
+        originalHook := KeybindGUI.activeInputHook
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
+        prompt := FakeProfileDialog("Test")
+        hook := FakeCaptureHook("F14")
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            Assert.True(this.gui.CaptureFunctionDialogState(
+                prompt,
+                "Sign Report",
+                listView,
+                1
+            ))
+            KeybindGUI.isListening := true
+            KeybindGUI.listeningControl := listView
+            KeybindGUI.activeInputHook := hook
+            profile.binds.Delete("Sign Report")
+            profile.scopes.Delete("Sign Report")
+            listView.rows.RemoveAt(1)
+
+            result := this.gui.OnInputEnd("Sign Report", listView, prompt, hook)
+            bindStillAbsent := !profile.binds.Has("Sign Report")
+            scopeStillAbsent := !profile.scopes.Has("Sign Report")
+            runtimeAbsent := !HotkeyManager.activeHotkeys.Has("Sign Report")
+            rowCount := listView.GetCount()
+            destroyed := prompt.destroyed
+        } finally {
+            KeybindGUI.activeInputHook := 0
+            KeybindGUI.isListening := false
+            KeybindGUI.listeningControl := ""
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            KeybindGUI.isListening := originalListening
+            KeybindGUI.listeningControl := originalControl
+            KeybindGUI.activeInputHook := originalHook
+        }
+
+        Assert.False(result)
+        Assert.True(bindStillAbsent)
+        Assert.True(scopeStillAbsent)
+        Assert.True(runtimeAbsent)
+        Assert.Equal(0, rowCount)
+        Assert.True(destroyed)
+    }
+
     TestRejectedCapturedKeyRestoresPriorBinding() {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
@@ -242,6 +304,12 @@ class KeybindGUITest {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
             HotkeyManager.hotkeyFunctions := Map("Sign Report", (*) => 0)
+            Assert.True(this.gui.CaptureFunctionDialogState(
+                prompt,
+                "Sign Report",
+                listView,
+                1
+            ))
             Assert.True(HotkeyManager.RegisterHotkey("Sign Report", "^F13"))
             KeybindGUI.isListening := true
             KeybindGUI.listeningControl := listView
@@ -284,6 +352,12 @@ class KeybindGUITest {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
             HotkeyManager.hotkeyFunctions := Map()
+            Assert.True(this.gui.CaptureFunctionDialogState(
+                dialog,
+                "Missing Action",
+                listView,
+                1
+            ))
 
             this.gui.ApplyScope("Missing Action", true, false, listView, 1, dialog)
             capturedScope := profile.scopes["Missing Action"]
@@ -299,6 +373,55 @@ class KeybindGUITest {
         Assert.Equal("Any", capturedScope)
         Assert.Equal("Any window", capturedListScope)
         Assert.False(capturedDestroyed)
+    }
+
+    TestStaleScopeDialogCannotModifyAReplacementRow() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        profile.binds["Draft Report"] := "^F14"
+        profile.scopes["Draft Report"] := "PowerScribe"
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
+        listView.rows.Push(["Draft Report", "Ctrl + F14", "PowerScribe"])
+        dialog := FakeProfileDialog("Test")
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            Assert.True(this.gui.CaptureFunctionDialogState(
+                dialog,
+                "Sign Report",
+                listView,
+                1
+            ))
+            profile.binds.Delete("Sign Report")
+            profile.scopes.Delete("Sign Report")
+            listView.rows.RemoveAt(1)
+
+            result := this.gui.ApplyScope(
+                "Sign Report",
+                true,
+                false,
+                listView,
+                1,
+                dialog
+            )
+            orphanScopeAbsent := !profile.scopes.Has("Sign Report")
+            remainingName := listView.GetText(1, 1)
+            remainingScope := listView.GetText(1, 3)
+            destroyed := dialog.destroyed
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.False(result)
+        Assert.True(orphanScopeAbsent)
+        Assert.Equal("Draft Report", remainingName)
+        Assert.Equal("PowerScribe", remainingScope)
+        Assert.True(destroyed)
     }
 
     TestFailedModalitySavePreservesLiveProfile() {
@@ -612,6 +735,10 @@ class KeybindGUITest {
 }
 
 class FailingListView {
+    GetText(row, column) {
+        return ["Sign Report", "Ctrl + S", "Any window"][column]
+    }
+
     GetCount() {
         throw Error("simulated ListView failure")
     }

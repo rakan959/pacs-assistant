@@ -150,6 +150,96 @@ class KeybindGUI {
         return false
     }
 
+    FindUniqueFunctionRow(listView, funcName) {
+        match := 0
+        try rowCount := listView.GetCount()
+        catch
+            return 0
+        Loop rowCount {
+            try rowName := listView.GetText(A_Index, 1)
+            catch
+                return 0
+            if (rowName == funcName) {
+                if match
+                    return 0
+                match := A_Index
+            }
+        }
+        return match
+    }
+
+    CaptureFunctionDialogState(dialog, funcName, listView, rowIndex := 0) {
+        if !this.DialogProfileIsCurrent(dialog)
+            return false
+        profile := ProfileManager.profiles[dialog.profileName]
+        if !profile.binds.Has(funcName)
+            return false
+        if !rowIndex
+            rowIndex := this.FindUniqueFunctionRow(listView, funcName)
+        if !rowIndex
+            return false
+
+        try {
+            if !(listView.GetText(rowIndex, 1) == funcName)
+                return false
+            dialog.functionName := funcName
+            dialog.expectedBind := profile.binds[funcName]
+            dialog.expectedScope := profile.scopes.Has(funcName)
+                ? profile.scopes[funcName]
+                : "Any"
+            dialog.functionRow := rowIndex
+            dialog.expectedRowBind := listView.GetText(rowIndex, 2)
+            dialog.expectedRowScope := listView.GetText(rowIndex, 3)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    FunctionDialogIsCurrent(dialog, funcName, listView) {
+        if !this.DialogProfileIsCurrent(dialog)
+            return false
+
+        valid := false
+        try {
+            profile := ProfileManager.profiles[dialog.profileName]
+            currentScope := profile.scopes.Has(funcName)
+                ? profile.scopes[funcName]
+                : "Any"
+            valid := HasProp(dialog, "functionName")
+                && dialog.functionName == funcName
+                && HasProp(dialog, "expectedBind")
+                && profile.binds.Has(funcName)
+                && profile.binds[funcName] == dialog.expectedBind
+                && HasProp(dialog, "expectedScope")
+                && currentScope == dialog.expectedScope
+                && HasProp(dialog, "functionRow")
+                && dialog.functionRow > 0
+                && listView.GetText(dialog.functionRow, 1) == funcName
+                && listView.GetText(dialog.functionRow, 2) == dialog.expectedRowBind
+                && listView.GetText(dialog.functionRow, 3) == dialog.expectedRowScope
+        }
+        if valid
+            return true
+
+        try this.StopListening()
+        catch as err {
+            MsgBox(
+                "The key-capture hook could not be stopped after the function changed. Restart PACS Assistant before pressing another shortcut.`n`n" err.Message,
+                "Function Changed",
+                "Icon!"
+            )
+            return false
+        }
+        try dialog.Destroy()
+        MsgBox(
+            "The selected function changed while this dialog was open. Reopen it before applying changes.",
+            "Function Changed",
+            "Icon!"
+        )
+        return false
+    }
+
     ShowProfileSelector() {
         selectorGui := Gui(, "PACS Assistant - Profile Selection")
         selectorGui.Add("Text",, "Select profile:")
@@ -336,7 +426,7 @@ class KeybindGUI {
         if (ih.EndReason != "EndKey")
             return
 
-        if !this.DialogProfileIsCurrent(promptGui)
+        if !this.FunctionDialogIsCurrent(promptGui, funcName, control)
             return false
 
         key := ih.EndKey
@@ -966,9 +1056,20 @@ class KeybindGUI {
         ; capturing and rebinds the next key pressed anywhere
         promptGui.OnEvent("Close", (*) => this.CancelKeybindPrompt(promptGui))
 
+        if !this.CaptureFunctionDialogState(promptGui, funcName, listView) {
+            promptGui.Destroy()
+            MsgBox(
+                "The selected function could not be verified. Refresh the profile and try again.",
+                "Function Not Available",
+                "Icon!"
+            )
+            return false
+        }
+
         this.BeginListening(funcName, listView, promptGui)
 
         promptGui.Show()
+        return true
     }
 
     ResizeColumns(listView) {
@@ -1001,6 +1102,16 @@ class KeybindGUI {
         psBox.Value := flags.requirePowerScribe
         scopeGui.Add("Text", "y+10", "Leave both unchecked to activate in any window.")
 
+        if !this.CaptureFunctionDialogState(scopeGui, funcName, listView, rowIndex) {
+            scopeGui.Destroy()
+            MsgBox(
+                "The selected function could not be verified. Refresh the profile and try again.",
+                "Function Not Available",
+                "Icon!"
+            )
+            return false
+        }
+
         scopeGui.Add("Button", "y+15 w80", "OK")
             .OnEvent("Click", (*) => this.ApplyScope(funcName, pacsBox.Value, psBox.Value, listView, rowIndex, scopeGui))
         scopeGui.Add("Button", "x+10 w80", "Cancel").OnEvent("Click", (*) => scopeGui.Destroy())
@@ -1008,7 +1119,7 @@ class KeybindGUI {
     }
 
     ApplyScope(funcName, requirePACS, requirePowerScribe, listView, rowIndex, scopeGui) {
-        if !this.DialogProfileIsCurrent(scopeGui)
+        if !this.FunctionDialogIsCurrent(scopeGui, funcName, listView)
             return false
 
         oldScope := ProfileManager.GetScope(funcName)
