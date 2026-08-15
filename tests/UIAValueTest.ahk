@@ -10,12 +10,13 @@
  * touched, which verifies that the adapter checks support before invoking a pattern.
  */
 class FakeElement {
-    __New(value := "", legacyValue := "", hasValuePattern := true, hasLegacyPattern := false) {
+    __New(value := "", legacyValue := "", hasValuePattern := true, hasLegacyPattern := false, writeErrorAfterMutation := "") {
         this.storedValue := value
         this.legacyValue := legacyValue
         this.hasValuePattern := hasValuePattern
         this.hasLegacyPattern := hasLegacyPattern
         this.valueWasWritten := false
+        this.writeErrorAfterMutation := writeErrorAfterMutation
     }
 
     GetPropertyValue(propertyId) {
@@ -30,7 +31,12 @@ class FakeElement {
 
     Value {
         get => this.storedValue
-        set => (this.valueWasWritten := true, this.storedValue := value)
+        set {
+            this.valueWasWritten := true
+            this.storedValue := value
+            if (this.writeErrorAfterMutation != "")
+                throw Error(this.writeErrorAfterMutation)
+        }
     }
 }
 
@@ -41,9 +47,12 @@ class UIAValueTest {
         "TestReadReturnsBlankWhenNothingExposed",
         "TestTryReadPreservesSupportedBlank",
         "TestTryReadRejectsUnsupportedBlank",
+        "TestSupportedBlankDoesNotFallThroughToLegacy",
+        "TestFailedReadIsNotConvertedToSupportedBlank",
         "TestCanWriteReflectsPatternAvailability",
         "TestWriteRefusesWhenPatternMissing",
-        "TestWriteSucceedsWhenPatternPresent"
+        "TestWriteSucceedsWhenPatternPresent",
+        "TestWritePropagatesPostMutationError"
     ]
 
     TestReadPrefersValueProperty() {
@@ -51,7 +60,7 @@ class UIAValueTest {
     }
 
     TestReadFallsBackToLegacyValue() {
-        Assert.Equal("legacy", UIAValue.Read(FakeElement("", "legacy")))
+        Assert.Equal("legacy", UIAValue.Read(FakeElement("", "legacy", false, true)))
     }
 
     TestReadReturnsBlankWhenNothingExposed() {
@@ -69,6 +78,20 @@ class UIAValueTest {
 
     TestTryReadRejectsUnsupportedBlank() {
         result := UIAValue.TryRead(FakeElement("", "", false, false))
+
+        Assert.False(result.supported)
+        Assert.Equal("", result.value)
+    }
+
+    TestSupportedBlankDoesNotFallThroughToLegacy() {
+        result := UIAValue.TryRead(FakeElement("", "stale legacy value", true, true))
+
+        Assert.True(result.supported)
+        Assert.Equal("", result.value)
+    }
+
+    TestFailedReadIsNotConvertedToSupportedBlank() {
+        result := UIAValue.TryRead(FailingValueReadElement())
 
         Assert.False(result.supported)
         Assert.Equal("", result.value)
@@ -94,5 +117,26 @@ class UIAValueTest {
         Assert.True(UIAValue.Write(el, "wet read"))
         Assert.True(el.valueWasWritten)
         Assert.Equal("wet read", el.storedValue)
+    }
+
+    TestWritePropagatesPostMutationError() {
+        el := FakeElement("existing", "", true, false, "provider failed after mutation")
+
+        Assert.Throws(
+            () => UIAValue.Write(el, "wet read"),
+            "provider failed after mutation"
+        )
+        Assert.Equal("wet read", el.storedValue)
+    }
+}
+
+class FailingValueReadElement {
+    GetPropertyValue(propertyId) {
+        switch propertyId {
+            case UIA.Property.ValueValue: throw Error("value read failed")
+            case UIA.Property.IsValuePatternAvailable: return true
+            case UIA.Property.IsLegacyIAccessiblePatternAvailable: return false
+        }
+        return ""
     }
 }

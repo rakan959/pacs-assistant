@@ -191,7 +191,16 @@ class MicrophoneManager {
 
         ; Editable combo boxes accept the value directly; gated so an unsupported one
         ; falls through to the dropdown instead of erroring
-        if UIAValue.Write(combo, micName) {
+        directWriteError := 0
+        try {
+            if (UIAValue.Write(combo, micName)
+                && this.WaitForSelection(combo, micName, 300)) {
+                return true
+            }
+        } catch as err {
+            directWriteError := err
+            ; A provider may apply the selection and then report an error. Verify the
+            ; postcondition before falling back or reporting the operation as failed.
             if this.WaitForSelection(combo, micName, 300)
                 return true
         }
@@ -224,6 +233,8 @@ class MicrophoneManager {
             if expanded {
                 try combo.ExpandCollapsePattern.Collapse()
             }
+            if directWriteError
+                this.RecordOperationalError(directWriteError)
             return false
         }
 
@@ -242,7 +253,10 @@ class MicrophoneManager {
             try combo.ExpandCollapsePattern.Collapse()
         }
 
-        return selected && this.WaitForSelection(combo, micName, 1000, item)
+        succeeded := selected && this.WaitForSelection(combo, micName, 1000, item)
+        if (!succeeded && directWriteError)
+            this.RecordOperationalError(directWriteError)
+        return succeeded
     }
 
     static WaitForSelection(combo, micName, timeoutMs, item := 0) {

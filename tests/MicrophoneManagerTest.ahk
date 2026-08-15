@@ -8,6 +8,7 @@ class MicrophoneManagerTest {
         "WaitForSelectionIgnoresDisplayCasing",
         "FindMicrophoneComboUsesFallbackAfterPrimaryFailure",
         "FindMicrophoneComboReturnsZeroWhenLookupsFail",
+        "PostMutationWriteErrorUsesVerifiedSelection",
         "FinalSelectionFailureNotifiesOnce",
         "OperationalErrorIsRecorded",
         "PickerReappearanceStartsANewLoginSession"
@@ -54,6 +55,14 @@ class MicrophoneManagerTest {
         root := FakeMicrophoneRoot(true, 0, true)
 
         Assert.Equal(0, MicrophoneManager.FindMicrophoneComboInRoot(root))
+    }
+
+    PostMutationWriteErrorUsesVerifiedSelection() {
+        combo := PostMutationMicrophoneCombo("Internal Microphone", "PowerMic III")
+
+        Assert.True(MicrophoneManager.SelectMicrophone(1, combo, "PowerMic"))
+        Assert.Equal("PowerMic III", combo.storedValue)
+        Assert.Equal("", MicrophoneManager.lastError)
     }
 
     FinalSelectionFailureNotifiesOnce() {
@@ -114,6 +123,30 @@ class FakeMicrophoneCombo {
 class FakeMicrophoneElement {
     __New(automationId) {
         this.AutomationId := automationId
+    }
+}
+
+class PostMutationMicrophoneCombo {
+    __New(value, mutatedValue) {
+        this.storedValue := value
+        this.mutatedValue := mutatedValue
+    }
+
+    GetPropertyValue(propertyId) {
+        switch propertyId {
+            case UIA.Property.ValueValue: return this.storedValue
+            case UIA.Property.IsValuePatternAvailable: return true
+            case UIA.Property.IsLegacyIAccessiblePatternAvailable: return false
+        }
+        return ""
+    }
+
+    Value {
+        get => this.storedValue
+        set {
+            this.storedValue := this.mutatedValue
+            throw Error("provider reported failure after selection")
+        }
     }
 }
 

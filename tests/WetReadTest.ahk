@@ -8,10 +8,12 @@ class WetReadTest {
         "FailedSendRestoresThePreviousNoteAndClipboard",
         "SuccessfulSendRestoresTheClipboard",
         "UnsupportedUIADoesNotClearTheNote",
+        "PostMutationUIAErrorRestoresThePreviousNote",
         "FailedUIAVerificationRestoresThePreviousNote",
         "UIABecomingUnsupportedStillRestoresAnEarlierWrite",
         "FailedControlVerificationRestoresThePreviousNote",
         "UnsupportedControlDoesNotAttemptRollback",
+        "DirectRestoreFallsBackAfterPreferredException",
         "SendExceptionRestoresThePreviousNoteAndClipboard",
         "ClearFailureAfterMutationRestoresThePreviousNote",
         "ClipboardRestoreFailureIsReported",
@@ -73,6 +75,22 @@ class WetReadTest {
         Assert.Equal(0, driver.clearCalls)
     }
 
+    PostMutationUIAErrorRestoresThePreviousNote() {
+        field := PostMutationFailingWetReadElement("existing note", "new wet read")
+
+        result := WetReadPasteEngine.Paste(
+            field,
+            "new wet read",
+            "uia",
+            NativeWetReadDriver()
+        )
+
+        Assert.False(result.success)
+        Assert.False(result.unsupported)
+        Assert.True(result.restored)
+        Assert.Equal("existing note", field.storedValue)
+    }
+
     FailedUIAVerificationRestoresThePreviousNote() {
         driver := FakeWetReadDriver("existing note", "original clipboard")
         driver.failedText := "new wet read"
@@ -117,6 +135,24 @@ class WetReadTest {
         Assert.False(result.success)
         Assert.True(result.unsupported)
         Assert.True(result.restored)
+        Assert.Equal("existing note", driver.fieldValue)
+        Assert.Equal(1, driver.controlCalls)
+    }
+
+    DirectRestoreFallsBackAfterPreferredException() {
+        driver := FakeWetReadDriver("partial value", "original clipboard")
+        driver.throwOnUiaValue := "existing note"
+        result := WetReadPasteEngine.NewResult()
+
+        restored := WetReadPasteEngine.RestoreDirect(
+            1,
+            "existing note",
+            "uia",
+            driver,
+            result
+        )
+
+        Assert.True(restored)
         Assert.Equal("existing note", driver.fieldValue)
         Assert.Equal(1, driver.controlCalls)
     }
@@ -220,6 +256,7 @@ class FakeWetReadDriver {
         this.controlCalls := 0
         this.throwOnClipboardRestore := false
         this.throwOnRead := false
+        this.throwOnUiaValue := ""
         this.clearCalls := 0
         this.clearFailuresRemaining := 0
     }
@@ -268,6 +305,8 @@ class FakeWetReadDriver {
 
     WriteUIA(field, value) {
         this.uiaCalls++
+        if (value = this.throwOnUiaValue)
+            throw Error("simulated UIA restore failure")
         if (!this.uiaSupported || (this.uiaSupportedCalls > 0 && this.uiaCalls > this.uiaSupportedCalls))
             return false
         this.fieldValue := value = this.failedText ? "partial value" : value
@@ -290,6 +329,31 @@ class FakeWetReadDriver {
 class UnsupportedWetReadElement {
     GetPropertyValue(propertyId) {
         return ""
+    }
+}
+
+class PostMutationFailingWetReadElement {
+    __New(value, failingValue) {
+        this.storedValue := value
+        this.failingValue := failingValue
+    }
+
+    GetPropertyValue(propertyId) {
+        switch propertyId {
+            case UIA.Property.ValueValue: return this.storedValue
+            case UIA.Property.IsValuePatternAvailable: return true
+            case UIA.Property.IsLegacyIAccessiblePatternAvailable: return false
+        }
+        return ""
+    }
+
+    Value {
+        get => this.storedValue
+        set {
+            this.storedValue := value
+            if (value = this.failingValue)
+                throw Error("provider failed after mutation")
+        }
     }
 }
 

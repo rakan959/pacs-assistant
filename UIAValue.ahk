@@ -23,14 +23,25 @@ class UIAValue {
      * @returns {supported, value}
      */
     static TryRead(element) {
+        valueRead := false
+        text := ""
         try {
             text := element.GetPropertyValue(UIA.Property.ValueValue)
+            valueRead := true
             if (text != "")
                 return {supported: true, value: text}
         }
 
+        valueSupported := false
+        try valueSupported := element.GetPropertyValue(UIA.Property.IsValuePatternAvailable) ? true : false
+        if (valueRead && valueSupported)
+            return {supported: true, value: ""}
+
+        legacyRead := false
+        text := ""
         try {
             text := element.GetPropertyValue(UIA.Property.LegacyIAccessibleValue)
+            legacyRead := true
             if (text != "")
                 return {supported: true, value: text}
         }
@@ -38,12 +49,10 @@ class UIAValue {
         ; An empty value is valid, but the property APIs also return an empty default
         ; for unsupported patterns. Capability flags are the only safe way to tell
         ; those states apart before a destructive replace-and-rollback transaction.
-        valueSupported := false
         legacySupported := false
-        try valueSupported := element.GetPropertyValue(UIA.Property.IsValuePatternAvailable) ? true : false
         try legacySupported := element.GetPropertyValue(UIA.Property.IsLegacyIAccessiblePatternAvailable) ? true : false
 
-        return {supported: valueSupported || legacySupported, value: ""}
+        return {supported: legacyRead && legacySupported, value: ""}
     }
 
     static Read(element) {
@@ -68,11 +77,7 @@ class UIAValue {
         if !this.CanWrite(element)
             return false
 
-        try {
-            element.Value := text
-            return true
-        }
-
-        return false
+        element.Value := text
+        return true
     }
 }

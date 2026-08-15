@@ -239,21 +239,20 @@ class WetReadPasteEngine {
     }
 
     static RestoreDirect(field, originalValue, mode, driver, result) {
-        try {
-            if (mode = "uia") {
-                restored := driver.WriteUIA(field, originalValue)
-                if !restored
-                    restored := driver.WriteControl(field, originalValue)
-            } else {
-                restored := driver.WriteControl(field, originalValue)
-                if !restored
-                    restored := driver.WriteUIA(field, originalValue)
+        restoreModes := mode = "uia" ? ["uia", "control"] : ["control", "uia"]
+        for restoreMode in restoreModes {
+            try {
+                restored := restoreMode = "uia"
+                    ? driver.WriteUIA(field, originalValue)
+                    : driver.WriteControl(field, originalValue)
+                if (restored && driver.WaitForValue(field, originalValue, this.verifyTimeoutMs))
+                    return true
+            } catch as err {
+                label := restoreMode = "uia" ? "UIA" : "ControlSetText"
+                this.AppendError(result, label " restore failed: " err.Message)
             }
-            return restored && driver.WaitForValue(field, originalValue, this.verifyTimeoutMs)
-        } catch as err {
-            this.AppendError(result, "Previous note restore failed: " err.Message)
-            return false
         }
+        return false
     }
 
     static AppendError(result, message) {
