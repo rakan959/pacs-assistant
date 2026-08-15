@@ -39,6 +39,8 @@ class WetReadTest {
         "RoutingFailureReportsTheActualCause",
         "AttendingFailureIsReportedAcrossEveryStickySetupExit",
         "StickyOpenerFailureAlsoReportsAttendingOutcome",
+        "ThrowingStickyOpenerStillReportsAttendingOutcome",
+        "ThrowingReportCaptureStillPastesAndReportsAttendingOutcome",
         "StickyTargetIsPinnedBeforePowerScribeRouting"
     ]
 
@@ -504,6 +506,60 @@ class WetReadTest {
         Assert.True(InStr(notifications[2].text, "Set it manually") > 0)
     }
 
+    ThrowingStickyOpenerStillReportsAttendingOutcome() {
+        notifications := []
+        captureCalls := 0
+        escaped := false
+
+        try result := RunPinnedWetReadWorkflow(
+            "wet read",
+            "uia",
+            ObjBindMethod(FakeEarlyWetReadExit, "Throw", "simulated opener failure"),
+            (*) => (captureCalls++, {text: "", session: 0}),
+            (*) => true,
+            (*) => true,
+            RecordWetReadNotification.Bind(notifications)
+        )
+        catch
+            escaped := true
+
+        Assert.False(escaped)
+        Assert.False(result)
+        Assert.Equal(0, captureCalls)
+        Assert.Equal(2, notifications.Length)
+        Assert.Equal("Sticky Note Target Not Verified", notifications[1].title)
+        Assert.True(InStr(notifications[1].text, "simulated opener failure") > 0)
+        Assert.Equal("Attending Not Assigned", notifications[2].title)
+    }
+
+    ThrowingReportCaptureStillPastesAndReportsAttendingOutcome() {
+        notifications := []
+        routeCalls := 0
+        pasteCalls := 0
+        stickySession := {stickyHwnd: 200}
+        escaped := false
+
+        try result := RunPinnedWetReadWorkflow(
+            "wet read",
+            "uia",
+            (*) => stickySession,
+            ObjBindMethod(FakeEarlyWetReadExit, "Throw", "simulated report failure"),
+            (*) => routeCalls++,
+            (*) => (pasteCalls++, true),
+            RecordWetReadNotification.Bind(notifications)
+        )
+        catch
+            escaped := true
+
+        Assert.False(escaped)
+        Assert.True(result)
+        Assert.Equal(0, routeCalls)
+        Assert.Equal(1, pasteCalls)
+        Assert.Equal(1, notifications.Length)
+        Assert.Equal("Attending Not Assigned", notifications[1].title)
+        Assert.True(InStr(notifications[1].text, "simulated report failure") > 0)
+    }
+
     StickyTargetIsPinnedBeforePowerScribeRouting() {
         events := []
         stickySession := {stickyHwnd: 200}
@@ -539,6 +595,10 @@ class WetReadTest {
 class FakeEarlyWetReadExit {
     static Return(stage) {
         return stage
+    }
+
+    static Throw(message) {
+        throw Error(message)
     }
 }
 

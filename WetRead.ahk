@@ -601,8 +601,16 @@ checkAttending(reportText, powerScribeSession := 0) {
 }
 
 AttendingFailureMessage(reportText, routingError := 0) {
-	if (reportText = "")
-		return "Could not read the report from PowerScribe, so the attending was not assigned. Set it manually."
+	if (reportText = "") {
+		message := "Could not read the report from PowerScribe, so the attending was not assigned"
+		if routingError {
+			detail := IsObject(routingError) && HasProp(routingError, "Message")
+				? routingError.Message
+				: String(routingError)
+			message .= ": " detail
+		}
+		return message ". Set it manually."
+	}
 
 	if routingError {
 		detail := IsObject(routingError) && HasProp(routingError, "Message")
@@ -647,41 +655,63 @@ RunPinnedWetReadWorkflow(
 ) {
 	; Establish the study-specific PACS target first. Later PowerScribe focus changes
 	; must never decide which Sticky Notes window receives the text.
-	stickySession := openSticky.Call()
-	if !stickySession {
-		message := "A new Sticky Notes window for the active Vue PACS study could not be verified. Nothing was pasted."
-		if notifier
-			notifier.Call(message, "Sticky Note Target Not Verified", "Icon!")
-		else
-			MsgBox(message, "Sticky Note Target Not Verified", "Icon!")
-		return RunWetReadPasteWithAttendingOutcome(
-			(*) => false,
-			false,
-			"",
-			0,
-			notifier
-		)
-	}
-
 	attendingRouted := false
 	attendingError := 0
-	reportCapture := captureReport.Call()
-	haystack := reportCapture.text
-	if (haystack != "") {
+	haystack := ""
+	try {
+		stickySession := 0
 		try {
-			routeAttending.Call(haystack, reportCapture.session)
-			attendingRouted := true
-		} catch as err
+			stickySession := openSticky.Call()
+		} catch as err {
 			attendingError := err
-	}
+			message := "A new Sticky Notes window for the active Vue PACS study could not be verified. Nothing was pasted: " err.Message
+			if notifier
+				notifier.Call(message, "Sticky Note Target Not Verified", "Icon!")
+			else
+				MsgBox(message, "Sticky Note Target Not Verified", "Icon!")
+			return false
+		}
+		if !stickySession {
+			message := "A new Sticky Notes window for the active Vue PACS study could not be verified. Nothing was pasted."
+			if notifier
+				notifier.Call(message, "Sticky Note Target Not Verified", "Icon!")
+			else
+				MsgBox(message, "Sticky Note Target Not Verified", "Icon!")
+			return false
+		}
 
-	return RunWetReadPasteWithAttendingOutcome(
-		pasteAction.Bind(clipText, pasteMode, stickySession),
-		attendingRouted,
-		haystack,
-		attendingError,
-		notifier
-	)
+		reportCapture := 0
+		try reportCapture := captureReport.Call()
+		catch as err
+			attendingError := err
+		if !attendingError {
+			if (!IsObject(reportCapture)
+				|| !HasProp(reportCapture, "text")
+				|| !HasProp(reportCapture, "session")
+				|| Type(reportCapture.text) != "String") {
+				attendingError := Error("PowerScribe returned an invalid report capture")
+			} else
+				haystack := reportCapture.text
+		}
+
+		if (haystack != "") {
+			try {
+				routeAttending.Call(haystack, reportCapture.session)
+				attendingRouted := true
+			} catch as err
+				attendingError := err
+		}
+
+		return pasteAction.Call(clipText, pasteMode, stickySession)
+	} finally {
+		if !attendingRouted {
+			message := AttendingFailureMessage(haystack, attendingError)
+			if notifier
+				notifier.Call(message, "Attending Not Assigned", "Icon!")
+			else
+				MsgBox(message, "Attending Not Assigned", "Icon!")
+		}
+	}
 }
 
 wetRead() {

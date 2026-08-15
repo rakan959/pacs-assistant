@@ -60,6 +60,8 @@ $powerScribe = Get-Content -Raw (Join-Path $repoRoot 'PowerScribe.ahk')
 $wetRead = Get-Content -Raw (Join-Path $repoRoot 'WetRead.ahk')
 $pacsMonitor = Get-Content -Raw (Join-Path $repoRoot 'PACSMonitor.ahk')
 $updateChecker = Get-Content -Raw (Join-Path $repoRoot 'UpdateChecker.ahk')
+$appControl = Get-Content -Raw (Join-Path $repoRoot 'AppControl.ahk')
+$keybindGui = Get-Content -Raw (Join-Path $repoRoot 'KeybindGUI.ahk')
 $noticesPath = Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md'
 $autoHotkeyLicensePath = Join-Path $repoRoot 'licenses/AutoHotkey-v2.0.26.txt'
 
@@ -110,6 +112,7 @@ Assert-Matches $workflow '(?ms)Resolve-ReleaseTagCommit.*?AssertReleaseTagCommit
 Assert-Matches $workflow "(?ms)'release',\s*'create'.*?'--draft'.*?'release',\s*'upload'.*?Resolve-ReleaseTagCommit.*?AssertReleaseTagCommit\.ps1.*?'release',\s*'edit'.*?'--draft=false'" 'New releases must remain drafts through asset upload and a second exact tag-commit check.'
 Assert-Matches $readme '(?i)immutable releases' 'Release documentation must require GitHub release immutability.'
 Assert-Matches $readme '(?i)tag ruleset.*restrict.*updates.*deletions' 'Release documentation must require protected release tags because ref comparison and publication are not atomic.'
+Assert-NotMatches ($appControl + $keybindGui) '``n``n' 'User-facing diagnostics must use real AHK newline escapes, not render literal backtick-n text.'
 
 $actionReferencePattern = '(?m)^\s*uses:\s*(?<reference>\S+?)(?:\s+#.*)?\s*$'
 $usesLineCount = [regex]::Matches($workflow, '(?m)^\s*uses:\s*').Count

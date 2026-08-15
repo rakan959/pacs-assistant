@@ -2166,7 +2166,7 @@ class KeybindGUI {
             restored := this.CancelKeybindPrompt(promptGui)
             if restored {
                 this.NotifyUser(
-                    "The key-capture window could not be shown. Input capture was stopped and the previous shortcuts were restored.``n``n" err.Message,
+                    "The key-capture window could not be shown. Input capture was stopped and the previous shortcuts were restored.`n`n" err.Message,
                     "Key Capture Could Not Start",
                     "Icon!"
                 )

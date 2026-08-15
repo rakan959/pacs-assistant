@@ -811,7 +811,7 @@ restartPACS(driver := 0) {
     try prepared := driver.PrepareRestart()
     catch as err {
         MsgBox(
-            "The installed Vue PACS client could not be verified. The restart was cancelled before closing any clinical window.``n``n" err.Message,
+            "The installed Vue PACS client could not be verified. The restart was cancelled before closing any clinical window.`n`n" err.Message,
             "PACS Restart Cancelled",
             "Icon!"
         )
@@ -883,7 +883,7 @@ restartPACS(driver := 0) {
     try stopResult := driver.StopTargets()
     catch as err {
         MsgBox(
-            "PACS target shutdown could not be completed or verified. The restart was cancelled.``n``n" err.Message,
+            "PACS target shutdown could not be completed or verified. The restart was cancelled.`n`n" err.Message,
             "PACS Restart Cancelled",
             "Icon!"
         )
@@ -919,7 +919,7 @@ restartPACS(driver := 0) {
         try driver.Pause(500)
         catch as err {
             MsgBox(
-                "The restart stabilization wait failed. PACS was not relaunched.``n``n" err.Message,
+                "The restart stabilization wait failed. PACS was not relaunched.`n`n" err.Message,
                 "PACS Restart Cancelled",
                 "Icon!"
             )
@@ -947,7 +947,7 @@ restartPACS(driver := 0) {
     try launched := driver.Launch()
     catch as err {
         MsgBox(
-            "The verified PACS shortcut could not be launched.``n``n" err.Message,
+            "The verified PACS shortcut could not be launched.`n`n" err.Message,
             "PACS Launch Failed",
             "Icon!"
         )
@@ -960,7 +960,7 @@ restartPACS(driver := 0) {
     try launchVerified := driver.WaitForLaunch()
     catch as err {
         MsgBox(
-            "The PACS shortcut ran, but the new Vue PACS window could not be verified.``n``n" err.Message,
+            "The PACS shortcut ran, but the new Vue PACS window could not be verified.`n`n" err.Message,
             "PACS Launch Not Verified",
             "Icon!"
         )
