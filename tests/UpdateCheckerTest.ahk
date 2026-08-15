@@ -20,7 +20,7 @@ class UpdateCheckerTest {
         "TestSkippedCachedVersionCannotReopen",
         "TestManualCompletionDefersDialogDuringClinicalCommand",
         "TestAsyncRequestDisconnectBreaksCallbackOwnership",
-        "TestMetadataResponsesAreByteBoundedBeforeParsing",
+        "TestMetadataResponsesAreStreamBoundedBeforeParsing",
         "TestSettingsChangeCancelsInFlightAutomaticCheck",
         "TestClinicalCommandBlocksUpdateExit",
         "TestReadOnlyInstallDirectoryBlocksUpdateBeforeShutdown",
@@ -545,7 +545,7 @@ class UpdateCheckerTest {
 
     TestAsyncRequestDisconnectBreaksCallbackOwnership() {
         operation := WinHttpTextRequest(
-            FakeWinHttpRequest(),
+            "https://api.github.com/test",
             (*) => 0,
             (*) => 0,
             UpdateChecker.maxMetadataSizeBytes
@@ -558,20 +558,27 @@ class UpdateCheckerTest {
         Assert.Equal(0, operation.onError)
     }
 
-    TestMetadataResponsesAreByteBoundedBeforeParsing() {
-        oversizedHeader := FakeBoundedTextResponse("small", "11")
-        Assert.Throws(
-            () => WinHttpTransport.ReadBoundedTextResponse(oversizedHeader, 10),
-            "exceeded its byte limit"
+    TestMetadataResponsesAreStreamBoundedBeforeParsing() {
+        operation := WinHttpTextRequest(
+            "https://api.github.com/test",
+            (*) => 0,
+            (*) => 0,
+            5
         )
-        Assert.Equal(0, oversizedHeader.bodyReads)
+        firstChunk := Buffer(4)
+        NumPut("UInt", 0x64636261, firstChunk)
+        operation.ConsumeReadChunk(firstChunk.Ptr, firstChunk.Size)
 
-        chunked := FakeBoundedTextResponse("ééé", "")
+        Assert.Equal(4, operation.totalBytes)
+        Assert.Equal(5, operation.bodyBuffer.Size)
+
+        secondChunk := Buffer(2)
         Assert.Throws(
-            () => WinHttpTransport.ReadBoundedTextResponse(chunked, 5),
+            () => operation.ConsumeReadChunk(secondChunk.Ptr, secondChunk.Size),
             "exceeded its byte limit"
         )
-        Assert.Equal(1, chunked.bodyReads)
+        Assert.Equal(4, operation.totalBytes)
+        operation.Disconnect()
     }
 
     TestSettingsChangeCancelsInFlightAutomaticCheck() {
@@ -724,30 +731,6 @@ class ThrowingUpdaterPathChecker extends UpdateChecker {
 
 class ReadOnlyInstallUpdateChecker extends UpdateChecker {
     static InstallDirectoryIsWritable() => false
-}
-
-class FakeWinHttpRequest {
-    Abort() {
-    }
-}
-
-class FakeBoundedTextResponse {
-    __New(body, contentLength) {
-        this.body := body
-        this.contentLength := contentLength
-        this.bodyReads := 0
-    }
-
-    GetResponseHeader(name) {
-        return this.contentLength
-    }
-
-    ResponseText {
-        get {
-            this.bodyReads++
-            return this.body
-        }
-    }
 }
 
 class CountingDownloadTransport {

@@ -10,23 +10,8 @@ class WinHttpTransport {
     static sendTimeoutMs := 5000
     static receiveTimeoutMs := 10000
 
-    CreateRequest(url, async := false) {
-        request := ComObject("WinHttp.WinHttpRequest.5.1")
-        request.SetTimeouts(
-            WinHttpTransport.resolveTimeoutMs,
-            WinHttpTransport.connectTimeoutMs,
-            WinHttpTransport.sendTimeoutMs,
-            WinHttpTransport.receiveTimeoutMs
-        )
-        request.Open("GET", url, async)
-        request.SetRequestHeader("User-Agent", "PACS-Assistant-Update-Checker")
-        request.SetRequestHeader("Accept", "application/vnd.github+json")
-        return request
-    }
-
     GetTextAsync(url, onComplete, onError, maximumSize) {
-        request := this.CreateRequest(url, true)
-        operation := WinHttpTextRequest(request, onComplete, onError, maximumSize)
+        operation := WinHttpTextRequest(url, onComplete, onError, maximumSize)
         return operation.Start()
     }
 
@@ -181,121 +166,444 @@ class WinHttpTransport {
         }
     }
 
-    static ReadBoundedTextResponse(request, maximumSize) {
-        if (!(maximumSize is Integer) || maximumSize <= 0)
-            throw ValueError("A positive metadata response limit is required")
-        try {
-            contentLengthText := request.GetResponseHeader("Content-Length")
-            if (contentLengthText != "") {
-                contentLength := Integer(contentLengthText)
-                if (contentLength < 0 || contentLength > maximumSize)
-                    throw Error("Update metadata response exceeded its byte limit")
-            }
-        } catch as err {
-            if InStr(err.Message, "exceeded its byte limit")
-                throw
-            ; Chunked responses legitimately omit Content-Length. The decoded body
-            ; still receives the same bound immediately after completion.
-        }
-        body := request.ResponseText
-        if (StrPut(body, "UTF-8") - 1 > maximumSize)
-            throw Error("Update metadata response exceeded its byte limit")
-        return body
-    }
 }
 
 class WinHttpTextRequest {
-    __New(request, onComplete, onError, maximumSize) {
-        this.request := request
+    ; WinHTTP invokes one process-lifetime callback on worker threads. Context and
+    ; handle maps keep each operation alive until HANDLE_CLOSING, the documented
+    ; final notification for a request. This avoids freeing callback state while a
+    ; worker can still reach it and avoids a per-hour callback allocation leak.
+    static operationsByContext := Map()
+    static operationsByHandle := Map()
+    static contextSequence := 0
+    static statusCallback := 0
+    static callbackFlags := 0x006A0800
+
+    __New(url, onComplete, onError, maximumSize) {
+        if (Type(url) != "String"
+            || !RegExMatch(url, "i)^https://api\.github\.com(/.*)$", &urlMatch))
+            throw ValueError("Update metadata URL is not a supported GitHub API URL")
+        if (!(maximumSize is Integer) || maximumSize <= 0)
+            throw ValueError("A positive metadata response limit is required")
+
+        this.url := url
+        this.path := urlMatch[1]
         this.onComplete := onComplete
         this.onError := onError
-        this.done := false
-        this.pollTimer := 0
-        this.startedAt := 0
         this.maximumSize := maximumSize
+        this.bodyBuffer := Buffer(maximumSize)
+        this.readBuffer := Buffer(64 * 1024)
+        this.totalBytes := 0
+        this.session := 0
+        this.connection := 0
+        this.request := 0
+        this.context := 0
+        this.timeoutTimer := 0
+        this.startedAt := 0
+        this.state := "created"
+        this.terminalKind := ""
+        this.terminalValue := 0
     }
 
     Start() {
         try {
+            this.state := "starting"
             this.startedAt := this.NowMilliseconds()
-            this.request.Send()
-            this.pollTimer := ObjBindMethod(this, "Poll")
-            SetTimer(this.pollTimer, 50)
+            this.session := DllCall(
+                "winhttp\WinHttpOpen",
+                "WStr", "PACS-Assistant-Update-Checker",
+                "UInt", 1,
+                "Ptr", 0,
+                "Ptr", 0,
+                "UInt", 0x10000000,
+                "Ptr"
+            )
+            if !this.session
+                throw OSError(A_LastError, "WinHttpOpen")
+            this.connection := DllCall(
+                "winhttp\WinHttpConnect",
+                "Ptr", this.session,
+                "WStr", "api.github.com",
+                "UShort", 443,
+                "UInt", 0,
+                "Ptr"
+            )
+            if !this.connection
+                throw OSError(A_LastError, "WinHttpConnect")
+            this.request := DllCall(
+                "winhttp\WinHttpOpenRequest",
+                "Ptr", this.connection,
+                "WStr", "GET",
+                "WStr", this.path,
+                "Ptr", 0,
+                "Ptr", 0,
+                "Ptr", 0,
+                "UInt", 0x00800000,
+                "Ptr"
+            )
+            if !this.request
+                throw OSError(A_LastError, "WinHttpOpenRequest")
+            if !DllCall(
+                "winhttp\WinHttpSetTimeouts",
+                "Ptr", this.request,
+                "Int", WinHttpTransport.resolveTimeoutMs,
+                "Int", WinHttpTransport.connectTimeoutMs,
+                "Int", WinHttpTransport.sendTimeoutMs,
+                "Int", WinHttpTransport.receiveTimeoutMs
+            )
+                throw OSError(A_LastError, "WinHttpSetTimeouts")
+
+            callback := WinHttpTextRequest.CallbackPointer()
+            previous := DllCall(
+                "winhttp\WinHttpSetStatusCallback",
+                "Ptr", this.request,
+                "Ptr", callback,
+                "UInt", WinHttpTextRequest.callbackFlags,
+                "Ptr", 0,
+                "Ptr"
+            )
+            if (previous = -1)
+                throw OSError(A_LastError, "WinHttpSetStatusCallback")
+
+            this.context := WinHttpTextRequest.NextContext()
+            WinHttpTextRequest.operationsByContext[this.context] := this
+            WinHttpTextRequest.operationsByHandle[this.request] := this
+            this.timeoutTimer := ObjBindMethod(this, "CheckTimeout")
+            SetTimer(this.timeoutTimer, 250)
+            this.state := "sending"
+            sent := DllCall(
+                "winhttp\WinHttpSendRequest",
+                "Ptr", this.request,
+                "WStr", "User-Agent: PACS-Assistant-Update-Checker`r`n"
+                    . "Accept: application/vnd.github+json`r`n",
+                "UInt", -1,
+                "Ptr", 0,
+                "UInt", 0,
+                "UInt", 0,
+                "UPtr", this.context
+            )
+            sendError := A_LastError
+            if (!sent && sendError != 997)
+                throw OSError(sendError, "WinHttpSendRequest")
             return this
         } catch as err {
-            this.Fail(err)
+            callback := this.onError
+            this.CleanupStartFailure()
+            try callback.Call(err)
+            catch as callbackError
+                OutputDebug("Asynchronous update error handling failed: " callbackError.Message)
             return 0
         }
     }
 
-    Poll() {
-        if this.done
+    static CallbackPointer() {
+        if !this.statusCallback
+            this.statusCallback := CallbackCreate(
+                ObjBindMethod(this, "DispatchStatus"),,
+                5
+            )
+        return this.statusCallback
+    }
+
+    static NextContext() {
+        this.contextSequence++
+        if !this.contextSequence
+            this.contextSequence := 1
+        return this.contextSequence
+    }
+
+    static DispatchStatus(handle, context, status, information, length) {
+        Critical
+        operation := 0
+        if (context && this.operationsByContext.Has(context))
+            operation := this.operationsByContext[context]
+        else if (handle && this.operationsByHandle.Has(handle))
+            operation := this.operationsByHandle[handle]
+        if !operation
+            return
+
+        try {
+            operation.HandleNativeStatus(handle, status, information, length)
+        } catch as err {
+            operation.Schedule("Fail", err)
+        }
+    }
+
+    HandleNativeStatus(handle, status, information, length) {
+        if (status = 0x00000800) {
+            if (this.state = "closing" && handle = this.request)
+                this.Schedule("Finalize")
+            return
+        }
+        if (this.state = "closing" || this.state = "closed")
+            return
+
+        if (status = 0x00400000) {
+            this.Schedule("ReceiveResponse")
+        } else if (status = 0x00020000) {
+            this.Schedule("HandleHeaders")
+        } else if (status = 0x00080000) {
+            if !length
+                this.Schedule("CompleteRead")
+            else {
+                this.ConsumeReadChunk(information, length)
+                this.Schedule("ReadNext")
+            }
+        } else if (status = 0x00200000) {
+            errorCode := information ? NumGet(information, A_PtrSize, "UInt") : 0
+            this.Schedule(
+                "Fail",
+                errorCode
+                    ? OSError(errorCode, "WinHTTP asynchronous request")
+                    : Error("WinHTTP asynchronous request failed")
+            )
+        }
+    }
+
+    Schedule(methodName, params*) {
+        SetTimer(ObjBindMethod(this, methodName, params*), -1)
+    }
+
+    ReceiveResponse() {
+        if (this.state != "sending")
+            return
+        this.state := "receiving"
+        received := DllCall(
+            "winhttp\WinHttpReceiveResponse",
+            "Ptr", this.request,
+            "Ptr", 0
+        )
+        receiveError := A_LastError
+        if (!received && receiveError != 997)
+            this.Fail(OSError(receiveError, "WinHttpReceiveResponse"))
+    }
+
+    HandleHeaders() {
+        if (this.state != "receiving")
             return
         try {
-            if !this.request.WaitForResponse(0) {
-                maxDuration := WinHttpTransport.resolveTimeoutMs
-                    + WinHttpTransport.connectTimeoutMs
-                    + WinHttpTransport.sendTimeoutMs
-                    + WinHttpTransport.receiveTimeoutMs
-                    + 2000
-                if (this.NowMilliseconds() - this.startedAt > maxDuration)
-                    this.Fail(Error("WinHTTP asynchronous request timed out"))
+            status := 0
+            statusSize := 4
+            if !DllCall(
+                "winhttp\WinHttpQueryHeaders",
+                "Ptr", this.request,
+                "UInt", 19 | 0x20000000,
+                "Ptr", 0,
+                "UInt*", &status,
+                "UInt*", &statusSize,
+                "Ptr", 0
+            )
+                throw OSError(A_LastError, "WinHttpQueryHeaders(status)")
+
+            contentLength := 0
+            contentLengthSize := 4
+            hasContentLength := DllCall(
+                "winhttp\WinHttpQueryHeaders",
+                "Ptr", this.request,
+                "UInt", 5 | 0x20000000,
+                "Ptr", 0,
+                "UInt*", &contentLength,
+                "UInt*", &contentLengthSize,
+                "Ptr", 0
+            )
+            headerError := A_LastError
+            if (!hasContentLength && headerError != 12150)
+                throw OSError(headerError, "WinHttpQueryHeaders(Content-Length)")
+            if (hasContentLength && contentLength > this.maximumSize)
+                throw Error("Update metadata response exceeded its byte limit")
+
+            if (status != 200) {
+                this.Succeed({status: status, body: ""})
                 return
             }
-            response := {
-                status: this.request.Status,
-                body: WinHttpTransport.ReadBoundedTextResponse(
-                    this.request,
-                    this.maximumSize
-                )
-            }
+
+            this.responseStatus := status
+            this.state := "reading"
+            this.ReadNext()
         } catch as err {
             this.Fail(err)
-            return
         }
+    }
 
-        callback := this.onComplete
-        this.Disconnect()
-        try callback.Call(response)
-        catch as err {
-            OutputDebug("Asynchronous update completion failed: " err.Message)
+    ReadNext() {
+        if (this.state != "reading")
+            return
+        readStarted := DllCall(
+            "winhttp\WinHttpReadData",
+            "Ptr", this.request,
+            "Ptr", this.readBuffer.Ptr,
+            "UInt", this.readBuffer.Size,
+            "Ptr", 0
+        )
+        readError := A_LastError
+        if (!readStarted && readError != 997)
+            this.Fail(OSError(readError, "WinHttpReadData"))
+    }
+
+    ConsumeReadChunk(source, length) {
+        if (!(length is Integer) || length < 0)
+            throw ValueError("WinHTTP returned an invalid metadata byte count")
+        if (this.totalBytes + length > this.maximumSize)
+            throw Error("Update metadata response exceeded its byte limit")
+        if length {
+            DllCall(
+                "ntdll\RtlMoveMemory",
+                "Ptr", this.bodyBuffer.Ptr + this.totalBytes,
+                "Ptr", source,
+                "UPtr", length
+            )
+            this.totalBytes += length
         }
+        return this.totalBytes
+    }
+
+    CompleteRead() {
+        if (this.state != "reading")
+            return
+        try {
+            body := this.totalBytes
+                ? StrGet(this.bodyBuffer.Ptr, this.totalBytes, "UTF-8")
+                : ""
+            this.Succeed({status: this.responseStatus, body: body})
+        } catch as err {
+            this.Fail(err)
+        }
+    }
+
+    Succeed(response) {
+        this.BeginClose("complete", response)
     }
 
     Fail(error) {
-        if this.done
+        this.BeginClose("error", error)
+    }
+
+    BeginClose(kind, value) {
+        if (this.state = "closing" || this.state = "closed")
             return
-        callback := this.onError
-        this.Disconnect()
-        try callback.Call(error)
-        catch as err {
-            OutputDebug("Asynchronous update error handling failed: " err.Message)
+        if (this.state = "created") {
+            this.terminalKind := kind
+            this.terminalValue := value
+            this.Finalize()
+            return
+        }
+
+        this.state := "closing"
+        this.terminalKind := kind
+        this.terminalValue := value
+        this.StopTimeoutTimer()
+
+        request := this.request
+        closePending := false
+        if request
+            closePending := DllCall("winhttp\WinHttpCloseHandle", "Ptr", request)
+        if this.connection {
+            DllCall("winhttp\WinHttpCloseHandle", "Ptr", this.connection)
+            this.connection := 0
+        }
+        if this.session {
+            DllCall("winhttp\WinHttpCloseHandle", "Ptr", this.session)
+            this.session := 0
+        }
+        if !closePending
+            this.Schedule("Finalize")
+    }
+
+    Finalize() {
+        if (this.state = "closed")
+            return
+
+        this.StopTimeoutTimer()
+        this.Unregister()
+        this.request := 0
+        this.connection := 0
+        this.session := 0
+        this.state := "closed"
+
+        kind := this.terminalKind
+        value := this.terminalValue
+        completeCallback := this.onComplete
+        errorCallback := this.onError
+        this.onComplete := 0
+        this.onError := 0
+        this.bodyBuffer := 0
+        this.readBuffer := 0
+        this.terminalValue := 0
+
+        if (kind = "complete") {
+            try completeCallback.Call(value)
+            catch as err
+                OutputDebug("Asynchronous update completion failed: " err.Message)
+        } else if (kind = "error") {
+            try errorCallback.Call(value)
+            catch as err
+                OutputDebug("Asynchronous update error handling failed: " err.Message)
         }
     }
 
+    Cancel() {
+        this.BeginClose("cancel", 0)
+    }
+
     Disconnect() {
-        if this.done
+        this.Cancel()
+    }
+
+    CheckTimeout() {
+        if (this.state = "closing" || this.state = "closed")
             return
-        this.done := true
-        if this.pollTimer {
-            SetTimer(this.pollTimer, 0)
-            this.pollTimer := 0
+        maxDuration := WinHttpTransport.resolveTimeoutMs
+            + WinHttpTransport.connectTimeoutMs
+            + WinHttpTransport.sendTimeoutMs
+            + WinHttpTransport.receiveTimeoutMs
+            + 2000
+        if (this.NowMilliseconds() - this.startedAt > maxDuration)
+            this.Fail(Error("WinHTTP asynchronous request timed out"))
+    }
+
+    StopTimeoutTimer() {
+        if this.timeoutTimer {
+            SetTimer(this.timeoutTimer, 0)
+            this.timeoutTimer := 0
         }
-        this.request := 0
+    }
+
+    CleanupStartFailure() {
+        this.StopTimeoutTimer()
+        if this.request {
+            DllCall(
+                "winhttp\WinHttpSetStatusCallback",
+                "Ptr", this.request,
+                "Ptr", 0,
+                "UInt", WinHttpTextRequest.callbackFlags,
+                "Ptr", 0,
+                "Ptr"
+            )
+        }
+        this.Unregister()
+        for propertyName in ["request", "connection", "session"] {
+            handle := this.%propertyName%
+            if handle
+                DllCall("winhttp\WinHttpCloseHandle", "Ptr", handle)
+            this.%propertyName% := 0
+        }
+        this.state := "closed"
         this.onComplete := 0
         this.onError := 0
+        this.bodyBuffer := 0
+        this.readBuffer := 0
+    }
+
+    Unregister() {
+        if (this.context && WinHttpTextRequest.operationsByContext.Has(this.context))
+            WinHttpTextRequest.operationsByContext.Delete(this.context)
+        if (this.request && WinHttpTextRequest.operationsByHandle.Has(this.request))
+            WinHttpTextRequest.operationsByHandle.Delete(this.request)
+        this.context := 0
     }
 
     NowMilliseconds() {
         return DllCall("GetTickCount64", "UInt64")
-    }
-
-    Cancel() {
-        if this.done
-            return
-        request := this.request
-        this.Disconnect()
-        try request.Abort()
     }
 }
 

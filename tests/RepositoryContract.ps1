@@ -144,6 +144,8 @@ Assert-NotMatches $profileManager '(?m)^#Include\s+PACSCommands\.ahk\s*$' 'Profi
 Assert-NotMatches $powerScribe '\bProfileManager\b' 'PowerScribe automation must not reach profile state through an implicit global.'
 Assert-Matches $wetRead '(?m)^#Include\s+ProfileManager\.ahk\s*$' 'The wet-read composition layer must declare its profile dependency.'
 Assert-NotMatches $pacsMonitor '\btest(?:Mode|StudyRows|RefreshCalls|LastNewStudies)\b' 'Production PACS monitoring must use injected boundaries rather than compiled test-mode state.'
+Assert-NotMatches $updateChecker '\.\s*Response(?:Text|Body)\b' 'Update responses must be streamed through explicit byte caps rather than materialized by a COM response property.'
+Assert-Matches $updateChecker 'WinHttpReadData' 'Update response bodies must use a bounded streaming WinHTTP read path.'
 Assert-Matches $main '(?m)^#SingleInstance\s+Ignore\s*$' 'A second launch must never force-terminate a dirty or in-flight clinical instance.'
 Assert-NotMatches $main '(?m)^#SingleInstance\s+Force\s*$' 'Force replacement bypasses shutdown and clinical transaction gates.'
 Assert-Matches $main 'OnExit\(\(exitReason, exitCode\) => kbGUI\.HandleProcessExit\(exitReason, exitCode\)\)' 'Tray and external exits must use the authoritative shutdown coordinator.'
@@ -151,7 +153,7 @@ Assert-Matches $main 'UpdateChecker\.shutdownCoordinator\s*:=\s*kbGUI' 'Self-upd
 foreach ($subscriber in @('UpdateChecker', 'PACSMonitor', 'MicrophoneManager')) {
     Assert-Matches $main ("Settings\.AddChangeListener\(ObjBindMethod\(" + $subscriber) ("main.ahk must explicitly subscribe " + $subscriber + " to settings changes.")
 }
-Assert-Matches $updateChecker 'CreateRequest\(url,\s*true\)' 'Automatic update metadata requests must use WinHTTP asynchronous mode.'
+Assert-Matches $updateChecker '(?s)WinHttpOpen.*0x10000000' 'Automatic update metadata requests must use native WinHTTP asynchronous mode.'
 Assert-Matches $main '(?s)kbGUI\s*:=\s*KeybindGUI\(\).*PACSMonitor\.automationAcquire\s*:=.*MicrophoneManager\.automationAcquire\s*:=.*PACSMonitor\.Start\(\).*MicrophoneManager\.Start\(\).*UpdateChecker\.Start\(\)' 'The GUI and shared automation gates must initialize before clinical timers, and clinical timers before automatic network checks.'
 
 Assert-Matches $readme 'git clone --recurse-submodules' 'README must document cloning with submodules.'
