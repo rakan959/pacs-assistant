@@ -49,6 +49,8 @@ $featureTemplate = Get-Content -Raw (Join-Path $repoRoot '.github/ISSUE_TEMPLATE
 $versionGeneratorPath = Join-Path $repoRoot 'scripts/GenerateVersion.ps1'
 $releaseValidatorPath = Join-Path $repoRoot 'scripts/ValidateExistingRelease.ps1'
 $releaseTagCommitValidatorPath = Join-Path $repoRoot 'scripts/AssertReleaseTagCommit.ps1'
+$releaseFinderPath = Join-Path $repoRoot 'scripts/FindReleaseByTag.ps1'
+$ownedDraftValidatorPath = Join-Path $repoRoot 'scripts/ValidateOwnedDraftRelease.ps1'
 $releaseValidator = if (Test-Path -LiteralPath $releaseValidatorPath -PathType Leaf) {
     Get-Content -Raw -LiteralPath $releaseValidatorPath
 } else {
@@ -108,8 +110,69 @@ Assert-Matches $workflow 'ActualTagCommitSha' 'Existing release validation must 
 if ([regex]::Matches($workflow, '& scripts/AssertReleaseTagCommit\.ps1').Count -lt 2) {
     $failures.Add('Release publication must verify the tag commit both before release handling and immediately before publishing a new draft.')
 }
-Assert-Matches $workflow '(?ms)Resolve-ReleaseTagCommit.*?AssertReleaseTagCommit\.ps1.*?if \(\$releaseExitCode' 'Release handling must reject a moved tag before either the existing- or new-release branch.'
+Assert-Matches $workflow '(?ms)Resolve-ReleaseTagCommit.*?AssertReleaseTagCommit\.ps1.*?\$release\s*=\s*Find-ReleaseByTag' 'Release handling must reject a moved tag before either the existing- or new-release branch.'
 Assert-Matches $workflow "(?ms)'release',\s*'create'.*?'--draft'.*?'release',\s*'upload'.*?Resolve-ReleaseTagCommit.*?AssertReleaseTagCommit\.ps1.*?'release',\s*'edit'.*?'--draft=false'" 'New releases must remain drafts through asset upload and a second exact tag-commit check.'
+Assert-Matches $workflow '(?s)\$uploadedDraft\s*=\s*Find-ReleaseByTag.*?ValidateExistingRelease\.ps1.*?-ExpectedDraft \$true.*?--draft=false' 'Uploaded draft bytes and metadata must be revalidated before publication.'
+Assert-Matches $workflow '(?s)--paginate.*?--slurp.*?releases\?per_page=100.*?FindReleaseByTag\.ps1' 'Release discovery must include authenticated draft releases across every API page.'
+Assert-Matches $workflow '(?ms)^concurrency:\s*\r?\n\s+group:\s*\$\{\{\s*github\.workflow\s*\}\}-\$\{\{\s*github\.ref\s*\}\}\s*\r?\n\s+cancel-in-progress:\s*false' 'Workflow runs for the same ref must be serialized so one rerun cannot delete another active draft.'
+Assert-Matches $workflow '(?s)if \(\$release -and \$release\.draft\).*?ValidateOwnedDraftRelease\.ps1.*?--method DELETE' 'A rerun must validate and remove only its own interrupted draft before recreating it.'
+Assert-Matches $workflow '(?s)catch\s*\{.*?\$createdDraftId.*?--method DELETE.*?throw' 'A failed publication attempt must best-effort remove the draft created by that run.'
+
+if (-not (Test-Path -LiteralPath $releaseFinderPath -PathType Leaf)) {
+    $failures.Add('Release discovery must be implemented by scripts/FindReleaseByTag.ps1.')
+} else {
+    $releasePagesJson = @'
+[[{"id":11,"tag_name":"v1.0.0","draft":false}],[{"id":22,"tag_name":"v2.0.0","draft":true}]]
+'@
+    $draft = & $releaseFinderPath -ReleaseJson $releasePagesJson -ReleaseTag 'v2.0.0'
+    if ($draft.id -ne 22 -or -not $draft.draft) {
+        $failures.Add('Release discovery did not recover an interrupted draft by exact tag.')
+    }
+    $missing = @(& $releaseFinderPath -ReleaseJson $releasePagesJson -ReleaseTag 'v9.0.0')
+    if ($missing.Count -ne 0) {
+        $failures.Add('Release discovery must return no object for an absent tag.')
+    }
+    try {
+        & $releaseFinderPath `
+            -ReleaseJson '[[{"id":1,"tag_name":"v2.0.0"},{"id":2,"tag_name":"v2.0.0"}]]' `
+            -ReleaseTag 'v2.0.0'
+        $failures.Add('Release discovery must reject duplicate releases for one exact tag.')
+    } catch {
+        if ($_.Exception.Message -notmatch 'multiple') {
+            $failures.Add('Duplicate release discovery failed for the wrong reason.')
+        }
+    }
+}
+
+if (-not (Test-Path -LiteralPath $ownedDraftValidatorPath -PathType Leaf)) {
+    $failures.Add('Interrupted drafts must be ownership-checked by scripts/ValidateOwnedDraftRelease.ps1.')
+} else {
+    $ownedDraft = [pscustomobject]@{
+        id = 22
+        draft = $true
+        prerelease = $false
+        tag_name = 'v2.0.0'
+        name = 'v2.0.0'
+        author = [pscustomobject]@{ login = 'github-actions[bot]' }
+    }
+    & $ownedDraftValidatorPath `
+        -Release $ownedDraft `
+        -ReleaseTag 'v2.0.0' `
+        -ExpectedPrerelease $false
+    $foreignDraft = $ownedDraft.PSObject.Copy()
+    $foreignDraft.author = [pscustomobject]@{ login = 'human-maintainer' }
+    try {
+        & $ownedDraftValidatorPath `
+            -Release $foreignDraft `
+            -ReleaseTag 'v2.0.0' `
+            -ExpectedPrerelease $false
+        $failures.Add('Draft reconciliation must reject a draft not created by GitHub Actions.')
+    } catch {
+        if ($_.Exception.Message -notmatch 'author') {
+            $failures.Add('Foreign draft validation failed for the wrong reason.')
+        }
+    }
+}
 Assert-Matches $readme '(?i)immutable releases' 'Release documentation must require GitHub release immutability.'
 Assert-Matches $readme '(?i)tag ruleset.*restrict.*updates.*deletions' 'Release documentation must require protected release tags because ref comparison and publication are not atomic.'
 Assert-NotMatches ($appControl + $keybindGui) '``n``n' 'User-facing diagnostics must use real AHK newline escapes, not render literal backtick-n text.'
@@ -242,8 +305,13 @@ if (-not (Test-Path -LiteralPath $releaseValidatorPath -PathType Leaf)) {
             }
             $expectedCommit = '0123456789abcdef0123456789abcdef01234567'
             $actualCommit = $expectedCommit
+            $expectedDraft = $false
             switch ($Case) {
                 'draft' { $release.draft = $true }
+                'valid-draft' {
+                    $release.draft = $true
+                    $expectedDraft = $true
+                }
                 'wrong-prerelease' { $release.prerelease = $true }
                 'wrong-tag' { $release.tag_name = 'v9.9.9' }
                 'wrong-name' { $release.name = 'Unexpected title' }
@@ -262,6 +330,7 @@ if (-not (Test-Path -LiteralPath $releaseValidatorPath -PathType Leaf)) {
                     -Release $release `
                     -ReleaseTag 'v2.3.4' `
                     -ExpectedPrerelease $false `
+                    -ExpectedDraft $expectedDraft `
                     -ExpectedCommitSha $expectedCommit `
                     -ActualTagCommitSha $actualCommit `
                     -Assets $assetPaths
@@ -276,6 +345,9 @@ if (-not (Test-Path -LiteralPath $releaseValidatorPath -PathType Leaf)) {
 
     if (-not (Invoke-ReleaseValidationFixture)) {
         $failures.Add('The matching release fixture must be accepted as an immutable no-op.')
+    }
+    if (-not (Invoke-ReleaseValidationFixture -Case 'valid-draft')) {
+        $failures.Add('The matching uploaded draft fixture must be accepted before publication.')
     }
     foreach ($invalidCase in @('draft', 'wrong-prerelease', 'wrong-tag', 'wrong-name', 'wrong-commit', 'extra-asset')) {
         if (Invoke-ReleaseValidationFixture -Case $invalidCase) {

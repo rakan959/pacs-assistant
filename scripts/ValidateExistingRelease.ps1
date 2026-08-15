@@ -9,6 +9,8 @@ param(
     [Parameter(Mandatory)]
     [bool] $ExpectedPrerelease,
 
+    [bool] $ExpectedDraft = $false,
+
     [Parameter(Mandatory)]
     [ValidatePattern('^[0-9a-fA-F]{40}$')]
     [string] $ExpectedCommitSha,
@@ -40,8 +42,9 @@ function Require-Property {
 foreach ($property in @('draft', 'prerelease', 'tag_name', 'name', 'assets')) {
     Require-Property -Object $Release -Name $property -Context 'Existing release'
 }
-if ($Release.draft -isnot [bool] -or $Release.draft) {
-    throw "Existing release '$ReleaseTag' must be published (draft=false)."
+if ($Release.draft -isnot [bool] -or $Release.draft -ne $ExpectedDraft) {
+    $expectedState = $ExpectedDraft ? 'an unpublished draft' : 'published (draft=false)'
+    throw "Existing release '$ReleaseTag' must be $expectedState."
 }
 if ($Release.prerelease -isnot [bool] -or $Release.prerelease -ne $ExpectedPrerelease) {
     throw "Existing release '$ReleaseTag' has the wrong prerelease classification."
@@ -100,4 +103,5 @@ foreach ($entry in $localByName.GetEnumerator()) {
     }
 }
 
-Write-Host "Existing release '$ReleaseTag' exactly matches the immutable publication contract."
+$state = $ExpectedDraft ? 'draft upload' : 'immutable publication'
+Write-Host "Existing release '$ReleaseTag' exactly matches the $state contract."

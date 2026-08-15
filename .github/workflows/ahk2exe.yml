@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   AUTOHOTKEY_VERSION: 2.0.26
   AUTOHOTKEY_SHA256: 43522aa3122a57784ac5db30abf85c2244475c36acd7796e2c993355f9e926ae
@@ -259,16 +263,24 @@ jobs:
             -ExpectedCommitSha $env:EXPECTED_COMMIT `
             -ActualTagCommitSha $actualTagCommit
 
-          $releaseEndpoint = "repos/$env:GITHUB_REPOSITORY/releases/tags/$encodedTag"
-          $releaseOutput = @(& gh api `
-            --method GET `
-            --header 'Accept: application/vnd.github+json' `
-            --header 'X-GitHub-Api-Version: 2022-11-28' `
-            $releaseEndpoint 2>&1)
-          $releaseExitCode = $LASTEXITCODE
+          function Find-ReleaseByTag {
+            $releaseOutput = @(& gh api `
+              --method GET `
+              --header 'Accept: application/vnd.github+json' `
+              --header 'X-GitHub-Api-Version: 2022-11-28' `
+              --paginate `
+              --slurp `
+              "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" 2>&1)
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not list releases for '$env:RELEASE_TAG': $($releaseOutput -join ' ')"
+            }
+            return & scripts/FindReleaseByTag.ps1 `
+              -ReleaseJson ($releaseOutput -join "`n") `
+              -ReleaseTag $env:RELEASE_TAG
+          }
 
-          if ($releaseExitCode -eq 0) {
-            $release = ($releaseOutput -join "`n") | ConvertFrom-Json
+          $release = Find-ReleaseByTag
+          if ($release -and -not $release.draft) {
             & scripts/ValidateExistingRelease.ps1 `
               -Release $release `
               -ReleaseTag $env:RELEASE_TAG `
@@ -278,58 +290,109 @@ jobs:
               -Assets $assets
 
             Write-Host "Release '$env:RELEASE_TAG' already matches the complete release contract; publication is a no-op."
-          } elseif (($releaseOutput -join "`n") -notmatch '(?i)HTTP 404|Not Found') {
-            throw "Could not determine whether release '$env:RELEASE_TAG' exists: $($releaseOutput -join ' ')"
           } else {
-            $createArguments = @(
-              'release',
-              'create',
-              $env:RELEASE_TAG,
-              '--repo',
-              $env:GITHUB_REPOSITORY,
-              '--title',
-              $env:RELEASE_TAG,
-              '--generate-notes',
-              '--verify-tag',
-              '--draft'
-            )
-            if ($expectedPrerelease) {
-              $createArguments += '--prerelease'
-            }
-            & gh @createArguments
-            if ($LASTEXITCODE -ne 0) {
-              throw "GitHub draft release creation failed (exit $LASTEXITCODE)"
+            if ($release -and $release.draft) {
+              & scripts/ValidateOwnedDraftRelease.ps1 `
+                -Release $release `
+                -ReleaseTag $env:RELEASE_TAG `
+                -ExpectedPrerelease $expectedPrerelease
+              $deleteOutput = @(& gh api `
+                --method DELETE `
+                --header 'Accept: application/vnd.github+json' `
+                --header 'X-GitHub-Api-Version: 2022-11-28' `
+                "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)" 2>&1)
+              if ($LASTEXITCODE -ne 0) {
+                throw "Interrupted draft cleanup failed: $($deleteOutput -join ' ')"
+              }
             }
 
-            $uploadArguments = @(
-              'release',
-              'upload',
-              $env:RELEASE_TAG
-            ) + $assets + @(
-              '--repo',
-              $env:GITHUB_REPOSITORY
-            )
-            & gh @uploadArguments
-            if ($LASTEXITCODE -ne 0) {
-              throw "GitHub release asset upload failed (exit $LASTEXITCODE)"
-            }
+            $createdDraftId = 0
+            $published = $false
+            try {
+              $createArguments = @(
+                'release',
+                'create',
+                $env:RELEASE_TAG,
+                '--repo',
+                $env:GITHUB_REPOSITORY,
+                '--title',
+                $env:RELEASE_TAG,
+                '--generate-notes',
+                '--verify-tag',
+                '--draft'
+              )
+              if ($expectedPrerelease) {
+                $createArguments += '--prerelease'
+              }
+              & gh @createArguments
+              if ($LASTEXITCODE -ne 0) {
+                throw "GitHub draft release creation failed (exit $LASTEXITCODE)"
+              }
 
-            $actualTagCommit = Resolve-ReleaseTagCommit $encodedTag
-            & scripts/AssertReleaseTagCommit.ps1 `
-              -ExpectedCommitSha $env:EXPECTED_COMMIT `
-              -ActualTagCommitSha $actualTagCommit
+              $createdDraft = Find-ReleaseByTag
+              if (-not $createdDraft) {
+                throw "The newly created draft could not be discovered."
+              }
+              & scripts/ValidateOwnedDraftRelease.ps1 `
+                -Release $createdDraft `
+                -ReleaseTag $env:RELEASE_TAG `
+                -ExpectedPrerelease $expectedPrerelease
+              $createdDraftId = [long] $createdDraft.id
 
-            $publishArguments = @(
-              'release',
-              'edit',
-              $env:RELEASE_TAG,
-              '--repo',
-              $env:GITHUB_REPOSITORY,
-              '--verify-tag',
-              '--draft=false'
-            )
-            & gh @publishArguments
-            if ($LASTEXITCODE -ne 0) {
-              throw "GitHub draft release publication failed (exit $LASTEXITCODE)"
+              $uploadArguments = @(
+                'release',
+                'upload',
+                $env:RELEASE_TAG
+              ) + $assets + @(
+                '--repo',
+                $env:GITHUB_REPOSITORY
+              )
+              & gh @uploadArguments
+              if ($LASTEXITCODE -ne 0) {
+                throw "GitHub release asset upload failed (exit $LASTEXITCODE)"
+              }
+
+              $actualTagCommit = Resolve-ReleaseTagCommit $encodedTag
+              & scripts/AssertReleaseTagCommit.ps1 `
+                -ExpectedCommitSha $env:EXPECTED_COMMIT `
+                -ActualTagCommitSha $actualTagCommit
+
+              $uploadedDraft = Find-ReleaseByTag
+              & scripts/ValidateExistingRelease.ps1 `
+                -Release $uploadedDraft `
+                -ReleaseTag $env:RELEASE_TAG `
+                -ExpectedPrerelease $expectedPrerelease `
+                -ExpectedDraft $true `
+                -ExpectedCommitSha $env:EXPECTED_COMMIT `
+                -ActualTagCommitSha $actualTagCommit `
+                -Assets $assets
+
+              $publishArguments = @(
+                'release',
+                'edit',
+                $env:RELEASE_TAG,
+                '--repo',
+                $env:GITHUB_REPOSITORY,
+                '--verify-tag',
+                '--draft=false'
+              )
+              & gh @publishArguments
+              if ($LASTEXITCODE -ne 0) {
+                throw "GitHub draft release publication failed (exit $LASTEXITCODE)"
+              }
+              $published = $true
+            } catch {
+              $publicationError = $_
+              if ($createdDraftId -gt 0 -and -not $published) {
+                $cleanupOutput = @(& gh api `
+                  --method DELETE `
+                  --header 'Accept: application/vnd.github+json' `
+                  --header 'X-GitHub-Api-Version: 2022-11-28' `
+                  "repos/$env:GITHUB_REPOSITORY/releases/$createdDraftId" 2>&1)
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Warning "Draft cleanup also failed: $($cleanupOutput -join ' ')"
+                }
+              }
+              throw $publicationError
             }
           }
