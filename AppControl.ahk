@@ -954,7 +954,11 @@ restartPACS(driver := 0) {
         return false
     }
     if !launched {
-        MsgBox "ERROR: PACS not found..."
+        MsgBox(
+            "The verified PACS shortcut was not found or could not be launched.",
+            "PACS Launch Failed",
+            "Icon!"
+        )
         return false
     }
     try launchVerified := driver.WaitForLaunch()

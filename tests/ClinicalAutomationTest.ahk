@@ -559,6 +559,12 @@ class ClinicalAutomationTest {
     }
 
     RestartLaunchBoundaryFailuresAreReported() {
+        falseDriver := FakePacsRestartDriver([], 0, true)
+        falseDriver.launchSucceeded := false
+        Assert.False(restartPACS(falseDriver))
+        Assert.Equal(1, falseDriver.launchCalls)
+        Assert.Equal(0, falseDriver.waitForLaunchCalls)
+
         launchDriver := FakePacsRestartDriver([], 0, true)
         launchDriver.launchError := "simulated launch failure"
         Assert.False(restartPACS(launchDriver))
@@ -996,6 +1002,7 @@ class FakePacsRestartDriver {
         this.prepareCalls := 0
         this.prepareResult := true
         this.quiescent := true
+        this.launchSucceeded := true
         this.launchVerified := true
         this.stopResult := {anyStopped: false, failedTargets: []}
         this.stopError := ""
@@ -1035,7 +1042,7 @@ class FakePacsRestartDriver {
         this.launchCalls++
         if (this.launchError != "")
             throw Error(this.launchError)
-        return true
+        return this.launchSucceeded
     }
 
     VerifyQuiescence() {
