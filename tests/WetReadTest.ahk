@@ -80,18 +80,24 @@ class WetReadTest {
 
     PostMutationUIAErrorRestoresThePreviousNote() {
         field := PostMutationFailingWetReadElement("existing note", "new wet read")
+        driver := NativeWetReadDriver(
+            "Sticky Notes",
+            FakeWetReadWindowDriver(true),
+            FakeWetReadFocusDriver(true)
+        )
 
         result := WetReadPasteEngine.Paste(
             field,
             "new wet read",
             "uia",
-            NativeWetReadDriver()
+            driver
         )
 
         Assert.False(result.success)
         Assert.False(result.unsupported)
         Assert.True(result.restored)
         Assert.Equal("existing note", field.storedValue)
+        Assert.True(field.writeCalls > 1)
     }
 
     FailedUIAVerificationRestoresThePreviousNote() {
@@ -211,8 +217,13 @@ class WetReadTest {
     }
 
     UnreadableNativeFieldFailsClosed() {
+        driver := NativeWetReadDriver(
+            "Sticky Notes",
+            FakeWetReadWindowDriver(true),
+            FakeWetReadFocusDriver(true)
+        )
         Assert.Throws(
-            () => NativeWetReadDriver().Read(UnsupportedWetReadElement()),
+            () => driver.Read(UnsupportedWetReadElement()),
             "cannot be read safely"
         )
     }
@@ -245,7 +256,11 @@ class WetReadTest {
     }
 
     NativeControlWithoutHandleIsUnsupported() {
-        driver := NativeWetReadDriver()
+        driver := NativeWetReadDriver(
+            "Sticky Notes",
+            FakeWetReadWindowDriver(true),
+            FakeWetReadFocusDriver(true)
+        )
 
         Assert.False(driver.WriteControl({NativeWindowHandle: 0}, "new wet read"))
     }
@@ -378,6 +393,7 @@ class PostMutationFailingWetReadElement {
     __New(value, failingValue) {
         this.storedValue := value
         this.failingValue := failingValue
+        this.writeCalls := 0
     }
 
     GetPropertyValue(propertyId) {
@@ -392,6 +408,7 @@ class PostMutationFailingWetReadElement {
     Value {
         get => this.storedValue
         set {
+            this.writeCalls++
             this.storedValue := value
             if (value = this.failingValue)
                 throw Error("provider failed after mutation")
