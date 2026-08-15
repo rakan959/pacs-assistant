@@ -1329,8 +1329,18 @@ class KeybindGUI {
             return false
         ; Custom deletion persists the whole profile. Resolve any pending keybind
         ; edits before opening a dialog that can reach that persistence boundary.
+        ; Discard rebuilds the owner and invalidates the ListView supplied by its
+        ; click callback, so require a fresh click from the rebuilt window.
+        hadDirtyProfile := this.IsProfileDirty()
         if !this.ResolveDirtyProfileBeforeLeaving(true)
             return false
+        if hadDirtyProfile {
+            this.NotifyUser(
+                "The pending profile changes were resolved. Click Add Function again in the refreshed window.",
+                "Profile Refreshed"
+            )
+            return false
+        }
         selectorGui := this.NewProfileDialog("PACS Assistant - Add Function")
         
         ; Get list of unbound functions, separated by type

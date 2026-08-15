@@ -32,6 +32,7 @@ class KeybindGUITest {
         "TestDirtyKeybindMutationInvalidatesModalityDialog",
         "TestPreexistingDirtyProfileBlocksModalityDialog",
         "TestPreexistingDirtyProfileBlocksCustomDeletion",
+        "TestDiscardBeforeAddFunctionRequiresFreshMainWindowControl",
         "TestStaleRenameDialogCannotRenameAnotherProfile",
         "TestDestroyedRenameDialogCannotMutateProfile",
         "TestRenameDialogCannotMutateSameNameReplacement",
@@ -1052,6 +1053,23 @@ class KeybindGUITest {
         Assert.True(memoryCustom)
         Assert.True(dirty)
         Assert.True(selector.destroyed)
+    }
+
+    TestDiscardBeforeAddFunctionRequiresFreshMainWindowControl() {
+        gui := {
+            base: DirtyAddFunctionTestGUI.Prototype,
+            dirty: true,
+            resolveCalls: 0,
+            dialogCalls: 0,
+            notices: 0
+        }
+
+        result := gui.ShowAddFunctionDialog({destroyed: true})
+
+        Assert.False(result)
+        Assert.Equal(1, gui.resolveCalls)
+        Assert.Equal(0, gui.dialogCalls)
+        Assert.Equal(1, gui.notices)
     }
 
     TestStaleRenameDialogCannotRenameAnotherProfile() {
@@ -2263,6 +2281,27 @@ class DirtyPersistentOperationGUI extends KeybindGUI {
     }
 
     NotifyUser(*) {
+    }
+}
+
+class DirtyAddFunctionTestGUI extends KeybindGUI {
+    IsProfileDirty(*) {
+        return this.dirty
+    }
+
+    ResolveDirtyProfileBeforeLeaving(*) {
+        this.resolveCalls++
+        this.dirty := false
+        return true
+    }
+
+    NewProfileDialog(*) {
+        this.dialogCalls++
+        throw Error("A stale ListView must not reach dialog creation")
+    }
+
+    NotifyUser(*) {
+        this.notices++
     }
 }
 
