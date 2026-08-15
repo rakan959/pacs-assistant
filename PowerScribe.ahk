@@ -111,10 +111,6 @@ class AttendingRouting {
     }
 }
 
-setAttending(x) {
-    return PowerScribe.SetAttending(x)
-}
-
 /**
  * Reads the text of the report currently open in PowerScribe.
  *
