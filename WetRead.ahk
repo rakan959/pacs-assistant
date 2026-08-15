@@ -394,11 +394,11 @@ class WetReadPasteEngine {
  * Assigns the current report to the profile's attending for its modality. A blank
  * assignment leaves PowerScribe's default unchanged.
  */
-checkAttending(reportText) {
+checkAttending(reportText, powerScribeSession := 0) {
     return AttendingRouting.Route(
         reportText,
         ObjBindMethod(ProfileManager, "GetModalityAttending"),
-        ObjBindMethod(PowerScribe, "SetAttending")
+        (attending) => PowerScribe.SetAttending(attending, powerScribeSession, reportText)
     )
 }
 
@@ -435,10 +435,11 @@ wetRead() {
 	; because a report that silently keeps the wrong attending goes to the wrong queue.
 	attendingRouted := false
 	attendingError := 0
-	haystack := readReportText()
+	reportCapture := PowerScribe.CaptureReport()
+	haystack := reportCapture.text
 	if (haystack != "") {
 		try {
-			checkAttending(haystack)
+			checkAttending(haystack, reportCapture.session)
 			attendingRouted := true
 		} catch as err
 			attendingError := err

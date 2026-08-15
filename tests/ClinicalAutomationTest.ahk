@@ -23,6 +23,10 @@ class ClinicalAutomationTest {
         "AttendingReportsUnconfirmedSubmission",
         "AttendingRejectsClosureWithoutCommittedReadback",
         "AttendingRequiresVerificationPickerDismissal",
+        "AttendingFinalReadbackMustStillMatchBeforeDismissal",
+        "AttendingTransactionUsesCapturedExactWindow",
+        "CapturedReportSessionRoutesToSameWindow",
+        "AttendingRejectsSameWindowReportChange",
         "AttendingStopsBeforeTextWhenFocusMoves",
         "AttendingRoutingUsesInjectedDependencies",
         "BlankAttendingSkipsPowerScribeWrite",
@@ -53,9 +57,13 @@ class ClinicalAutomationTest {
         this.originalAttendingDriver := HasProp(PowerScribe, "attendingControlDriver")
             ? PowerScribe.attendingControlDriver
             : 0
+        this.originalPowerScribeSessionDriver := HasProp(PowerScribe, "sessionDriver")
+            ? PowerScribe.sessionDriver
+            : 0
         this.originalProfiles := ProfileManager.profiles
         this.originalCurrentProfile := ProfileManager.currentProfile
         PowerScribe.attendingControlDriver := FakeAttendingControlDriver()
+        PowerScribe.sessionDriver := FakePowerScribeSessionDriver()
         ProfileManager.profiles := Map()
         ProfileManager.currentProfile := ""
     }
@@ -193,7 +201,7 @@ class ClinicalAutomationTest {
         Assert.True(PowerScribe.SetAttending(attending))
         Assert.Equal(13, driver.calls.Length)
         Assert.Equal("activate", driver.calls[1].kind)
-        Assert.Equal(PowerScribe.windowTitle, driver.calls[1].value)
+        Assert.Equal("ahk_id 100", driver.calls[1].value)
         Assert.Equal("active", driver.calls[2].kind)
         Assert.Equal("keys", driver.calls[3].kind)
         Assert.Equal("{Alt down}ta{Alt up}", driver.calls[3].value)
@@ -270,6 +278,72 @@ class ClinicalAutomationTest {
 
         Assert.False(PowerScribe.SetAttending("Smith"))
         Assert.Equal(2, attendingDriver.confirmationChecks)
+    }
+
+    AttendingFinalReadbackMustStillMatchBeforeDismissal() {
+        driver := FakeWindowDriver()
+        AppControl.windowDriver := driver
+        attendingDriver := FakeAttendingControlDriver({}, true, [true, false])
+        PowerScribe.attendingControlDriver := attendingDriver
+
+        Assert.False(PowerScribe.SetAttending("Smith"))
+        Assert.False(this.DriverSentKeys(driver, "{Escape}"))
+    }
+
+    AttendingTransactionUsesCapturedExactWindow() {
+        session := {hwnd: 701, target: "ahk_id 701", processId: 42}
+        sessionDriver := FakePowerScribeSessionDriver(session)
+        PowerScribe.sessionDriver := sessionDriver
+        driver := FakeWindowDriver()
+        AppControl.windowDriver := driver
+
+        Assert.True(PowerScribe.SetAttending("Smith", session))
+
+        Assert.Equal(0, sessionDriver.captureCalls)
+        for call in driver.calls {
+            if (call.kind = "activate" || call.kind = "active")
+                Assert.Equal(session.target, call.value)
+        }
+    }
+
+    CapturedReportSessionRoutesToSameWindow() {
+        profile := ProfileManager.NewProfile()
+        profile.modalityAttendings["Chest"] := "Smith"
+        ProfileManager.profiles["Test"] := profile
+        ProfileManager.currentProfile := "Test"
+        session := {hwnd: 702, target: "ahk_id 702", processId: 42}
+        sessionDriver := FakePowerScribeSessionDriver(session)
+        PowerScribe.sessionDriver := sessionDriver
+        driver := FakeWindowDriver()
+        AppControl.windowDriver := driver
+
+        Assert.Equal("Chest", checkAttending("EXAMINATION: CT CHEST", session))
+
+        Assert.Equal(0, sessionDriver.captureCalls)
+        for call in driver.calls {
+            if (call.kind = "activate" || call.kind = "active")
+                Assert.Equal(session.target, call.value)
+        }
+    }
+
+    AttendingRejectsSameWindowReportChange() {
+        originalReport := "EXAMINATION: CT CHEST`nFINDINGS: Original"
+        session := {
+            hwnd: 703,
+            target: "ahk_id 703",
+            processId: 42,
+            reportText: originalReport
+        }
+        sessionDriver := FakePowerScribeSessionDriver(
+            session,
+            "EXAMINATION: MRI BRAIN`nFINDINGS: Different study"
+        )
+        PowerScribe.sessionDriver := sessionDriver
+        driver := FakeWindowDriver()
+        AppControl.windowDriver := driver
+
+        Assert.False(PowerScribe.SetAttending("Smith", session, originalReport))
+        Assert.False(this.DriverSentKeys(driver, "{Alt down}ta{Alt up}"))
     }
 
     DriverSentKeys(driver, expected) {
@@ -572,6 +646,7 @@ class ClinicalAutomationTest {
         if this.originalLifecycleDriver
             AppControl.lifecycleDriver := this.originalLifecycleDriver
         PowerScribe.attendingControlDriver := this.originalAttendingDriver
+        PowerScribe.sessionDriver := this.originalPowerScribeSessionDriver
         ProfileManager.profiles := this.originalProfiles
         ProfileManager.currentProfile := this.originalCurrentProfile
     }
@@ -614,7 +689,7 @@ class FakeAttendingControlDriver {
     ) {
         this.control := control
         this.valueMatches := valueMatches
-        this.confirmationAllowed := canConfirm
+        this.confirmationAllowed := canConfirm is Array ? canConfirm.Clone() : canConfirm
         this.pickerClosures := [confirmationCompleted, verificationDismissed]
         this.confirmationChecks := 0
         this.committedValueMatches := committedValueMatches
@@ -632,6 +707,10 @@ class FakeAttendingControlDriver {
     }
 
     CanConfirm(*) {
+        if this.confirmationAllowed is Array
+            return this.confirmationAllowed.Length
+                ? this.confirmationAllowed.RemoveAt(1)
+                : false
         return this.confirmationAllowed
     }
 
@@ -647,6 +726,65 @@ class FakeAttendingControlDriver {
 
     ControlHasExpectedFocus(*) {
         return true
+    }
+}
+
+class FakePowerScribeSessionDriver {
+    __New(session := 0, reportText := "EXAMINATION: CT CHEST") {
+        this.session := session ? session : {hwnd: 100, target: "ahk_id 100", processId: 42}
+        if !HasProp(this.session, "reportText")
+            this.session.reportText := reportText
+        this.reportText := reportText
+        this.captureCalls := 0
+    }
+
+    Capture(*) {
+        this.captureCalls++
+        return this.session
+    }
+
+    IsLive(session) {
+        return session && session.hwnd = this.session.hwnd
+    }
+
+    Root(session) {
+        return this.IsLive(session)
+            ? FakePowerScribeReportRoot(session.hwnd, session.processId, this.reportText)
+            : 0
+    }
+}
+
+class FakePowerScribeReportRoot {
+    __New(hwnd, processId, reportText) {
+        this.WinId := hwnd
+        this.ProcessId := processId
+        this.report := FakePowerScribeReportElement(hwnd, processId, reportText)
+    }
+
+    FindElements(condition) {
+        return condition.Type = "Document" ? [this.report] : []
+    }
+
+    ElementFromPath(*) {
+        return this.report
+    }
+}
+
+class FakePowerScribeReportElement {
+    __New(hwnd, processId, value) {
+        this.WinId := hwnd
+        this.ProcessId := processId
+        this.Type := UIA.Type.Document
+        this.value := value
+    }
+
+    GetPropertyValue(propertyId) {
+        switch propertyId {
+            case UIA.Property.ValueValue: return this.value
+            case UIA.Property.IsValuePatternAvailable: return true
+            case UIA.Property.IsLegacyIAccessiblePatternAvailable: return false
+        }
+        return ""
     }
 }
 

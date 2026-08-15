@@ -3,6 +3,65 @@
 #Include AppControl.ahk
 #Include UIAValue.ahk
 
+class NativePowerScribeSessionDriver {
+    Capture(selector) {
+        if !AppControl.ActivateWindow(selector)
+            return 0
+        try hwnd := WinActive(selector)
+        catch
+            return 0
+        return this.SessionFromHandle(hwnd)
+    }
+
+    SessionFromHandle(hwnd) {
+        if (hwnd <= 0)
+            return 0
+        target := "ahk_id " hwnd
+        try {
+            if !WinExist(target)
+                return 0
+            title := WinGetTitle(target)
+            executable := WinGetProcessName(target)
+            processId := WinGetPID(target)
+        } catch {
+            return 0
+        }
+        if (!(title == AppControl.powerScribeReportingTitle)
+            || StrCompare(executable, AppControl.powerScribeExecutable, false) != 0
+            || processId <= 0)
+            return 0
+        return {hwnd: hwnd, target: target, processId: processId}
+    }
+
+    IsLive(session) {
+        if (!IsObject(session)
+            || !HasProp(session, "hwnd")
+            || !HasProp(session, "target")
+            || !HasProp(session, "processId"))
+            return false
+        current := this.SessionFromHandle(session.hwnd)
+        return current
+            && current.hwnd = session.hwnd
+            && current.processId = session.processId
+            && current.target == session.target
+    }
+
+    Root(session) {
+        if !this.IsLive(session)
+            return 0
+        try root := UIA.ElementFromHandle(session.target)
+        catch
+            return 0
+        try {
+            return root.WinId = session.hwnd && root.ProcessId = session.processId
+                ? root
+                : 0
+        } catch {
+            return 0
+        }
+    }
+}
+
 ; Attending-picker target validation. This keeps focus-sensitive clinical input
 ; behind a semantic UIA identity check and an observable write postcondition.
 class NativeAttendingControlDriver {
@@ -113,7 +172,10 @@ class NativeAttendingControlDriver {
         try {
             root := UIA.ElementFromHandle(windowTitle)
             focused := UIA.GetFocusedElement()
-            return UIA.CompareElementsEx(control, focused)
+            expected := this.UniqueExpectedControl(root)
+            return expected
+                && UIA.CompareElementsEx(expected, control)
+                && UIA.CompareElementsEx(control, focused)
                 && NativeAttendingControlDriver.IsExpectedControl(root, focused)
         } catch {
             return false
@@ -143,10 +205,10 @@ class NativeAttendingControlDriver {
             return false
     }
 
-    WaitForStableExpectedValue(control, expected) {
+    WaitForStableExpectedValue(windowTitle, control, expected) {
         stableReads := 0
         loop NativeAttendingControlDriver.confirmationAttempts {
-            if this.HasExpectedValue(control, expected) {
+            if this.CanConfirm(windowTitle, control, expected) {
                 stableReads++
                 if (stableReads >= 2)
                     return true
@@ -167,6 +229,7 @@ class NativeAttendingControlDriver {
 class PowerScribe {
     static windowTitle := AppControl.PacsGracefulCloseTarget()
     static attendingControlDriver := NativeAttendingControlDriver()
+    static sessionDriver := NativePowerScribeSessionDriver()
 
     ; Positional path to the report text. Brittle - kept only as a last resort behind
     ; a property-based lookup.
@@ -222,65 +285,147 @@ class PowerScribe {
         return AppControl.SendKeysToWindow(this.windowTitle, keys)
     }
 
-    static SetAttending(attending) {
-        if !AppControl.ActivateWindow(this.windowTitle)
+    static CaptureReport() {
+        session := this.sessionDriver.Capture(this.windowTitle)
+        if !session
+            return {text: "", session: 0}
+        text := this.ReadReportText(session)
+        if (text != "")
+            session.reportText := text
+        return {text: text, session: session}
+    }
+
+    static ReadReportText(session) {
+        root := this.sessionDriver.Root(session)
+        if !root
+            return ""
+
+        ; The report editor presents as a Document, but has been seen as a plain Edit.
+        candidates := []
+        for condition in [{Type: "Document"}, {Type: "Edit"}] {
+            elements := ""
+            try {
+                elements := root.FindElements(condition)
+            } catch {
+                continue
+            }
+
+            for el in elements {
+                if !this.IsExpectedReportControl(root, el)
+                    continue
+                text := ""
+                try text := UIAValue.Read(el)
+                if (text = "")
+                    continue
+                candidates.Push(text)
+            }
+        }
+
+        ; A positional result is another candidate, never an override. It must resolve
+        ; to the same exact PowerScribe window and agree with the unique typed report.
+        fallbackText := ""
+        try {
+            fallbackElement := root.ElementFromPath(this.reportPath)
+            if this.IsExpectedReportControl(root, fallbackElement)
+                fallbackText := UIAValue.Read(fallbackElement)
+        }
+
+        if !this.sessionDriver.IsLive(session)
+            return ""
+        return this.SelectReportText(candidates, fallbackText)
+    }
+
+    static ReportMatches(session, expectedReportText) {
+        if (expectedReportText = "")
+            return false
+        current := this.ReadReportText(session)
+        return current != "" && current == expectedReportText
+    }
+
+    static SetAttending(attending, session := 0, expectedReportText := "") {
+        if !session {
+            capture := this.CaptureReport()
+            session := capture.session
+            if (expectedReportText = "")
+                expectedReportText := capture.text
+        } else if (expectedReportText = "" && HasProp(session, "reportText")) {
+            expectedReportText := session.reportText
+        }
+        if !session || !this.sessionDriver.IsLive(session)
+            return false
+        if !this.ReportMatches(session, expectedReportText)
+            return false
+        target := session.target
+        if !AppControl.ActivateWindow(target)
+            return false
+        if !this.sessionDriver.IsLive(session)
             return false
 
         driver := AppControl.windowDriver
         try {
-            if !AppControl.SendKeysToActiveWindow(this.windowTitle, "{Alt down}ta{Alt up}")
+            if !AppControl.SendKeysToActiveWindow(target, "{Alt down}ta{Alt up}")
                 return false
             driver.Pause(100)
+            if !this.ReportMatches(session, expectedReportText)
+                return false
 
             ; The shortcut is only a locator action. Prove the focused element is
             ; PowerScribe's writable attending field before placing clinical data.
-            control := this.attendingControlDriver.FindExpectedControl(this.windowTitle)
+            control := this.attendingControlDriver.FindExpectedControl(target)
             if !control
                 return false
-            if !driver.IsActive(this.windowTitle)
+            if !driver.IsActive(target)
                 return false
-            if !this.attendingControlDriver.WriteAndVerify(this.windowTitle, control, attending)
+            if !this.attendingControlDriver.WriteAndVerify(target, control, attending)
                 return false
 
             driver.Pause(100)
-            if !this.attendingControlDriver.CanConfirm(this.windowTitle, control, attending)
+            if !this.ReportMatches(session, expectedReportText)
+                return false
+            if !this.attendingControlDriver.CanConfirm(target, control, attending)
                 return false
             if !AppControl.SendKeysToActiveWindow(
-                this.windowTitle,
+                target,
                 "{tab}{space}{tab}{Enter}"
             )
                 return false
             ; Closing the original picker proves only that the UI changed. Reopen the
             ; same semantic picker and read the committed value back before reporting
             ; success; a cancelled or rerendered picker therefore fails closed.
-            if !this.attendingControlDriver.WaitForPickerAbsent(this.windowTitle)
+            if !this.attendingControlDriver.WaitForPickerAbsent(target)
+                return false
+            if !this.ReportMatches(session, expectedReportText)
                 return false
             if !AppControl.SendKeysToActiveWindow(
-                this.windowTitle,
+                target,
                 "{Alt down}ta{Alt up}"
             )
                 return false
             driver.Pause(100)
 
-            verificationControl := this.attendingControlDriver.FindExpectedControl(this.windowTitle)
+            verificationControl := this.attendingControlDriver.FindExpectedControl(target)
             if !verificationControl
                 return false
             committed := this.attendingControlDriver.WaitForStableExpectedValue(
+                target,
                 verificationControl,
                 attending
             )
+            if !this.ReportMatches(session, expectedReportText)
+                return false
 
             ; Escape is safe only while the unique verified attending field retains
             ; focus in the exact reporting window. Always dismiss a safely identified
             ; verification picker, even when its readback exposed a failed commit.
-            if !this.attendingControlDriver.ControlHasExpectedFocus(
-                this.windowTitle,
-                verificationControl
+            if !this.attendingControlDriver.CanConfirm(
+                target,
+                verificationControl,
+                attending
             )
                 return false
-            if !AppControl.SendKeysToActiveWindow(this.windowTitle, "{Escape}")
+            if !AppControl.SendKeysToActiveWindow(target, "{Escape}")
                 return false
-            if !this.attendingControlDriver.WaitForPickerAbsent(this.windowTitle)
+            if !this.attendingControlDriver.WaitForPickerAbsent(target)
                 return false
             return committed
         } catch {
@@ -359,41 +504,5 @@ class AttendingRouting {
  * @returns the report text, or "" if it could not be read
  */
 readReportText() {
-    try {
-        root := UIA.ElementFromHandle(PowerScribe.windowTitle)
-    } catch {
-        return ""
-    }
-
-    ; The report editor presents as a Document, but has been seen as a plain Edit.
-    candidates := []
-    for condition in [{Type: "Document"}, {Type: "Edit"}] {
-        elements := ""
-        try {
-            elements := root.FindElements(condition)
-        } catch {
-            continue
-        }
-
-        for el in elements {
-            if !PowerScribe.IsExpectedReportControl(root, el)
-                continue
-            text := ""
-            try text := UIAValue.Read(el)
-            if (text = "")
-                continue
-            candidates.Push(text)
-        }
-    }
-
-    ; A positional result is another candidate, never an override. It must resolve
-    ; to the same exact PowerScribe window and agree with the unique typed report.
-    fallbackText := ""
-    try {
-        fallbackElement := root.ElementFromPath(PowerScribe.reportPath)
-        if PowerScribe.IsExpectedReportControl(root, fallbackElement)
-            fallbackText := UIAValue.Read(fallbackElement)
-    }
-
-    return PowerScribe.SelectReportText(candidates, fallbackText)
+    return PowerScribe.CaptureReport().text
 }
