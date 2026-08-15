@@ -12,12 +12,18 @@ class NativeWetReadFocusDriver {
         try field.Click("left")
     }
 
+    IsExpectedTarget(targetTitle, field) {
+        try root := UIA.ElementFromHandle(targetTitle)
+        catch
+            return false
+        return NativeWetReadDriver.IsExpectedNoteField(root, field)
+    }
+
     IsExpectedFocus(targetTitle, field) {
         try {
-            root := UIA.ElementFromHandle(targetTitle)
             focused := UIA.GetFocusedElement()
             return UIA.CompareElementsEx(field, focused)
-                && NativeWetReadDriver.IsExpectedNoteField(root, focused)
+                && this.IsExpectedTarget(targetTitle, focused)
         } catch {
             return false
         }
@@ -68,6 +74,8 @@ class NativeWetReadDriver {
     }
 
     Read(field) {
+        if !this.focusDriver.IsExpectedTarget(this.targetTitle, field)
+            throw Error("Sticky Notes value cannot be read safely")
         result := UIAValue.TryRead(field)
         if !result.supported
             throw Error("Sticky Notes value cannot be read safely")
@@ -123,10 +131,14 @@ class NativeWetReadDriver {
     }
 
     WriteUIA(field, value) {
+        if !this.focusDriver.IsExpectedTarget(this.targetTitle, field)
+            return false
         return UIAValue.Write(field, value)
     }
 
     WriteControl(field, value) {
+        if !this.focusDriver.IsExpectedTarget(this.targetTitle, field)
+            return false
         hwnd := 0
         try hwnd := field.NativeWindowHandle
         ; ControlSetText requires a concrete ControlID in AutoHotkey v2. An empty

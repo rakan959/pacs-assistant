@@ -20,6 +20,7 @@ class WetReadTest {
         "UnreadableNoteDoesNotAttemptPaste",
         "UnreadableNativeFieldFailsClosed",
         "StickyNoteTargetRequiresExpectedTypeProcessAndCapability",
+        "NativeDirectWriteRefusesStaleStickyTarget",
         "NativeControlWithoutHandleIsUnsupported",
         "NativeSendRefusesLostFocus",
         "NativeSendRefusesWrongStickyControlFocus",
@@ -231,6 +232,18 @@ class WetReadTest {
         Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, noCapability))
     }
 
+    NativeDirectWriteRefusesStaleStickyTarget() {
+        field := FakeWritableWetReadElement()
+        driver := NativeWetReadDriver(
+            "Sticky Notes",
+            FakeWetReadWindowDriver(true),
+            FakeWetReadFocusDriver(false)
+        )
+
+        Assert.False(driver.WriteUIA(field, "new wet read"))
+        Assert.Equal(0, field.writeCalls)
+    }
+
     NativeControlWithoutHandleIsUnsupported() {
         driver := NativeWetReadDriver()
 
@@ -394,6 +407,25 @@ class FakeWetReadField {
     }
 }
 
+class FakeWritableWetReadElement {
+    __New() {
+        this.writeCalls := 0
+        this.storedValue := ""
+    }
+
+    GetPropertyValue(property) {
+        return property = UIA.Property.IsValuePatternAvailable
+    }
+
+    Value {
+        get => this.storedValue
+        set {
+            this.writeCalls++
+            this.storedValue := value
+        }
+    }
+}
+
 class FakeStickyTargetElement {
     __New(type, processId, readable := false, windowId := 100) {
         this.Type := type
@@ -427,6 +459,10 @@ class FakeWetReadFocusDriver {
     }
 
     RequestFocus(*) {
+    }
+
+    IsExpectedTarget(*) {
+        return this.matches
     }
 
     IsExpectedFocus(*) {
