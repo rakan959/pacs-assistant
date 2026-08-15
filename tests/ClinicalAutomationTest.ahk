@@ -20,7 +20,10 @@ class ClinicalAutomationTest {
         "AttendingVerificationRejectsSubstringNearMatch",
         "NativeAttendingPickerAbsenceRejectsReplacementControl",
         "NativeAttendingPickerRequiresUniqueSemanticControl",
+        "NativeAttendingPickerUncertaintyCannotManufactureUniqueness",
+        "NativeAttendingRequiresCapturedExactAutomationId",
         "AttendingNameUsesLiteralText",
+        "AttendingConfirmationNeverUsesPositionalKeys",
         "AttendingStopsBeforeTextWhenControlMissing",
         "AttendingStopsBeforeConfirmationWhenValueUnverified",
         "AttendingStopsBeforeConfirmationWhenPickerLosesFocus",
@@ -53,7 +56,9 @@ class ClinicalAutomationTest {
         "PacsLauncherAcceptsInstalledShortcut",
         "ReportSelectionUsesOnlyReportShapedText",
         "ReportSelectionRejectsMultipleReportCandidates",
-        "ReportSelectionRejectsUnrelatedFallbackText"
+        "ReportSelectionRejectsUnrelatedFallbackText",
+        "ReportCaptureFailsClosedOnEnumerationError",
+        "ReportCaptureFailsClosedOnUnreadableSibling"
     ]
 
     Setup() {
@@ -65,6 +70,7 @@ class ClinicalAutomationTest {
         this.originalPowerScribeSessionDriver := HasProp(PowerScribe, "sessionDriver")
             ? PowerScribe.sessionDriver
             : 0
+        this.originalApprovedAttendingIds := NativeAttendingControlDriver.approvedAutomationIds
         this.originalProfiles := ProfileManager.profiles
         this.originalCurrentProfile := ProfileManager.currentProfile
         this.originalClinicalCommandActive := PACSCommands.clinicalCommandActive
@@ -73,6 +79,7 @@ class ClinicalAutomationTest {
         this.busyNotifications := []
         PowerScribe.attendingControlDriver := FakeAttendingControlDriver()
         PowerScribe.sessionDriver := FakePowerScribeSessionDriver()
+        NativeAttendingControlDriver.approvedAutomationIds := ["attendingPicker"]
         ProfileManager.profiles := Map()
         ProfileManager.currentProfile := ""
         PACSCommands.clinicalCommandActive := false
@@ -268,6 +275,20 @@ class ClinicalAutomationTest {
         Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, wrongWindow))
     }
 
+    NativeAttendingRequiresCapturedExactAutomationId() {
+        root := FakeAttendingTargetElement(UIA.Type.Window, 42)
+        candidate := FakeAttendingTargetElement(
+            UIA.Type.ComboBox,
+            42,
+            "Attending",
+            "attendingPicker",
+            true
+        )
+        NativeAttendingControlDriver.approvedAutomationIds := []
+
+        Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, candidate))
+    }
+
     NativeAttendingWriteRefusesLostControlFocus() {
         control := {writeCalls: 0}
         driver := NativeAttendingControlDriver((*) => false)
@@ -289,7 +310,7 @@ class ClinicalAutomationTest {
             UIA.Type.Edit,
             42,
             "Attending",
-            "attendingPickerReplacement",
+            "attendingPicker",
             true
         )
 
@@ -299,11 +320,26 @@ class ClinicalAutomationTest {
 
     NativeAttendingPickerRequiresUniqueSemanticControl() {
         driver := NativeAttendingControlDriver()
-        first := FakeAttendingTargetElement(UIA.Type.Edit, 42, "Attending", "attendingOne", true)
-        second := FakeAttendingTargetElement(UIA.Type.ComboBox, 42, "Attending", "attendingTwo", true)
+        first := FakeAttendingTargetElement(UIA.Type.Edit, 42, "Attending", "attendingPicker", true)
+        second := FakeAttendingTargetElement(UIA.Type.ComboBox, 42, "Attending", "attendingPicker", true)
 
         Assert.Equal(0, driver.UniqueExpectedControl(FakeAttendingRoot([first], [second])))
         Assert.True(driver.UniqueExpectedControl(FakeAttendingRoot([first])) = first)
+    }
+
+    NativeAttendingPickerUncertaintyCannotManufactureUniqueness() {
+        driver := NativeAttendingControlDriver()
+        valid := FakeAttendingTargetElement(
+            UIA.Type.Edit,
+            42,
+            "Attending",
+            "attendingPicker",
+            true
+        )
+        unreadable := ThrowingAttendingTargetElement()
+
+        Assert.Equal(0, driver.UniqueExpectedControl(FakeAttendingRoot([valid, unreadable])))
+        Assert.False(driver.PickerIsAbsentFromRoot(FakeAttendingRoot([unreadable])))
     }
 
     AttendingNameUsesLiteralText() {
@@ -314,7 +350,7 @@ class ClinicalAutomationTest {
         attending := "Smith + Jones {Neuro}"
 
         Assert.True(PowerScribe.SetAttending(attending))
-        Assert.Equal(13, driver.calls.Length)
+        Assert.Equal(11, driver.calls.Length)
         Assert.Equal("activate", driver.calls[1].kind)
         Assert.Equal("ahk_id 100", driver.calls[1].value)
         Assert.Equal("active", driver.calls[2].kind)
@@ -323,13 +359,20 @@ class ClinicalAutomationTest {
         Assert.Equal("active", driver.calls[5].kind)
         Assert.Equal(1, attendingDriver.writes.Length)
         Assert.Equal(attending, attendingDriver.writes[1].value)
+        Assert.Equal(1, attendingDriver.semanticConfirmations)
         Assert.Equal("active", driver.calls[7].kind)
-        Assert.Equal("keys", driver.calls[8].kind)
-        Assert.Equal("{tab}{space}{tab}{Enter}", driver.calls[8].value)
-        Assert.Equal("active", driver.calls[9].kind)
-        Assert.Equal("{Alt down}ta{Alt up}", driver.calls[10].value)
-        Assert.Equal("active", driver.calls[12].kind)
-        Assert.Equal("{Escape}", driver.calls[13].value)
+        Assert.Equal("{Alt down}ta{Alt up}", driver.calls[8].value)
+        Assert.Equal("active", driver.calls[10].kind)
+        Assert.Equal("{Escape}", driver.calls[11].value)
+    }
+
+    AttendingConfirmationNeverUsesPositionalKeys() {
+        driver := FakeWindowDriver()
+        AppControl.windowDriver := driver
+
+        Assert.True(PowerScribe.SetAttending("Smith"))
+        Assert.False(this.DriverSentKeys(driver, "{tab}{space}{tab}{Enter}"))
+        Assert.Equal(1, PowerScribe.attendingControlDriver.semanticConfirmations)
     }
 
     AttendingStopsBeforeTextWhenControlMissing() {
@@ -532,7 +575,7 @@ class ClinicalAutomationTest {
 
         Assert.Throws(
             () => checkAttending("EXAMINATION: CT CHEST"),
-            "could not safely control PowerScribe"
+            "could not safely assign attending 'Smith'"
         )
     }
 
@@ -766,12 +809,38 @@ class ClinicalAutomationTest {
         Assert.Equal(fallbackReport, PowerScribe.SelectReportText([], fallbackReport))
     }
 
+    ReportCaptureFailsClosedOnEnumerationError() {
+        session := {hwnd: 800, target: "ahk_id 800", processId: 42}
+        PowerScribe.sessionDriver := FixedReportRootSessionDriver(
+            session,
+            ThrowingReportEnumerationRoot(800, 42)
+        )
+
+        Assert.Equal("", PowerScribe.ReadReportText(session))
+    }
+
+    ReportCaptureFailsClosedOnUnreadableSibling() {
+        session := {hwnd: 801, target: "ahk_id 801", processId: 42}
+        valid := FakePowerScribeReportElement(
+            801,
+            42,
+            "EXAMINATION: CT CHEST`nFINDINGS: Current report."
+        )
+        PowerScribe.sessionDriver := FixedReportRootSessionDriver(
+            session,
+            UncertainReportRoot(801, 42, [valid, {}])
+        )
+
+        Assert.Equal("", PowerScribe.ReadReportText(session))
+    }
+
     Teardown() {
         AppControl.windowDriver := this.originalDriver
         if this.originalLifecycleDriver
             AppControl.lifecycleDriver := this.originalLifecycleDriver
         PowerScribe.attendingControlDriver := this.originalAttendingDriver
         PowerScribe.sessionDriver := this.originalPowerScribeSessionDriver
+        NativeAttendingControlDriver.approvedAutomationIds := this.originalApprovedAttendingIds
         ProfileManager.profiles := this.originalProfiles
         ProfileManager.currentProfile := this.originalCurrentProfile
         PACSCommands.clinicalCommandActive := this.originalClinicalCommandActive
@@ -954,6 +1023,7 @@ class FakeAttendingControlDriver {
         this.confirmationChecks := 0
         this.committedValueMatches := committedValueMatches
         this.committedValueChecks := 0
+        this.semanticConfirmations := 0
         this.writes := []
     }
 
@@ -972,6 +1042,11 @@ class FakeAttendingControlDriver {
                 ? this.confirmationAllowed.RemoveAt(1)
                 : false
         return this.confirmationAllowed
+    }
+
+    ConfirmExpectedAttending(*) {
+        this.semanticConfirmations++
+        return true
     }
 
     WaitForPickerAbsent(*) {
@@ -1048,6 +1123,49 @@ class FakePowerScribeReportElement {
     }
 }
 
+class FixedReportRootSessionDriver {
+    __New(session, root) {
+        this.session := session
+        this.rootElement := root
+    }
+
+    Root(session) {
+        return this.IsLive(session) ? this.rootElement : 0
+    }
+
+    IsLive(session) {
+        return session.hwnd = this.session.hwnd
+            && session.processId = this.session.processId
+    }
+}
+
+class ThrowingReportEnumerationRoot {
+    __New(hwnd, processId) {
+        this.WinId := hwnd
+        this.ProcessId := processId
+    }
+
+    FindElements(*) {
+        throw Error("simulated report enumeration failure")
+    }
+}
+
+class UncertainReportRoot {
+    __New(hwnd, processId, controls) {
+        this.WinId := hwnd
+        this.ProcessId := processId
+        this.controls := controls
+    }
+
+    FindElements(condition) {
+        return condition.Type = "Document" ? this.controls : []
+    }
+
+    ElementFromPath(*) {
+        throw Error("no positional fallback")
+    }
+}
+
 class FakeAttendingTargetElement {
     __New(type, processId, name := "", automationId := "", writable := false, windowId := 100) {
         this.Type := type
@@ -1059,6 +1177,14 @@ class FakeAttendingTargetElement {
         this.IsValuePatternAvailable := writable
         this.IsLegacyIAccessiblePatternAvailable := false
         this.NativeWindowHandle := 0
+    }
+}
+
+class ThrowingAttendingTargetElement {
+    Type {
+        get {
+            throw Error("simulated provider failure")
+        }
     }
 }
 

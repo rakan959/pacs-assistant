@@ -57,7 +57,10 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 
 5) **Modality attendings**
 - Click **Modality Attendings** to assign an attending per modality for the current profile.
-- Wet reads route to the attending assigned to the study's modality.
+- Wet reads identify the attending assigned to the study's modality. Automated
+  assignment currently fails closed and names the attending for manual assignment:
+  the repository does not yet contain a live-captured, stable PowerScribe picker and
+  confirmation-control identity, so it never submits the former positional key chord.
 - Leave a modality blank to keep whatever default attending PowerScribe already has.
 - Assignments are per profile, so a call shift assigned by modality can be its own profile.
 

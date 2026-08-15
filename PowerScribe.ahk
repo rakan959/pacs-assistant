@@ -76,6 +76,10 @@ class NativePowerScribeSessionDriver {
 class NativeAttendingControlDriver {
     static confirmationAttempts := 10
     static confirmationPollMs := 50
+    ; A live PowerScribe capture has not yet established a stable AutomationId for
+    ; the attending picker. Keep the native mutation path closed until an exact ID
+    ; can be recorded and regression-tested; a name substring is not an identity.
+    static approvedAutomationIds := []
 
     __New(focusVerifier := 0) {
         this.focusVerifier := focusVerifier
@@ -100,7 +104,9 @@ class NativeAttendingControlDriver {
         matches := []
         for typeName in ["Edit", "ComboBox"] {
             for candidate in root.FindElements({Type: typeName}) {
-                if NativeAttendingControlDriver.IsExpectedControl(root, candidate)
+                ; Do not silently discard a candidate whose provider properties
+                ; cannot be inspected. That would manufacture false uniqueness.
+                if NativeAttendingControlDriver.InspectExpectedControl(root, candidate)
                     matches.Push(candidate)
             }
         }
@@ -118,28 +124,31 @@ class NativeAttendingControlDriver {
         if !root || !control
             return false
 
-        try {
-            rootProcess := root.ProcessId
-            if (rootProcess <= 0 || control.ProcessId != rootProcess)
-                return false
-            rootWindow := root.WinId
-            if (rootWindow <= 0 || control.WinId != rootWindow)
-                return false
-            if (control.Type != UIA.Type.Edit && control.Type != UIA.Type.ComboBox)
-                return false
-            if !control.IsEnabled
-                return false
-
-            identity := control.Name " " control.AutomationId
-            if !InStr(StrLower(identity), "attend")
-                return false
-
-            ; Direct mutation is permitted only through ValuePattern. Avoid falling
-            ; back to SendText, which could land in the report if focus moved.
-            return control.IsValuePatternAvailable
-        } catch {
+        try return NativeAttendingControlDriver.InspectExpectedControl(root, control)
+        catch
             return false
+    }
+
+    static InspectExpectedControl(root, control) {
+        rootProcess := root.ProcessId
+        if (rootProcess <= 0 || control.ProcessId != rootProcess)
+            return false
+        rootWindow := root.WinId
+        if (rootWindow <= 0 || control.WinId != rootWindow)
+            return false
+        if (control.Type != UIA.Type.Edit && control.Type != UIA.Type.ComboBox)
+            return false
+        if !control.IsEnabled || !control.IsValuePatternAvailable
+            return false
+
+        automationId := control.AutomationId
+        if (automationId = "")
+            return false
+        for approvedId in NativeAttendingControlDriver.approvedAutomationIds {
+            if (automationId == approvedId)
+                return true
         }
+        return false
     }
 
     WriteAndVerify(windowTitle, control, expected) {
@@ -194,6 +203,14 @@ class NativeAttendingControlDriver {
     CanConfirm(windowTitle, control, expected) {
         return this.ControlHasExpectedFocus(windowTitle, control)
             && this.HasExpectedValue(control, expected)
+    }
+
+    ConfirmExpectedAttending(*) {
+        ; The previous positional {Tab}/{Space}/{Tab}/{Enter} chord could invoke an
+        ; unrelated control if PowerScribe's tab order changed. No stable semantic
+        ; confirmation control is recorded in this repository, so native automated
+        ; confirmation remains unavailable and the caller reports manual assignment.
+        return false
     }
 
     WaitForPickerAbsent(windowTitle) {
@@ -277,17 +294,9 @@ class PowerScribe {
     static IsExpectedReportControl(root, control) {
         if !root || !control
             return false
-        try {
-            rootProcess := root.ProcessId
-            rootWindow := root.WinId
-            return rootProcess > 0
-                && control.ProcessId = rootProcess
-                && rootWindow > 0
-                && control.WinId = rootWindow
-                && (control.Type = UIA.Type.Document || control.Type = UIA.Type.Edit)
-        } catch {
+        try return this.InspectExpectedReportControl(root, control)
+        catch
             return false
-        }
     }
 
     static SendKeys(keys) {
@@ -315,18 +324,22 @@ class PowerScribe {
         ; The report editor presents as a Document, but has been seen as a plain Edit.
         candidates := []
         for condition in [{Type: "Document"}, {Type: "Edit"}] {
-            elements := ""
             try {
                 elements := root.FindElements(condition)
             } catch {
-                continue
+                return ""
             }
 
             for el in elements {
-                if !this.IsExpectedReportControl(root, el)
-                    continue
-                text := ""
-                try text := UIAValue.Read(el)
+                ; A returned candidate that cannot be fully identified/read makes
+                ; the current-report set unknowable; never route from the remainder.
+                try {
+                    if !this.InspectExpectedReportControl(root, el)
+                        return ""
+                    text := UIAValue.Read(el)
+                } catch {
+                    return ""
+                }
                 if (text = "")
                     continue
                 candidates.Push(text)
@@ -345,6 +358,16 @@ class PowerScribe {
         if !this.sessionDriver.IsLive(session)
             return ""
         return this.SelectReportText(candidates, fallbackText)
+    }
+
+    static InspectExpectedReportControl(root, control) {
+        rootProcess := root.ProcessId
+        rootWindow := root.WinId
+        return rootProcess > 0
+            && control.ProcessId = rootProcess
+            && rootWindow > 0
+            && control.WinId = rootWindow
+            && (control.Type = UIA.Type.Document || control.Type = UIA.Type.Edit)
     }
 
     static ReportMatches(session, expectedReportText) {
@@ -396,9 +419,10 @@ class PowerScribe {
                 return false
             if !this.attendingControlDriver.CanConfirm(target, control, attending)
                 return false
-            if !AppControl.SendKeysToActiveWindow(
+            if !this.attendingControlDriver.ConfirmExpectedAttending(
                 target,
-                "{tab}{space}{tab}{Enter}"
+                control,
+                attending
             )
                 return false
             ; Closing the original picker proves only that the UI changed. Reopen the
@@ -497,24 +521,11 @@ class AttendingRouting {
         attending := attendingLookup.Call(modality)
 
         if (attending != "" && !attendingWriter.Call(attending))
-            throw Error("Attending could not be assigned because PACS Assistant could not safely control PowerScribe")
+            throw Error(
+                "PACS Assistant could not safely assign attending '" attending
+                "'. Assign that attending manually in PowerScribe."
+            )
 
         return modality
     }
-}
-
-/**
- * Reads the text of the report currently open in PowerScribe.
- *
- * The report control used to be addressed by a fixed positional path. When
- * PowerScribe's element tree shifted, that path stopped resolving and threw, taking
- * the whole wet read down with it - the sticky note never got pasted either
- * (issue #28). Candidates are matched on their control type instead, and the one
- * whose text actually reads like a report wins; the positional path is only a last
- * resort.
- *
- * @returns the report text, or "" if it could not be read
- */
-readReportText() {
-    return PowerScribe.CaptureReport().text
 }
