@@ -14,6 +14,7 @@ class ClinicalAutomationTest {
         "BuiltInClinicalCommandUsesConfirmedTarget",
         "NativePowerScribeCaptureRejectsImpostorAndDuplicate",
         "TargetedCustomCommandUsesConfirmedTarget",
+        "ClinicalCommandGateRejectsNestedBuiltIn",
         "AttendingTargetRequiresSemanticControlIdentity",
         "NativeAttendingWriteRefusesLostControlFocus",
         "AttendingVerificationRejectsSubstringNearMatch",
@@ -66,10 +67,21 @@ class ClinicalAutomationTest {
             : 0
         this.originalProfiles := ProfileManager.profiles
         this.originalCurrentProfile := ProfileManager.currentProfile
+        this.originalClinicalCommandActive := PACSCommands.clinicalCommandActive
+        this.originalActiveClinicalCommand := PACSCommands.activeClinicalCommand
+        this.originalBusyNotifier := PACSCommands.busyNotifier
+        this.busyNotifications := []
         PowerScribe.attendingControlDriver := FakeAttendingControlDriver()
         PowerScribe.sessionDriver := FakePowerScribeSessionDriver()
         ProfileManager.profiles := Map()
         ProfileManager.currentProfile := ""
+        PACSCommands.clinicalCommandActive := false
+        PACSCommands.activeClinicalCommand := ""
+        PACSCommands.busyNotifier := (text, title, options) => this.busyNotifications.Push({
+            text: text,
+            title: title,
+            options: options
+        })
     }
 
     ActivationFailureDoesNotSend() {
@@ -213,6 +225,32 @@ class ClinicalAutomationTest {
         Assert.Equal("ahk_id 501", driver.calls[3].value)
         Assert.Equal("active", driver.calls[6].kind)
         Assert.Equal("^d", driver.calls[7].value)
+    }
+
+    ClinicalCommandGateRejectsNestedBuiltIn() {
+        driver := FakeExactWindowDriver([{
+            hwnd: 501,
+            title: "Vue PACS Client",
+            exe: "mp.exe",
+            pid: 42
+        }])
+        AppControl.windowDriver := driver
+
+        nestedResult := PACSCommands.RunClinicalCommand(
+            "Outer clinical workflow",
+            (*) => PACSCommands.commands["Next Series"].Call()
+        )
+        callsDuringOuter := driver.calls.Length
+        gateReleased := !PACSCommands.clinicalCommandActive
+
+        PACSCommands.commands["Next Series"].Call()
+
+        Assert.False(nestedResult)
+        Assert.Equal(0, callsDuringOuter)
+        Assert.Equal(1, this.busyNotifications.Length)
+        Assert.True(gateReleased)
+        Assert.Equal("keys", driver.calls[3].kind)
+        Assert.Equal("{Right}", driver.calls[3].value)
     }
 
     AttendingTargetRequiresSemanticControlIdentity() {
@@ -736,6 +774,9 @@ class ClinicalAutomationTest {
         PowerScribe.sessionDriver := this.originalPowerScribeSessionDriver
         ProfileManager.profiles := this.originalProfiles
         ProfileManager.currentProfile := this.originalCurrentProfile
+        PACSCommands.clinicalCommandActive := this.originalClinicalCommandActive
+        PACSCommands.activeClinicalCommand := this.originalActiveClinicalCommand
+        PACSCommands.busyNotifier := this.originalBusyNotifier
     }
 }
 
