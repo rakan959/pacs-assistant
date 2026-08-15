@@ -10,6 +10,7 @@ class AppStorage {
     static legacyRootOverride := ""
     static migrationMarkerName := ".migration-v1-complete"
     static copyFile := (source, destination) => FileCopy(source, destination, false)
+    static copySequence := 0
 
     static DataRoot() {
         if (this.dataRootOverride != "")
@@ -52,8 +53,25 @@ class AppStorage {
     static CopyIfMissing(source, destination) {
         if !FileExist(source) || FileExist(destination)
             return false
-        this.copyFile.Call(source, destination)
-        return true
+        this.copySequence++
+        temporary := destination ".migration-copy-"
+            . DllCall("GetCurrentProcessId") "-"
+            . DllCall("GetTickCount64", "UInt64") "-"
+            . this.copySequence
+        if FileExist(temporary)
+            throw Error("Migration temporary path already exists")
+
+        try {
+            this.copyFile.Call(source, temporary)
+            if !FileExist(temporary)
+                throw Error("Migration copy did not create its temporary file")
+            ; Never overwrite a destination that appeared after the initial check.
+            ; Failing here leaves the migration unmarked for a later safe retry.
+            FileMove(temporary, destination, false)
+            return true
+        } finally {
+            try FileDelete(temporary)
+        }
     }
 
     static WriteMigrationMarker(marker) {

@@ -6,7 +6,8 @@ class AppStorageTest {
     static Tests := [
         "TestInstalledDataMigrationPreservesLegacyAndDoesNotOverwriteDestination",
         "TestCompletedMigrationDoesNotResurrectDeletedProfile",
-        "TestPartialMigrationRetriesBeforeWritingMarker"
+        "TestPartialMigrationRetriesBeforeWritingMarker",
+        "TestFailedCopyCannotPublishAPartialDestination"
     ]
 
     Setup() {
@@ -71,6 +72,21 @@ class AppStorageTest {
         Assert.Equal("legacy profile", FileRead(this.dataRoot "\profiles\Night.ini"))
     }
 
+    TestFailedCopyCannotPublishAPartialDestination() {
+        destination := this.dataRoot "\config.ini"
+        AppStorage.copyFile := PartialMigrationCopy(destination)
+
+        Assert.Throws(
+            (*) => AppStorage.Ensure(),
+            "simulated partial migration copy"
+        )
+        Assert.False(FileExist(destination) != "")
+
+        AppStorage.copyFile := this.originalCopyFile
+        AppStorage.Ensure()
+        Assert.Equal("legacy config", FileRead(destination))
+    }
+
     Teardown() {
         AppStorage.dataRootOverride := this.originalDataRoot
         AppStorage.legacyRootOverride := this.originalLegacyRoot
@@ -85,8 +101,22 @@ class FailingMigrationCopy {
     }
 
     Call(source, destination) {
-        if (destination == this.failedDestination)
+        if (InStr(destination, this.failedDestination) = 1)
             throw Error("simulated migration copy failure")
+        FileCopy(source, destination, false)
+    }
+}
+
+class PartialMigrationCopy {
+    __New(destinationPrefix) {
+        this.destinationPrefix := destinationPrefix
+    }
+
+    Call(source, destination) {
+        if (InStr(destination, this.destinationPrefix) = 1) {
+            FileAppend("partial", destination)
+            throw Error("simulated partial migration copy")
+        }
         FileCopy(source, destination, false)
     }
 }
