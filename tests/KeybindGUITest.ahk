@@ -31,7 +31,10 @@ class KeybindGUITest {
         "TestRenameDialogCannotMutateSameNameReplacement",
         "TestRenamePromptHonorsDirtyCancel",
         "TestCaseOnlyRenamePersistsResolvedDirtyChanges",
+        "TestDiscardBeforeRenameRestoresRuntimeAndMainView",
+        "TestDiscardBeforeCaseRenameKeepsStoredRuntime",
         "TestSuccessfulMainRenameDoesNotReapplyHotkeys",
+        "TestDefaultProfileSelectionRequiresExactRenderedName",
         "TestCreateProfileSurfacesStorageRecovery",
         "TestDirtyScopeEditBlocksProfileSwitchWhenCancelled",
         "TestClosingSavesDirtyProfileBeforeExit",
@@ -902,6 +905,67 @@ class KeybindGUITest {
         Assert.False(gui.IsProfileDirty("night"))
     }
 
+    TestDiscardBeforeRenameRestoresRuntimeAndMainView() {
+        state := this.PrepareDiscardRenameState("pacs_discard_rename_cancel_")
+        gui := state.gui
+
+        try {
+            resolved := gui.ResolveDirtyProfileBeforeLeaving(true)
+            memoryBind := ProfileManager.profiles["Night"].binds["Sign Report"]
+            memoryScope := ProfileManager.profiles["Night"].scopes["Sign Report"]
+            runtimeBind := HotkeyManager.activeHotkeys["Sign Report"].hotkey
+            runtimeScope := HotkeyManager.activeHotkeys["Sign Report"].scope
+        } finally {
+            this.RestoreDiscardRenameState(state)
+        }
+
+        Assert.True(resolved)
+        Assert.Equal("^F13", memoryBind)
+        Assert.Equal("Any", memoryScope)
+        Assert.Equal("^F13", runtimeBind)
+        Assert.Equal("Any", runtimeScope)
+        Assert.Equal("^F13", gui.visibleBind)
+        Assert.Equal("Any", gui.visibleScope)
+        Assert.Equal(1, gui.createCalls)
+        Assert.False(gui.lastCreateAppliedBinds)
+        Assert.False(gui.IsProfileDirty("Night"))
+    }
+
+    TestDiscardBeforeCaseRenameKeepsStoredRuntime() {
+        state := this.PrepareDiscardRenameState("pacs_discard_case_rename_")
+        gui := state.gui
+        dialog := FakeProfileDialog("Night")
+
+        try {
+            Assert.True(gui.ResolveDirtyProfileBeforeLeaving(true))
+            Assert.True(gui.CaptureRenameDialogState(dialog, "Night"))
+            renamed := gui.RenameProfile("Night", "night", dialog)
+            reloaded := ProfileManager.LoadProfile(ProfileManager.ProfilePath("night"))
+            persistedBind := reloaded.binds["Sign Report"]
+            persistedScope := reloaded.scopes["Sign Report"]
+            runtimeBind := HotkeyManager.activeHotkeys["Sign Report"].hotkey
+            runtimeScope := HotkeyManager.activeHotkeys["Sign Report"].scope
+        } finally {
+            this.RestoreDiscardRenameState(state)
+        }
+
+        Assert.True(renamed)
+        Assert.Equal("^F13", persistedBind)
+        Assert.Equal("Any", persistedScope)
+        Assert.Equal("^F13", runtimeBind)
+        Assert.Equal("Any", runtimeScope)
+        Assert.Equal("^F13", gui.visibleBind)
+        Assert.Equal("Any", gui.visibleScope)
+        Assert.False(gui.IsProfileDirty("Night"))
+        Assert.False(gui.IsProfileDirty("night"))
+    }
+
+    TestDefaultProfileSelectionRequiresExactRenderedName() {
+        Assert.Equal(2, this.gui.DefaultProfileListIndex(["AA *", "A *"], "A"))
+        Assert.Equal(1, this.gui.DefaultProfileListIndex(["A *", "AA *"], "A"))
+        Assert.Equal(0, this.gui.DefaultProfileListIndex(["AA *"], "A"))
+    }
+
     TestSuccessfulMainRenameDoesNotReapplyHotkeys() {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
@@ -1537,6 +1601,55 @@ class KeybindGUITest {
         ProfileManager.profilesPath := state.profilesPath
         try DirDelete(state.tempRoot, true)
     }
+
+    PrepareDiscardRenameState(prefix) {
+        state := {
+            profiles: ProfileManager.profiles,
+            current: ProfileManager.currentProfile,
+            profilesPath: ProfileManager.profilesPath,
+            revisions: ProfileManager.profileRevisions,
+            defaultProfile: ProfileManager.defaultProfile,
+            activeHotkeys: HotkeyManager.activeHotkeys,
+            tempRoot: A_Temp "\\" prefix A_TickCount
+        }
+        try DirDelete(state.tempRoot, true)
+        DirCreate(state.tempRoot)
+        ProfileManager.profilesPath := state.tempRoot
+        ProfileManager.profileRevisions := Map()
+        ProfileManager.defaultProfile := ""
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        ProfileManager.profiles := Map("Night", profile)
+        ProfileManager.currentProfile := "Night"
+        ProfileManager.SaveProfile("Night", profile)
+
+        profile.binds["Sign Report"] := "^F14"
+        profile.scopes["Sign Report"] := "PACS"
+        HotkeyManager.activeHotkeys := Map(
+            "Sign Report", {hotkey: "^F14", scope: "PACS"}
+        )
+        gui := {base: DiscardRenameTrackingGUI.Prototype}
+        gui.gui := FakeProfileDialog()
+        gui.createCalls := 0
+        gui.lastCreateAppliedBinds := true
+        gui.visibleBind := "^F14"
+        gui.visibleScope := "PACS"
+        gui.MarkProfileDirty("Night")
+        gui.profileLeaveDriver := FixedProfileLeaveDriver("No")
+        state.gui := gui
+        return state
+    }
+
+    RestoreDiscardRenameState(state) {
+        ProfileManager.profiles := state.profiles
+        ProfileManager.currentProfile := state.current
+        ProfileManager.profilesPath := state.profilesPath
+        ProfileManager.profileRevisions := state.revisions
+        ProfileManager.defaultProfile := state.defaultProfile
+        HotkeyManager.activeHotkeys := state.activeHotkeys
+        try DirDelete(state.tempRoot, true)
+    }
 }
 
 class FailingListView {
@@ -1738,6 +1851,36 @@ class DirtyRenameTestGUI extends DirtyLeaveTestGUI {
         this.createCalls++
         if applyBinds
             this.applyCalls++
+    }
+}
+
+class DiscardRenameTrackingGUI extends KeybindGUI {
+    GuiIsLive(gui) {
+        return IsObject(gui) && (!HasProp(gui, "destroyed") || !gui.destroyed)
+    }
+
+    HasMainWindow() {
+        return this.GuiIsLive(this.gui)
+    }
+
+    RestoreRuntimeProfile(profile, &errorText) {
+        errorText := ""
+        HotkeyManager.activeHotkeys := Map(
+            "Sign Report", {
+                hotkey: profile.binds["Sign Report"],
+                scope: profile.scopes["Sign Report"]
+            }
+        )
+        return true
+    }
+
+    CreateMainGUI(applyBinds := true) {
+        this.createCalls++
+        this.lastCreateAppliedBinds := applyBinds
+        profile := ProfileManager.profiles[ProfileManager.currentProfile]
+        this.visibleBind := profile.binds["Sign Report"]
+        this.visibleScope := profile.scopes["Sign Report"]
+        this.gui := FakeProfileDialog()
     }
 }
 

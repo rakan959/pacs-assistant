@@ -276,14 +276,12 @@ class KeybindGUI {
         lb := selectorGui.Add("ListBox", "w200 h150", profileNames)
         
         ; If there's a default profile, select it in the listbox
-        if (ProfileManager.defaultProfile != "") {
-            for i, name in profileNames {
-                if (InStr(name, ProfileManager.defaultProfile " *")) {
-                    lb.Choose(i)
-                    break
-                }
-            }
-        }
+        defaultIndex := this.DefaultProfileListIndex(
+            profileNames,
+            ProfileManager.defaultProfile
+        )
+        if defaultIndex
+            lb.Choose(defaultIndex)
         
         ; Add buttons
         selectorGui.Add("GroupBox", "w190 h150", "Actions")
@@ -300,6 +298,17 @@ class KeybindGUI {
         selectorGui.OnEvent("Close", (*) => this.CloseProfileSelector(selectorGui))
         selectorGui.Show()
         return selectorGui
+    }
+
+    DefaultProfileListIndex(profileNames, defaultProfile) {
+        if (defaultProfile = "")
+            return 0
+        renderedDefault := defaultProfile " *"
+        for index, renderedName in profileNames {
+            if (renderedName == renderedDefault)
+                return index
+        }
+        return 0
     }
 
     CloseProfileSelector(selectorGui) {
@@ -764,7 +773,7 @@ class KeybindGUI {
         )
     }
 
-    ResolveDirtyProfileBeforeLeaving() {
+    ResolveDirtyProfileBeforeLeaving(refreshMainWindow := false) {
         profileName := ProfileManager.currentProfile
         if !this.IsProfileDirty(profileName)
             return true
@@ -777,6 +786,7 @@ class KeybindGUI {
         if !(choice == "No")
             return false
 
+        originalProfile := ProfileManager.profiles[profileName]
         try {
             stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath(profileName))
         } catch as err {
@@ -787,10 +797,37 @@ class KeybindGUI {
             )
             return false
         }
+
+        restoreError := ""
+        if !this.RestoreRuntimeProfile(stored, &restoreError) {
+            this.RestoreRuntimeAndNotify(
+                originalProfile,
+                "The unsaved changes were retained because the saved runtime bindings could not be restored.`n`n" restoreError,
+                "Discard Failed"
+            )
+            return false
+        }
+
         ProfileManager.profiles[profileName] := stored
         ProfileManager.profileRevisions[profileName] :=
             ProfileManager.GetProfileRevision(profileName) + 1
         this.ClearProfileDirty(profileName)
+
+        if (refreshMainWindow && this.HasMainWindow()) {
+            try {
+                this.gui.Destroy()
+                ; The stored profile is already the verified live runtime contract.
+                ; Rebuild only the view; re-registering would add another failure edge.
+                this.CreateMainGUI(false)
+            } catch as err {
+                this.NotifyUser(
+                    "The saved profile was restored, but the main window could not be refreshed.`n`n" err.Message,
+                    "Profile View Refresh Failed",
+                    "Icon!"
+                )
+                return false
+            }
+        }
         return true
     }
 
@@ -1061,7 +1098,7 @@ class KeybindGUI {
         ; dirty binding can be silently discarded when the dirty flag is rekeyed.
         if (!parentGui
             && name == ProfileManager.currentProfile
-            && !this.ResolveDirtyProfileBeforeLeaving())
+            && !this.ResolveDirtyProfileBeforeLeaving(true))
             return false
 
         renameGui := this.NewProfileDialog(
