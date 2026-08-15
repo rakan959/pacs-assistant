@@ -50,7 +50,7 @@ class UpdateCheckerTest {
 
     Setup() {
         this.originalSettingsFile := Settings.settingsFile
-        this.tempSettings := A_Temp "\update_settings_" A_TickCount ".ini"
+        this.tempSettings := TestTempPath("update-settings", ".ini")
         Settings.settingsFile := this.tempSettings
         Settings.SaveAllSettings()
         this.originalTransport := UpdateChecker.transport
@@ -311,7 +311,7 @@ class UpdateCheckerTest {
     }
 
     TestSha256KnownVector() {
-        path := A_Temp "\pacs_sha256_" A_TickCount ".txt"
+        path := TestTempPath("pacs-sha256", ".txt")
         FileAppend("abc", path, "UTF-8-RAW")
         try {
             Assert.Equal(
@@ -324,7 +324,7 @@ class UpdateCheckerTest {
     }
 
     TestArtifactValidationRejectsNonExecutable() {
-        path := A_Temp "\pacs_bad_update_" A_TickCount ".exe"
+        path := TestTempPath("pacs-bad-update", ".exe")
         FileAppend("not an executable", path, "UTF-8-RAW")
         try {
             digest := UpdateChecker.HashFileSha256(path)

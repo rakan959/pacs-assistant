@@ -43,7 +43,7 @@ class PACSMonitorTest {
         this.originalAutomationRelease := PACSMonitor.automationRelease
         this.originalDriver := PACSMonitor.driver
         this.originalTimerDriver := PACSMonitor.timerDriver
-        this.tempSettings := A_Temp "\pacs_monitor_settings_" A_TickCount ".ini"
+        this.tempSettings := TestTempPath("pacs-monitor-settings", ".ini")
         Settings.settingsFile := this.tempSettings
         Settings.SaveAllSettings()
         

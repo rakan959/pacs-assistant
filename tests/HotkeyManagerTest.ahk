@@ -49,7 +49,7 @@ class HotkeyManagerTest {
 
         ; Isolate settings
         this.originalSettings := Settings.settingsFile
-        this.tempSettings := A_Temp "\hk_scope_test_" A_TickCount ".ini"
+        this.tempSettings := TestTempPath("hotkey-scope", ".ini")
         Settings.settingsFile := this.tempSettings
         Settings.SaveAllSettings()
     }

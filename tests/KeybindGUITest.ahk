@@ -402,7 +402,7 @@ class KeybindGUITest {
         originalProfilesPath := ProfileManager.profilesPath
         originalRevisions := ProfileManager.profileRevisions
         originalActive := HotkeyManager.activeHotkeys
-        tempRoot := A_Temp "\pacs_capture_mutation_gate_" A_TickCount
+        tempRoot := TestTempPath("pacs-capture-mutation-gate")
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := "^F13"
         profile.scopes["Sign Report"] := "Any"
@@ -726,7 +726,7 @@ class KeybindGUITest {
         originalDefault := ProfileManager.defaultProfile
         originalProfilesPath := ProfileManager.profilesPath
         originalRevisions := ProfileManager.profileRevisions
-        tempRoot := A_Temp "\pacs_selector_delete_" A_TickCount
+        tempRoot := TestTempPath("pacs-selector-delete")
         selector := ReentrantSelectorDialog()
         gui := {
             base: ProfileSelectorTransactionGUI.Prototype,
@@ -1467,7 +1467,7 @@ class KeybindGUITest {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
         originalProfilesPath := ProfileManager.profilesPath
-        tempRoot := A_Temp "\pacs_stale_dialog_" A_TickCount
+        tempRoot := TestTempPath("pacs-stale-dialog")
         profileA := ProfileManager.NewProfile()
         profileA.modalityAttendings["Neuro"] := "A Attending"
         profileB := ProfileManager.NewProfile()
@@ -1504,7 +1504,7 @@ class KeybindGUITest {
         originalCurrent := ProfileManager.currentProfile
         originalRevisions := ProfileManager.profileRevisions
         originalProfilesPath := ProfileManager.profilesPath
-        tempRoot := A_Temp "\pacs_same_profile_stale_" A_TickCount
+        tempRoot := TestTempPath("pacs-same-profile-stale")
         profile := ProfileManager.NewProfile()
         profile.modalityAttendings["Neuro"] := "Old Attending"
 
@@ -1548,7 +1548,7 @@ class KeybindGUITest {
         originalCurrent := ProfileManager.currentProfile
         originalRevisions := ProfileManager.profileRevisions
         originalProfilesPath := ProfileManager.profilesPath
-        tempRoot := A_Temp "\pacs_dirty_modality_dialog_" A_TickCount
+        tempRoot := TestTempPath("pacs-dirty-modality-dialog")
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := "^F13"
         profile.scopes["Sign Report"] := "Any"
@@ -1625,7 +1625,7 @@ class KeybindGUITest {
         originalCurrent := ProfileManager.currentProfile
         originalProfilesPath := ProfileManager.profilesPath
         originalRevisions := ProfileManager.profileRevisions
-        tempRoot := A_Temp "\pacs_dirty_custom_delete_" A_TickCount
+        tempRoot := TestTempPath("pacs-dirty-custom-delete")
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := "^F13"
         profile.scopes["Sign Report"] := "Any"
@@ -1693,7 +1693,7 @@ class KeybindGUITest {
         originalCurrent := ProfileManager.currentProfile
         originalDefault := ProfileManager.defaultProfile
         originalProfilesPath := ProfileManager.profilesPath
-        tempRoot := A_Temp "\pacs_stale_rename_" A_TickCount
+        tempRoot := TestTempPath("pacs-stale-rename")
         profileA := ProfileManager.NewProfile()
         profileB := ProfileManager.NewProfile()
         dialog := FakeProfileDialog("A")
@@ -1815,7 +1815,7 @@ class KeybindGUITest {
         originalCurrent := ProfileManager.currentProfile
         originalProfilesPath := ProfileManager.profilesPath
         originalRevisions := ProfileManager.profileRevisions
-        tempRoot := A_Temp "\pacs_dirty_case_rename_" A_TickCount
+        tempRoot := TestTempPath("pacs-dirty-case-rename")
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := ""
         profile.scopes["Sign Report"] := "Any"
@@ -1863,7 +1863,7 @@ class KeybindGUITest {
         originalCurrent := ProfileManager.currentProfile
         originalProfilesPath := ProfileManager.profilesPath
         originalRevisions := ProfileManager.profileRevisions
-        tempRoot := A_Temp "\pacs_dirty_prompt_race_" DllCall("GetTickCount64", "UInt64")
+        tempRoot := TestTempPath("pacs-dirty-prompt-race")
         prompted := ProfileManager.NewProfile()
         prompted.binds["Sign Report"] := "^F13"
         prompted.scopes["Sign Report"] := "Any"
@@ -1970,7 +1970,7 @@ class KeybindGUITest {
         originalDefault := ProfileManager.defaultProfile
         originalProfilesPath := ProfileManager.profilesPath
         originalRevisions := ProfileManager.profileRevisions
-        tempRoot := A_Temp "\pacs_rename_runtime_" A_TickCount
+        tempRoot := TestTempPath("pacs-rename-runtime")
         profile := ProfileManager.NewProfile()
         dialog := FakeProfileDialog("Old")
         gui := {base: RenameRuntimeTrackingKeybindGUI.Prototype}
@@ -2065,7 +2065,7 @@ class KeybindGUITest {
         originalCurrent := ProfileManager.currentProfile
         originalProfilesPath := ProfileManager.profilesPath
         originalRevisions := ProfileManager.profileRevisions
-        tempRoot := A_Temp "\pacs_dirty_close_" A_TickCount
+        tempRoot := TestTempPath("pacs-dirty-close")
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := ""
         profile.scopes["Sign Report"] := "Any"
@@ -2111,7 +2111,7 @@ class KeybindGUITest {
         originalCurrent := ProfileManager.currentProfile
         originalProfilesPath := ProfileManager.profilesPath
         originalRevisions := ProfileManager.profileRevisions
-        tempRoot := A_Temp "\pacs_dirty_discard_" A_TickCount
+        tempRoot := TestTempPath("pacs-dirty-discard")
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := ""
         profile.scopes["Sign Report"] := "Any"
@@ -2238,7 +2238,7 @@ class KeybindGUITest {
         originalProfilesPath := ProfileManager.profilesPath
         originalDriver := HotkeyManager.hotkeyDriver
         originalFunctions := HotkeyManager.hotkeyFunctions
-        tempRoot := A_Temp "\pacs_custom_runtime_rollback_" A_TickCount
+        tempRoot := TestTempPath("pacs-custom-runtime-rollback")
         profile := ProfileManager.NewProfile()
         profile.binds["Custom: Keep"] := "^F23"
         profile.scopes["Custom: Keep"] := "Any"
@@ -2339,7 +2339,7 @@ class KeybindGUITest {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
         originalProfilesPath := ProfileManager.profilesPath
-        tempRoot := A_Temp "\pacs_stale_custom_delete_" A_TickCount
+        tempRoot := TestTempPath("pacs-stale-custom-delete")
         profile := ProfileManager.NewProfile()
         profile.binds["Custom: Keep"] := "^F23"
         profile.scopes["Custom: Keep"] := "Any"
@@ -2383,7 +2383,7 @@ class KeybindGUITest {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
         originalProfilesPath := ProfileManager.profilesPath
-        tempRoot := A_Temp "\pacs_custom_delete_dirty_race_" A_TickCount
+        tempRoot := TestTempPath("pacs-custom-delete-dirty-race")
         profile := ProfileManager.NewProfile()
         profile.binds["Custom: Keep"] := "^F23"
         profile.scopes["Custom: Keep"] := "Any"
@@ -2540,7 +2540,7 @@ class KeybindGUITest {
         originalCurrent := ProfileManager.currentProfile
         originalProfilesPath := ProfileManager.profilesPath
         originalRevisions := ProfileManager.profileRevisions
-        tempRoot := A_Temp "\pacs_saved_runtime_failure_" DllCall("GetTickCount64", "UInt64")
+        tempRoot := TestTempPath("pacs-saved-runtime-failure")
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := "^F13"
         profile.scopes["Sign Report"] := "Any"
@@ -2585,7 +2585,7 @@ class KeybindGUITest {
         originalCurrent := ProfileManager.currentProfile
         originalProfilesPath := ProfileManager.profilesPath
         originalRevisions := ProfileManager.profileRevisions
-        tempRoot := A_Temp "\pacs_concurrent_profile_save_" DllCall("GetTickCount64", "UInt64")
+        tempRoot := TestTempPath("pacs-concurrent-profile-save")
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := "^F13"
         profile.scopes["Sign Report"] := "Any"
@@ -2667,7 +2667,7 @@ class KeybindGUITest {
         originalDefault := ProfileManager.defaultProfile
         originalProfilesPath := ProfileManager.profilesPath
         originalRevisions := ProfileManager.profileRevisions
-        tempRoot := A_Temp "\pacs_stale_profile_delete_" A_TickCount
+        tempRoot := TestTempPath("pacs-stale-profile-delete")
         oldProfile := ProfileManager.NewProfile()
         otherProfile := ProfileManager.NewProfile()
         selector := FakeProfileDialog()
@@ -2711,7 +2711,7 @@ class KeybindGUITest {
             profiles: ProfileManager.profiles,
             current: ProfileManager.currentProfile,
             profilesPath: ProfileManager.profilesPath,
-            tempRoot: A_Temp "\pacs_gui_profile_" A_TickCount
+            tempRoot: TestTempPath("pacs-gui-profile")
         }
         try DirDelete(state.tempRoot, true)
         DirCreate(state.tempRoot)
@@ -2735,7 +2735,7 @@ class KeybindGUITest {
             revisions: ProfileManager.profileRevisions,
             defaultProfile: ProfileManager.defaultProfile,
             activeHotkeys: HotkeyManager.activeHotkeys,
-            tempRoot: A_Temp "\\" prefix A_TickCount
+            tempRoot: TestTempPath(prefix)
         }
         try DirDelete(state.tempRoot, true)
         DirCreate(state.tempRoot)

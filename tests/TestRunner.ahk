@@ -1,5 +1,14 @@
 #Requires AutoHotkey v2.0
 
+TestTempPath(prefix, extension := "") {
+    static sequence := 0
+    sequence++
+    return A_Temp "\" prefix "-"
+        . DllCall("GetCurrentProcessId") "-"
+        . DllCall("GetTickCount64", "UInt64") "-"
+        . sequence extension
+}
+
 class TestRunner {
     static tests := []
     static successes := 0
@@ -35,7 +44,7 @@ class TestRunner {
             this.RunTest(instance, methodName, report)
         }
     }
-    
+
     static RunTest(instance, methodName, report := true) {
         failure := false
 
@@ -92,7 +101,7 @@ class Assert {
         if !this.ExactlyEqual(expected, actual)
             throw Error(message ? message : Format("Expected '{1}' but got '{2}'", expected, actual))
     }
-    
+
     static NotEqual(expected, actual, message := "") {
         if this.ExactlyEqual(expected, actual)
             throw Error(message ? message : Format("Expected value different from '{1}'", expected))

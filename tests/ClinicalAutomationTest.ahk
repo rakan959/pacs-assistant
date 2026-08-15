@@ -682,7 +682,7 @@ class ClinicalAutomationTest {
     }
 
     PacsLauncherRejectsNonShortcutMatch() {
-        root := A_Temp "\pacs_launch_" A_TickCount "_" Random(1000, 9999)
+        root := TestTempPath("pacs-launch")
         DirCreate(root)
         FileAppend("not a shortcut", root "\Vue Client (Integrated) helper.cmd")
         driver := FakeAppLifecycleDriver("launcher")
@@ -697,7 +697,7 @@ class ClinicalAutomationTest {
     }
 
     PacsLauncherRejectsRetargetedShortcut() {
-        root := A_Temp "\pacs_launch_retarget_" A_TickCount "_" Random(1000, 9999)
+        root := TestTempPath("pacs-launch-retarget")
         DirCreate(root)
         shortcut := root "\Vue Client (Integrated).lnk"
         target := root "\notepad.exe"
@@ -714,7 +714,7 @@ class ClinicalAutomationTest {
     }
 
     PacsLauncherRejectsUntrustedSameNamedExecutable() {
-        root := A_Temp "\pacs_launch_untrusted_" A_TickCount "_" Random(1000, 9999)
+        root := TestTempPath("pacs-launch-untrusted")
         trustedRoot := root "\trusted"
         otherRoot := root "\other"
         DirCreate(trustedRoot)
@@ -736,7 +736,7 @@ class ClinicalAutomationTest {
     }
 
     PacsLauncherAcceptsInstalledShortcut() {
-        root := A_Temp "\pacs_launch_" A_TickCount "_" Random(1000, 9999)
+        root := TestTempPath("pacs-launch")
         DirCreate(root)
         shortcut := root "\Vue Client (Integrated).lnk"
         target := root "\mp.exe"

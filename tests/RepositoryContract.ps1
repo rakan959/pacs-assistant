@@ -523,8 +523,8 @@ if (-not (Test-Path -LiteralPath $noticesPath -PathType Leaf)) {
     $notices = Get-Content -Raw $noticesPath
     Assert-Matches $notices 'UIA-v2' 'Third-party notices must name UIA-v2.'
     Assert-Matches $notices 'AutoHotkey v2\.0\.26' 'Third-party notices must name the embedded AutoHotkey runtime.'
-    Assert-Matches $notices '\[AutoHotkey-v2\.0\.26\.txt\]\(AutoHotkey-v2\.0\.26\.txt\)' 'Third-party notices must link the flat published AutoHotkey license asset.'
-    Assert-NotMatches $notices '\]\(licenses/AutoHotkey-v2\.0\.26\.txt\)' 'Third-party notices must not link a directory that release assets do not preserve.'
+    Assert-Matches $notices '\[repository license copy\]\(licenses/AutoHotkey-v2\.0\.26\.txt\)' 'Third-party notices must link the license at its real repository path.'
+    Assert-Matches $notices 'Published release asset:\s*`AutoHotkey-v2\.0\.26\.txt`' 'Third-party notices must also identify the flat published license asset.'
     Assert-Matches $notices 'AutoHotkey-v2\.0\.26-source\.zip' 'Third-party notices must identify the runtime corresponding-source release asset.'
     Assert-Matches $notices 'MIT License' 'Third-party notices must include the UIA-v2 MIT license.'
     Assert-Matches $notices 'Copyright \(c\) 2023 Descolada' 'Third-party notices must preserve the UIA-v2 copyright notice.'

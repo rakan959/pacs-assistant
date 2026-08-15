@@ -48,7 +48,7 @@ class ProfileManagerTest {
     ]
 
     Setup() {
-        this.tempRoot := A_Temp "\pacs_profile_tests_" A_TickCount
+        this.tempRoot := TestTempPath("pacs-profile-tests")
         this.profilesDir := this.tempRoot "\profiles"
         DirCreate(this.profilesDir)
 

@@ -5,6 +5,7 @@ class TestRunnerTest {
         "ThrowsRejectsAFunctionThatReturnsNormally",
         "EqualRejectsCaseOnlyAndTypeOnlyDifferences",
         "NotEqualAcceptsCaseOnlyAndTypeOnlyDifferences",
+        "TemporaryPathsAreUniqueAndProcessScoped",
         "SetupFailureIsCountedAndDoesNotStopTheClass",
         "TeardownRunsAfterSetupFailure",
         "TeardownFailureCountsAsTheTestFailure",
@@ -49,6 +50,22 @@ class TestRunnerTest {
 
         Assert.True(caseDifferenceAccepted, "Assert.NotEqual must distinguish string case")
         Assert.True(typeDifferenceAccepted, "Assert.NotEqual must distinguish value types")
+    }
+
+    TemporaryPathsAreUniqueAndProcessScoped() {
+        first := TestTempPath("pacs-fixture", ".ini")
+        second := TestTempPath("pacs-fixture", ".ini")
+        processId := DllCall("GetCurrentProcessId")
+
+        Assert.NotEqual(first, second)
+        Assert.True(
+            InStr(first, A_Temp "\pacs-fixture-" processId "-") = 1,
+            "Temporary paths must remain under the process-scoped system temp prefix"
+        )
+        Assert.True(
+            SubStr(first, StrLen(first) - 3) == ".ini",
+            "Temporary paths must preserve the requested extension"
+        )
     }
 
     SetupFailureIsCountedAndDoesNotStopTheClass() {

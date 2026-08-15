@@ -11,7 +11,8 @@ The compiled executable embeds the AutoHotkey v2.0.26 runtime.
 
 - Upstream source: https://github.com/AutoHotkey/AutoHotkey/tree/v2.0.26
 - Release source asset: `AutoHotkey-v2.0.26-source.zip`
-- License and bundled PCRE notices: [AutoHotkey-v2.0.26.txt](AutoHotkey-v2.0.26.txt)
+- Repository license and bundled PCRE notices: [repository license copy](licenses/AutoHotkey-v2.0.26.txt)
+- Published release asset: `AutoHotkey-v2.0.26.txt`
 
 ## UIA-v2 v1.1.3
 

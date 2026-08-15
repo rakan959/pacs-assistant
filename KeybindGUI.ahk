@@ -869,7 +869,7 @@ class KeybindGUI {
 
             ; First disable all existing hotkeys
             HotkeyManager.DisableAllHotkeys()
-            
+
             ; Update profile
             currentProfile.binds[funcName] := newBind
             bindingChanged := true
@@ -1992,7 +1992,7 @@ class KeybindGUI {
             )
             return false
         }
-        
+
         if this.ConfirmDestructiveAction(
             "Are you sure you want to delete the custom function '" funcName "'?",
             "Confirm Delete"
@@ -2062,7 +2062,7 @@ class KeybindGUI {
             selectorGui.Destroy()
             this.gui.Destroy()
             this.CreateMainGUI(false)
-            
+
             ; Reopen Add Function only after releasing the publication boundary.
             for ctrl in this.gui {
                 if (ctrl.Type = "ListView") {
@@ -2117,7 +2117,7 @@ class KeybindGUI {
             MsgBox("The keybind name cannot contain |, =, square brackets, or line breaks.", "Invalid Keybind Name", "Icon!")
             return
         }
-        
+
         ; Check if name already exists in current profile
         currentProfile := ProfileManager.profiles[profileName]
         if !this.CustomFunctionNameAvailable(currentProfile, funcName) {
@@ -2235,7 +2235,7 @@ class KeybindGUI {
             MsgBox("Please select a function to remove.", "Error", "Icon!")
             return
         }
-        
+
         funcName := removalState.functionName
         if this.ConfirmDestructiveAction(
             "Remove '" funcName "' from the profile?",

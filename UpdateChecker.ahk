@@ -1232,7 +1232,7 @@ class UpdateChecker {
                 try WinActivate("ahk_id " this.updateDialog.Hwnd)
                 return this.updateDialog
             }
-            
+
             ; Create update dialog with modern styling
             updateGui := Gui(, "PACS Assistant - Update Available")
             updateGui.settingsRevision := Settings.revision

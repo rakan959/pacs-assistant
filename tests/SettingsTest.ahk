@@ -44,7 +44,7 @@ class SettingsTest {
             ? Settings.dialogUnavailableNotifier
             : 0
         this.originalWriteTransactionActive := Settings.writeTransactionActive
-        this.tempFile := A_Temp "\settings_test_" A_TickCount ".ini"
+        this.tempFile := TestTempPath("settings-test", ".ini")
         Settings.settingsFile := this.tempFile
         Settings.changeListeners := []
         Settings.mutationGuard := (*) => true

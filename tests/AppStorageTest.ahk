@@ -14,7 +14,7 @@ class AppStorageTest {
         this.originalDataRoot := AppStorage.dataRootOverride
         this.originalLegacyRoot := AppStorage.legacyRootOverride
         this.originalCopyFile := AppStorage.copyFile
-        this.tempRoot := A_Temp "\pacs_storage_" A_TickCount "_" Random(1000, 9999)
+        this.tempRoot := TestTempPath("pacs-storage")
         this.legacyRoot := this.tempRoot "\legacy"
         this.dataRoot := this.tempRoot "\data"
         DirCreate(this.legacyRoot "\profiles")

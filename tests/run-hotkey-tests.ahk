@@ -189,9 +189,6 @@ Main() {
 
     HotkeyManager.DisableAllHotkeys()
 
-    ; Settings writes its ini next to the running script on load
-    try FileDelete(A_ScriptDir "\settings.ini")
-
     Out("")
     Out(TestsFailed = 0
         ? "PASS - " TestsRun " assertions"
