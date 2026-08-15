@@ -17,8 +17,8 @@ class PACSCommands {
         "Paste Wet Read", (*) => wetRead(),
         "Toggle PowerScribe Window", (*) => toggleWindow("PowerScribe"),
         "Toggle EPIC Window", (*) => toggleWindow("Hyperspace"),
-        "Next Series", (*) => AppControl.SendKeysToWindow("Vue PACS Client", "{Right}"),
-        "Previous Series", (*) => AppControl.SendKeysToWindow("Vue PACS Client", "{Left}"),
+        "Next Series", (*) => AppControl.SendKeysToWindow("Vue PACS Client ahk_exe mp.exe", "{Right}"),
+        "Previous Series", (*) => AppControl.SendKeysToWindow("Vue PACS Client ahk_exe mp.exe", "{Left}"),
         "Set PowerScribe Microphone", (*) => MicrophoneManager.ApplyNow()
     )
 

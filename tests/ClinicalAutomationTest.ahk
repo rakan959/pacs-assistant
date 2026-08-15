@@ -8,6 +8,7 @@ class ClinicalAutomationTest {
         "ActivationFailureDoesNotSend",
         "ActivationCanSucceedButFocusCheckStopsSend",
         "TargetedSendActivatesBeforeSending",
+        "PacsSeriesCommandsConstrainExecutable",
         "BuiltInClinicalCommandUsesConfirmedTarget",
         "TargetedCustomCommandUsesConfirmedTarget",
         "AttendingTargetRequiresSemanticControlIdentity",
@@ -82,6 +83,18 @@ class ClinicalAutomationTest {
         Assert.Equal("active", driver.calls[2].kind)
         Assert.Equal("Vue PACS Client", driver.calls[2].value)
         Assert.Equal("keys", driver.calls[3].kind)
+        Assert.Equal("{Right}", driver.calls[3].value)
+    }
+
+    PacsSeriesCommandsConstrainExecutable() {
+        driver := FakeWindowDriver()
+        AppControl.windowDriver := driver
+
+        PACSCommands.commands["Next Series"].Call()
+
+        expected := "Vue PACS Client ahk_exe mp.exe"
+        Assert.Equal(expected, driver.calls[1].value)
+        Assert.Equal(expected, driver.calls[2].value)
         Assert.Equal("{Right}", driver.calls[3].value)
     }
 
