@@ -210,13 +210,13 @@ class MicrophoneManager {
 
         item := 0
         try {
-            item := combo.WaitElement({Type: "ListItem", Name: micName, mm: "SubString"}, 1000)
+            item := combo.WaitElement({Type: "ListItem", Name: micName, mm: "SubString", cs: false}, 1000)
         }
         if !item {
             ; Some frameworks host the dropdown list outside the combo element
             try {
                 root := UIA.ElementFromHandle("ahk_id " hwnd)
-                item := root.WaitElement({Type: "ListItem", Name: micName, mm: "SubString"}, 500)
+                item := root.WaitElement({Type: "ListItem", Name: micName, mm: "SubString", cs: false}, 500)
             }
         }
 
@@ -248,7 +248,7 @@ class MicrophoneManager {
     static WaitForSelection(combo, micName, timeoutMs, item := 0) {
         started := A_TickCount
         loop {
-            if InStr(UIAValue.Read(combo), micName)
+            if InStr(UIAValue.Read(combo), micName, false)
                 return true
             if item {
                 try {

@@ -130,17 +130,56 @@ class Settings {
         }
     }
 
-    ; Save a setting value
-    static Set(settingName, value) {
+    static WriteSetting(path, settingName, value) {
         ; Handle numeric values
         if (settingName = "RefreshInterval")
-            IniWrite(value, this.settingsFile, "Settings", settingName)
+            IniWrite(value, path, "Settings", settingName)
         ; Handle boolean values
         else if this.IsBooleanSetting(settingName)
-            IniWrite(value ? "1" : "0", this.settingsFile, "Settings", settingName)
+            IniWrite(value ? "1" : "0", path, "Settings", settingName)
         ; Handle string values
         else
-            IniWrite(value, this.settingsFile, "Settings", settingName)
+            IniWrite(value, path, "Settings", settingName)
+    }
+
+    ; Save one setting value. Multi-value GUI changes use SaveValues so callers never
+    ; observe a partially written settings form.
+    static Set(settingName, value) {
+        this.WriteSetting(this.settingsFile, settingName, value)
+    }
+
+    static NewTemporarySettingsPath() {
+        stem := this.settingsFile ".tmp-" DllCall("GetCurrentProcessId") "-" A_TickCount
+        path := stem
+        suffix := 0
+        while FileExist(path) {
+            suffix++
+            path := stem "-" suffix
+        }
+        return path
+    }
+
+    /**
+     * Applies a settings batch to a same-directory copy and replaces the live file
+     * only after every write succeeds. Existing unknown keys and settings managed by
+     * other dialogs are retained.
+     */
+    static SaveValues(values, replacer?) {
+        temporaryPath := this.NewTemporarySettingsPath()
+        try {
+            if FileExist(this.settingsFile)
+                FileCopy(this.settingsFile, temporaryPath, true)
+
+            for setting, value in values
+                this.WriteSetting(temporaryPath, setting, value)
+
+            if IsSet(replacer)
+                replacer.Call(temporaryPath, this.settingsFile)
+            else
+                FileMove(temporaryPath, this.settingsFile, true)
+        } finally {
+            try FileDelete(temporaryPath)
+        }
     }
 
     static AddChangeListener(listener) {
@@ -164,9 +203,7 @@ class Settings {
     
     ; Save all settings to their default values
     static SaveAllSettings() {
-        for setting, value in this.defaultSettings {
-            this.Set(setting, value)
-        }
+        this.SaveValues(this.defaultSettings)
     }
     
     ; Show settings dialog
@@ -385,22 +422,30 @@ class Settings {
             return
         }
 
-        ; Save all checkbox settings
+        values := Map()
+
+        ; Collect all checkbox settings
         for setting, checkbox in controls.checkboxes {
-            this.Set(setting, checkbox.Value)
+            values[setting] := checkbox.Value
         }
 
-        ; Save refresh interval
-        this.Set("RefreshInterval", interval)
+        values["RefreshInterval"] := interval
+        values["MicrophoneName"] := micName
+        values["AlertSound"] := controls.soundDropDown.Text
+        values["CustomSoundFile"] := controls.customSound.Text
 
-        ; Save microphone name
-        this.Set("MicrophoneName", micName)
-
-        ; Save sound settings
-        this.Set("AlertSound", controls.soundDropDown.Text)
-        this.Set("CustomSoundFile", controls.customSound.Text)
+        try this.SaveValues(values)
+        catch as err {
+            MsgBox(
+                "The settings could not be saved. The previous file was left unchanged.`n`n" err.Message,
+                "Save Failed",
+                "Icon!"
+            )
+            return false
+        }
 
         settingsGui.Destroy()
         this.NotifyChanged()
+        return true
     }
 }

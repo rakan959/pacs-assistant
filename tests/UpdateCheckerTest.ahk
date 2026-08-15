@@ -19,6 +19,9 @@ class UpdateCheckerTest {
         "TestSha256KnownVector",
         "TestArtifactValidationRejectsNonExecutable",
         "TestUpdaterScriptRequiresHealthyRelaunch",
+        "TestUpdaterScriptRecoversAfterPreSwapFailure",
+        "TestUpdaterUsesPrivateTemporaryScript",
+        "TestCleanupDoesNotOwnGenericScript",
         "TestSkippedVersionPersistsAcrossReload"
     ]
 
@@ -206,6 +209,31 @@ class UpdateCheckerTest {
         Assert.True(InStr(script, "Start-Process -FilePath $CurrentExe -PassThru") > 0)
         Assert.True(InStr(script, "Start-Sleep -Seconds 5") > 0)
         Assert.True(InStr(script, "$newProcess.HasExited") > 0)
+    }
+
+    TestUpdaterScriptRecoversAfterPreSwapFailure() {
+        script := UpdateChecker.BuildUpdaterScript()
+
+        Assert.True(InStr(script, "$ParentExited = $false") > 0)
+        Assert.True(InStr(script, "$RecoveryLaunched = $false") > 0)
+        Assert.True(InStr(script, "$RecoveryReady = $false") > 0)
+        Assert.True(InStr(script, "if ($ParentExited -and -not $RecoveryLaunched)") > 0)
+        Assert.True(InStr(script, "Start-Process -FilePath $CurrentExe") > 0)
+    }
+
+    TestUpdaterUsesPrivateTemporaryScript() {
+        path := UpdateChecker.CreateUpdaterPath()
+
+        Assert.True(InStr(path, A_Temp "\pacs-assistant-updater-") = 1)
+        Assert.False(path = A_ScriptDir "\update.ps1")
+    }
+
+    TestCleanupDoesNotOwnGenericScript() {
+        names := UpdateChecker.OwnedUpdateArtifactNames()
+
+        for name in names
+            Assert.False(name = "update.ps1")
+        Assert.Equal(2, names.Length)
     }
 
     TestSkippedVersionPersistsAcrossReload() {

@@ -45,6 +45,8 @@ $workflow = Get-Content -Raw (Join-Path $repoRoot '.github/workflows/ahk2exe.yml
 $gitmodules = Get-Content -Raw (Join-Path $repoRoot '.gitmodules')
 $readme = Get-Content -Raw (Join-Path $repoRoot 'README.md')
 $issueTemplate = Get-Content -Raw (Join-Path $repoRoot '.github/ISSUE_TEMPLATE/bug_report.md')
+$featureTemplate = Get-Content -Raw (Join-Path $repoRoot '.github/ISSUE_TEMPLATE/feature_request.md')
+$versionGeneratorPath = Join-Path $repoRoot 'scripts/GenerateVersion.ps1'
 $main = Get-Content -Raw (Join-Path $repoRoot 'main.ahk')
 $profileManager = Get-Content -Raw (Join-Path $repoRoot 'ProfileManager.ahk')
 $powerScribe = Get-Content -Raw (Join-Path $repoRoot 'PowerScribe.ahk')
@@ -74,7 +76,10 @@ Assert-Matches $workflow '(?m)^\s*runs-on:\s*windows-2025\s*$' 'The build job mu
 Assert-Matches $workflow '(?m)^\s*runs-on:\s*ubuntu-24\.04\s*$' 'The release job must use a versioned Ubuntu runner image.'
 Assert-NotMatches $workflow '(?m)^\s*runs-on:\s*\S+-latest\s*$' 'Workflow runner labels must not float on -latest.'
 Assert-Matches $workflow '(?m)^\s*& tests/RepositoryContract\.ps1\s*$' 'CI must run the repository contract check.'
+Assert-Matches $workflow '(?m)^\s*& scripts/GenerateVersion\.ps1\b' 'CI must generate Version.ahk through the tested version script.'
 Assert-Matches $workflow '(?m)^\s*licenses/AutoHotkey-v2\.0\.26\.txt\s*$' 'Release artifacts must include the AutoHotkey runtime license.'
+Assert-NotMatches $workflow '\$env:RELEASE_TAG\.Contains\(''-''\)' 'Release publication must not classify build-metadata hyphens as prerelease markers.'
+Assert-Matches $workflow "\`$env:RELEASE_TAG\s+-match\s+'\^v\(\?:0\|\[1-9\]\\d\*\).*-'" 'Release publication must detect a prerelease marker only between the core version and build metadata.'
 
 foreach ($match in [regex]::Matches($workflow, '(?m)^\s*uses:\s*(?<reference>\S+)\s*$')) {
     $reference = $match.Groups['reference'].Value
@@ -107,6 +112,75 @@ Assert-Matches $readme 'GPL-3\.0' 'README must identify the project license.'
 Assert-NotMatches $issueTemplate '(?i)\bsmartphone\b|\bbrowser\b|\biOS\b' 'The bug template must not ask irrelevant browser or smartphone questions.'
 Assert-Matches $issueTemplate 'PowerScribe' 'The bug template must request PowerScribe context.'
 Assert-Matches $issueTemplate '\bPACS\b' 'The bug template must request PACS context.'
+Assert-Matches $featureTemplate '(?i)protected health information|\bPHI\b' 'The feature template must prohibit protected health information.'
+Assert-Matches $featureTemplate '(?i)redact.+screenshots|screenshots.+redact' 'The feature template must tell reporters to redact screenshots.'
+
+if (-not (Test-Path -LiteralPath $versionGeneratorPath -PathType Leaf)) {
+    $failures.Add('scripts/GenerateVersion.ps1 must own and validate release version generation.')
+} else {
+    function Invoke-VersionGenerator {
+        param(
+            [string] $RefType,
+            [string] $RefName,
+            [string] $CommitSha = '0123456789abcdef0123456789abcdef01234567'
+        )
+
+        $caseRoot = Join-Path ([IO.Path]::GetTempPath()) ("pacs-version-contract-" + [guid]::NewGuid().ToString('N'))
+        $outputPath = Join-Path $caseRoot 'Version.ahk'
+        [void](New-Item -ItemType Directory -Path $caseRoot)
+        try {
+            try {
+                $messages = @(& $versionGeneratorPath -RefType $RefType -RefName $RefName -CommitSha $CommitSha -OutputPath $outputPath 2>&1)
+                return [pscustomobject]@{
+                    Succeeded = $true
+                    Content = Get-Content -Raw -LiteralPath $outputPath
+                    Message = $messages -join [Environment]::NewLine
+                }
+            } catch {
+                return [pscustomobject]@{
+                    Succeeded = $false
+                    Content = ''
+                    Message = $_.Exception.Message
+                }
+            }
+        } finally {
+            Remove-Item -LiteralPath $caseRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    $tagResult = Invoke-VersionGenerator -RefType tag -RefName 'v2.3.4-beta.1+build.5'
+    if (-not $tagResult.Succeeded) {
+        $failures.Add("Valid SemVer tag generation failed: $($tagResult.Message)")
+    } else {
+        Assert-Matches $tagResult.Content 'static current := "v2\.3\.4-beta\.1\+build\.5"' 'Generated AppVersion must retain the exact valid release tag.'
+        Assert-Matches $tagResult.Content 'Ahk2Exe-SetVersion 2\.3\.4\.0' 'Generated file metadata must use the numeric SemVer core.'
+        Assert-Matches $tagResult.Content 'static isDevBuild := false' 'Tagged builds must not be marked as development builds.'
+    }
+
+    $devResult = Invoke-VersionGenerator -RefType branch -RefName 'main'
+    if (-not $devResult.Succeeded) {
+        $failures.Add("Development version generation failed: $($devResult.Message)")
+    } else {
+        Assert-Matches $devResult.Content 'static current := "v0\.0\.0-dev\+0123456"' 'Development builds must include the short commit identity.'
+        Assert-Matches $devResult.Content 'static isDevBuild := true' 'Branch builds must be marked as development builds.'
+    }
+
+    foreach ($invalidTag in @(
+        'v01.2.3',
+        'v1.02.3',
+        'v1.2.03',
+        'v1.2.3-alpha..1',
+        'v1.2.3-01',
+        'v1.2.3+',
+        'v1.2.3-alpha_1',
+        'v65536.0.0'
+    )) {
+        $invalidResult = Invoke-VersionGenerator -RefType tag -RefName $invalidTag
+        if ($invalidResult.Succeeded) {
+            $failures.Add("Invalid release tag was accepted: $invalidTag")
+        }
+    }
+}
 
 if (-not (Test-Path -LiteralPath $noticesPath -PathType Leaf)) {
     $failures.Add('THIRD_PARTY_NOTICES.md must accompany the bundled UIA-v2 dependency.')

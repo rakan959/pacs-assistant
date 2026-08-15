@@ -5,6 +5,7 @@
 class MicrophoneManagerTest {
     static Tests := [
         "WaitForSelectionRequiresTheRequestedValue",
+        "WaitForSelectionIgnoresDisplayCasing",
         "FindMicrophoneComboUsesFallbackAfterPrimaryFailure",
         "FindMicrophoneComboReturnsZeroWhenLookupsFail",
         "FinalSelectionFailureNotifiesOnce",
@@ -32,6 +33,12 @@ class MicrophoneManagerTest {
 
         Assert.True(MicrophoneManager.WaitForSelection(matching, "PowerMic", 0))
         Assert.False(MicrophoneManager.WaitForSelection(other, "PowerMic", 0))
+    }
+
+    WaitForSelectionIgnoresDisplayCasing() {
+        combo := FakeMicrophoneCombo("POWERMIC III")
+
+        Assert.True(MicrophoneManager.WaitForSelection(combo, "powermic", 0))
     }
 
     FindMicrophoneComboUsesFallbackAfterPrimaryFailure() {

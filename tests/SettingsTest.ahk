@@ -11,6 +11,8 @@ class SettingsTest {
         "TestLegacyAliasesAreSelectable",
         "TestLegacySoundNamesMigrate",
         "TestFindSoundIndexFallback",
+        "TestFailedBatchPreservesOriginalFile",
+        "TestBatchPreservesUnmanagedSettings",
         "TestSavingSettingsNotifiesListeners",
         "TestChangeListenersAllRun",
         "TestChangeListenerFailureDoesNotBlockLaterListeners"
@@ -66,16 +68,15 @@ class SettingsTest {
         Assert.Equal(Settings.defaultSettings["AutoUpdate"], Settings.Get("AutoUpdate"))
     }
     
-    ; The alert sounds used to be MessageBeep aliases, which the stock Windows sound
-    ; scheme collapses onto a couple of files, so every option sounded the same. Each
-    ; one must now resolve to its own file.
+    ; The catalogue is a repository contract. Optional Windows Media files are a
+    ; runtime capability and production deliberately falls back when one is absent.
     TestAlertSoundsAreDistinct() {
         seen := Map()
         for name, file in Settings.soundFiles {
-            path := Settings.ResolveSoundFile(name)
-            Assert.True(path != "", "No file for alert sound: " name " (" file ")")
-            Assert.False(seen.Has(path), "Alert sound reuses another sound's file: " name)
-            seen[path] := name
+            key := StrLower(Trim(file))
+            Assert.True(key != "", "No filename configured for alert sound: " name)
+            Assert.False(seen.Has(key), "Alert sound reuses another sound's file: " name)
+            seen[key] := name
         }
         Assert.Equal(Settings.soundFiles.Count, seen.Count)
 
@@ -111,6 +112,34 @@ class SettingsTest {
         Assert.Equal("Default Beep", Settings.alertSounds[Settings.FindSoundIndex("Default")])
         Assert.Equal("Notification", Settings.alertSounds[Settings.FindSoundIndex("Asterisk")])
         Assert.Equal("Default Beep", Settings.alertSounds[Settings.FindSoundIndex("NotRealSound")])
+    }
+
+    TestFailedBatchPreservesOriginalFile() {
+        Settings.Set("AutoUpdate", true)
+        IniWrite("keep me", Settings.settingsFile, "Extension", "UnknownKey")
+        before := FileRead(Settings.settingsFile)
+        values := Map("AutoUpdate", false, "RefreshInterval", 45)
+
+        Assert.Throws(
+            () => Settings.SaveValues(values, FailSettingsReplace),
+            "simulated settings replace failure"
+        )
+
+        Assert.Equal(before, FileRead(Settings.settingsFile))
+        Assert.True(Settings.Get("AutoUpdate"))
+        Assert.Equal(60, Settings.Get("RefreshInterval"))
+    }
+
+    TestBatchPreservesUnmanagedSettings() {
+        Settings.Set("SkippedUpdateVersion", "v9.9.9")
+        IniWrite("keep me", Settings.settingsFile, "Extension", "UnknownKey")
+
+        Settings.SaveValues(Map("AutoUpdate", false, "RefreshInterval", 45))
+
+        Assert.False(Settings.Get("AutoUpdate"))
+        Assert.Equal(45, Settings.Get("RefreshInterval"))
+        Assert.Equal("v9.9.9", Settings.Get("SkippedUpdateVersion"))
+        Assert.Equal("keep me", IniRead(Settings.settingsFile, "Extension", "UnknownKey"))
     }
 
     TestSavingSettingsNotifiesListeners() {
@@ -171,6 +200,10 @@ class SettingsTest {
 
 ThrowSettingsListener(*) {
     throw Error("listener failed")
+}
+
+FailSettingsReplace(*) {
+    throw Error("simulated settings replace failure")
 }
 
 class FakeSettingsDialog {

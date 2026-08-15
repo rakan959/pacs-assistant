@@ -577,6 +577,31 @@ class UpdateChecker {
             && fileVersion.patch = expected.patch
     }
 
+    static OwnedUpdateArtifactNames() {
+        return ["pacs-assistant.backup.exe", "pacs-assistant.new.exe"]
+    }
+
+    static CreateUpdaterPath() {
+        guid := Buffer(16)
+        status := DllCall("ole32\CoCreateGuid", "Ptr", guid.Ptr, "Int")
+        if status != 0
+            throw Error("Could not allocate a private updater identifier")
+
+        textBuffer := Buffer(39 * 2, 0)
+        length := DllCall(
+            "ole32\StringFromGUID2",
+            "Ptr", guid.Ptr,
+            "Ptr", textBuffer.Ptr,
+            "Int", 39,
+            "Int"
+        )
+        if length <= 0
+            throw Error("Could not format the private updater identifier")
+
+        identifier := StrReplace(StrReplace(StrGet(textBuffer, "UTF-16"), "{"), "}")
+        return A_Temp "\pacs-assistant-updater-" identifier ".ps1"
+    }
+
     static BuildUpdaterScript() {
         script := "
         (
@@ -584,6 +609,12 @@ class UpdateChecker {
         $CurrentExe = [string]$args[1]
         $NewExe = [string]$args[2]
         $BackupExe = [string]$args[3]
+
+        $ParentExited = $false
+        $RecoveryLaunched = $false
+        $RecoveryReady = $false
+        $SwapStarted = $false
+        $NewProcess = $null
 
         $ErrorActionPreference = 'Stop'
         try {
@@ -595,29 +626,55 @@ class UpdateChecker {
                 Start-Sleep -Milliseconds 200
             }
 
+            $ParentExited = $true
+
             if (Test-Path -LiteralPath $BackupExe) {
                 Remove-Item -LiteralPath $BackupExe -Force
             }
             Move-Item -LiteralPath $CurrentExe -Destination $BackupExe
+            $SwapStarted = $true
 
-            try {
-                Move-Item -LiteralPath $NewExe -Destination $CurrentExe
-                $newProcess = Start-Process -FilePath $CurrentExe -PassThru
-                Start-Sleep -Seconds 5
-                $newProcess.Refresh()
-                if ($newProcess.HasExited) {
-                    throw 'The updated PACS Assistant exited during its startup health check.'
-                }
-            } catch {
-                if (Test-Path -LiteralPath $CurrentExe) {
-                    Remove-Item -LiteralPath $CurrentExe -Force
-                }
-                if (Test-Path -LiteralPath $BackupExe) {
-                    Move-Item -LiteralPath $BackupExe -Destination $CurrentExe
-                    Start-Process -FilePath $CurrentExe
-                }
-                throw
+            Move-Item -LiteralPath $NewExe -Destination $CurrentExe
+            $NewProcess = Start-Process -FilePath $CurrentExe -PassThru
+            Start-Sleep -Seconds 5
+            $NewProcess.Refresh()
+            if ($NewProcess.HasExited) {
+                throw 'The updated PACS Assistant exited during its startup health check.'
             }
+        } catch {
+            $UpdateError = $_
+            if ($ParentExited -and -not $RecoveryLaunched) {
+                $RecoveryReady = -not $SwapStarted
+                try {
+                    if ($null -ne $NewProcess -and -not $NewProcess.HasExited) {
+                        Stop-Process -Id $NewProcess.Id -Force -ErrorAction SilentlyContinue
+                        Wait-Process -Id $NewProcess.Id -Timeout 5 -ErrorAction SilentlyContinue
+                    }
+                } catch {}
+
+                if ($SwapStarted) {
+                    try {
+                        if (Test-Path -LiteralPath $CurrentExe) {
+                            Remove-Item -LiteralPath $CurrentExe -Force
+                        }
+                        if (Test-Path -LiteralPath $BackupExe) {
+                            Move-Item -LiteralPath $BackupExe -Destination $CurrentExe
+                        }
+                        $RecoveryReady = Test-Path -LiteralPath $CurrentExe -PathType Leaf
+                    } catch {
+                        $RecoveryReady = $false
+                    }
+                }
+
+                if ($RecoveryReady -and (Test-Path -LiteralPath $CurrentExe -PathType Leaf)) {
+                    try {
+                        Start-Process -FilePath $CurrentExe
+                        $RecoveryLaunched = $true
+                    } catch {}
+                }
+            }
+
+            throw $UpdateError
         } finally {
             Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
         }
@@ -626,7 +683,7 @@ class UpdateChecker {
     }
 
     static CleanupUpdateArtifacts() {
-        for name in ["pacs-assistant.backup.exe", "pacs-assistant.new.exe", "update.ps1"] {
+        for name in this.OwnedUpdateArtifactNames() {
             path := A_ScriptDir "\" name
             try {
                 if FileExist(path)
@@ -656,7 +713,7 @@ class UpdateChecker {
         currentExe := A_ScriptFullPath
         backupExe := A_ScriptDir "\pacs-assistant.backup.exe"
         newExe := A_ScriptDir "\pacs-assistant.new.exe"
-        updaterPath := A_ScriptDir "\update.ps1"
+        updaterPath := this.CreateUpdaterPath()
 
         try {
             this.CancelUpdateArtifactCleanup()
@@ -667,7 +724,7 @@ class UpdateChecker {
             if (FileExist(newExe))
                 FileDelete(newExe)
             if (FileExist(updaterPath))
-                FileDelete(updaterPath)
+                throw Error("The private updater script path already exists")
 
             this.transport.Download(updateInfo.downloadUrl, newExe)
             if !this.ValidateDownloadedArtifact(
