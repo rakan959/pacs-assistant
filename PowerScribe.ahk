@@ -30,6 +30,9 @@ class NativeAttendingControlDriver {
             rootProcess := root.ProcessId
             if (rootProcess <= 0 || control.ProcessId != rootProcess)
                 return false
+            rootWindow := root.WinId
+            if (rootWindow <= 0 || control.WinId != rootWindow)
+                return false
             if (control.Type != UIA.Type.Edit && control.Type != UIA.Type.ComboBox)
                 return false
             if !control.IsEnabled

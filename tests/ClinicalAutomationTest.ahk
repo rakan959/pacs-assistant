@@ -113,11 +113,13 @@ class ClinicalAutomationTest {
         wrongType := FakeAttendingTargetElement(UIA.Type.Button, 42, "Attending", "attendingPicker", true)
         wrongMeaning := FakeAttendingTargetElement(UIA.Type.Edit, 42, "Report", "reportEditor", true)
         wrongProcess := FakeAttendingTargetElement(UIA.Type.Edit, 99, "Attending", "attendingPicker", true)
+        wrongWindow := FakeAttendingTargetElement(UIA.Type.Edit, 42, "Attending", "attendingPicker", true, 200)
 
         Assert.True(NativeAttendingControlDriver.IsExpectedControl(root, valid))
         Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, wrongType))
         Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, wrongMeaning))
         Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, wrongProcess))
+        Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, wrongWindow))
     }
 
     NativeAttendingWriteRefusesLostControlFocus() {
@@ -459,9 +461,10 @@ class FakeAttendingControlDriver {
 }
 
 class FakeAttendingTargetElement {
-    __New(type, processId, name := "", automationId := "", writable := false) {
+    __New(type, processId, name := "", automationId := "", writable := false, windowId := 100) {
         this.Type := type
         this.ProcessId := processId
+        this.WinId := windowId
         this.Name := name
         this.AutomationId := automationId
         this.IsEnabled := true
