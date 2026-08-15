@@ -33,7 +33,8 @@ class WetReadTest {
         "NativeSendRefusesWrongStickyControlFocus",
         "NativeForwardVerificationRejectsCaseOnlyDifference",
         "NativeRollbackVerificationRejectsCaseOnlyDifference",
-        "RoutingFailureReportsTheActualCause"
+        "RoutingFailureReportsTheActualCause",
+        "AttendingFailureIsReportedAcrossEveryStickySetupExit"
     ]
 
     ClipboardFailureDoesNotTouchTheNote() {
@@ -409,6 +410,44 @@ class WetReadTest {
         Assert.True(InStr(message, "could not safely control PowerScribe") > 0)
         Assert.False(InStr(message, "Could not read the report") > 0)
     }
+
+    AttendingFailureIsReportedAcrossEveryStickySetupExit() {
+        routingCases := [
+            {reportText: "", routingError: 0},
+            {
+                reportText: "EXAMINATION: CT CHEST",
+                routingError: Error("simulated routing failure")
+            }
+        ]
+
+        for routingCase in routingCases {
+            for stage in ["opener", "root", "field", "semantic-target"] {
+                notifications := []
+                result := RunWetReadPasteWithAttendingOutcome(
+                    ObjBindMethod(FakeEarlyWetReadExit, "Return", stage),
+                    false,
+                    routingCase.reportText,
+                    routingCase.routingError,
+                    RecordWetReadNotification.Bind(notifications)
+                )
+
+                Assert.Equal(stage, result)
+                Assert.Equal(1, notifications.Length)
+                Assert.Equal("Attending Not Assigned", notifications[1].title)
+                Assert.True(InStr(notifications[1].text, "Set it manually") > 0)
+            }
+        }
+    }
+}
+
+class FakeEarlyWetReadExit {
+    static Return(stage) {
+        return stage
+    }
+}
+
+RecordWetReadNotification(notifications, text, title, options) {
+    notifications.Push({text: text, title: title, options: options})
 }
 
 class FakeWetReadDriver {

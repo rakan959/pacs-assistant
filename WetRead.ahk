@@ -578,6 +578,28 @@ AttendingFailureMessage(reportText, routingError := 0) {
 	return "The report was read, but no attending was assigned. Set it manually."
 }
 
+RunWetReadPasteWithAttendingOutcome(
+	pasteAction,
+	attendingRouted,
+	reportText,
+	routingError := 0,
+	notifier := 0
+) {
+	; The sticky workflow contains several legitimate fail-closed early returns. Keep
+	; attending outcome reporting outside that control flow so none of those exits can
+	; suppress the clinically distinct manual-routing warning.
+	try return pasteAction.Call()
+	finally {
+		if !attendingRouted {
+			message := AttendingFailureMessage(reportText, routingError)
+			if notifier
+				notifier.Call(message, "Attending Not Assigned", "Icon!")
+			else
+				MsgBox(message, "Attending Not Assigned", "Icon!")
+		}
+	}
+}
+
 wetRead() {
 	; Use clipboard contents; bail out if empty to avoid blank notes
 	clipText := A_Clipboard
@@ -607,6 +629,15 @@ wetRead() {
 			attendingError := err
 	}
 
+	return RunWetReadPasteWithAttendingOutcome(
+		PerformWetReadPaste.Bind(clipText, pasteMode),
+		attendingRouted,
+		haystack,
+		attendingError
+	)
+}
+
+PerformWetReadPaste(clipText, pasteMode) {
 	; Resolve a unique exact PACS title/executable, invoke a unique same-window
 	; semantic button, and capture only the Sticky Notes window that becomes active.
 	stickySession := StickyNoteOpener().Open({title: "Vue PACS", exe: "mp.exe"})
@@ -668,9 +699,6 @@ wetRead() {
 		MsgBox("The wet read operation could not restore the clipboard. Copy any needed clipboard content again.", "Clipboard Restore Failed", "Icon!")
 	}
 
-	if !attendingRouted {
-		MsgBox(AttendingFailureMessage(haystack, attendingError), "Attending Not Assigned", "Icon!")
-	}
 	Return
 }
 
