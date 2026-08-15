@@ -38,18 +38,19 @@ class TestRunner {
     
     static RunTest(instance, methodName, report := true) {
         failure := false
-        setupComplete := false
 
         try {
             if (HasMethod(instance, "Setup"))
                 instance.Setup()
-            setupComplete := true
             instance.%methodName%()
         } catch as err {
             failure := err
         }
 
-        if (setupComplete && HasMethod(instance, "Teardown")) {
+        ; Setup can mutate globals or fixtures before it raises. Teardown is the only
+        ; reliable cleanup boundary, so invoke it after every attempted test even
+        ; when setup itself failed.
+        if HasMethod(instance, "Teardown") {
             try instance.Teardown()
             catch as teardownError {
                 if (failure) {

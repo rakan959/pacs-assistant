@@ -4,6 +4,7 @@ class TestRunnerTest {
     static Tests := [
         "ThrowsRejectsAFunctionThatReturnsNormally",
         "SetupFailureIsCountedAndDoesNotStopTheClass",
+        "TeardownRunsAfterSetupFailure",
         "TeardownFailureCountsAsTheTestFailure",
         "TeardownRunsAfterABodyFailure"
     ]
@@ -25,6 +26,16 @@ class TestRunnerTest {
         Assert.Equal(1, result.successes)
         Assert.Equal(1, result.failures)
         Assert.Equal(1, SetupFailureProbe.bodyCalls)
+    }
+
+    TeardownRunsAfterSetupFailure() {
+        PartialSetupFailureProbe.Reset()
+        result := this.RunProbe(PartialSetupFailureProbe)
+
+        Assert.Equal(0, result.successes)
+        Assert.Equal(1, result.failures)
+        Assert.Equal(1, PartialSetupFailureProbe.teardownCalls)
+        Assert.False(PartialSetupFailureProbe.dirty)
     }
 
     TeardownFailureCountsAsTheTestFailure() {
@@ -104,6 +115,31 @@ class TeardownFailureProbe {
 
     Teardown() {
         throw Error("teardown failed")
+    }
+}
+
+class PartialSetupFailureProbe {
+    static Tests := ["NeverRuns"]
+    static dirty := false
+    static teardownCalls := 0
+
+    static Reset() {
+        this.dirty := false
+        this.teardownCalls := 0
+    }
+
+    Setup() {
+        PartialSetupFailureProbe.dirty := true
+        throw Error("setup failed after mutation")
+    }
+
+    NeverRuns() {
+        throw Error("test body must not run")
+    }
+
+    Teardown() {
+        PartialSetupFailureProbe.teardownCalls++
+        PartialSetupFailureProbe.dirty := false
     }
 }
 
