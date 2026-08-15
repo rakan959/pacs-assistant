@@ -128,6 +128,59 @@ class UpdateChecker {
         Settings.Set("SkippedUpdateVersion", version)
         this.skippedVersion := version
     }
+
+    /**
+     * Commits every preference represented by one update-dialog action as a single
+     * settings transaction. The optional skipped version belongs in that same batch:
+     * the user clicked one button, so a disk failure must preserve all prior values.
+     */
+    static SaveUpdatePreferences(autoUpdate, skipBetaVersions, skippedVersion?, replacer?) {
+        values := Map(
+            "AutoUpdate", autoUpdate ? true : false,
+            "SkipBetaVersions", skipBetaVersions ? true : false
+        )
+        if IsSet(skippedVersion) {
+            if (Type(skippedVersion) != "String" || Trim(skippedVersion) = "")
+                throw ValueError("Skipped update version must be a non-empty string")
+            values["SkippedUpdateVersion"] := skippedVersion
+        }
+
+        if IsSet(replacer)
+            Settings.SaveValues(values, replacer)
+        else
+            Settings.SaveValues(values)
+
+        if IsSet(skippedVersion)
+            this.skippedVersion := skippedVersion
+        return true
+    }
+
+    static TrySaveUpdatePreferences(autoUpdate, skipBetaVersions, skippedVersion?) {
+        try {
+            if IsSet(skippedVersion)
+                this.SaveUpdatePreferences(autoUpdate, skipBetaVersions, skippedVersion)
+            else
+                this.SaveUpdatePreferences(autoUpdate, skipBetaVersions)
+        } catch as err {
+            MsgBox(
+                "The update preferences could not be saved. The previous settings were left unchanged.`n`n" err.Message,
+                "Save Failed",
+                "Icon!"
+            )
+            return false
+        }
+
+        try this.OnSettingsChanged()
+        catch as err {
+            MsgBox(
+                "The update preferences were saved, but the automatic-check schedule could not be refreshed. Restart PACS Assistant to apply it.`n`n" err.Message,
+                "Update Schedule Failed",
+                "Icon!"
+            )
+            return false
+        }
+        return true
+    }
     
     ; Leading integer of a version field, 0 if there isn't one
     static ToInt(text) {
@@ -402,29 +455,33 @@ class UpdateChecker {
         ; Persisting the two checkboxes has to happen on every way out of the dialog.
         ; It used to live only in the Close handler, and Gui.Destroy() does not raise
         ; Close - so every button discarded the user's choices.
-        saveChoices := (*) => (
-            Settings.Set("AutoUpdate", autoUpdateCheckbox.Value),
-            Settings.Set("SkipBetaVersions", skipBetaCheckbox.Value),
-            this.OnSettingsChanged()
+        saveChoices := (*) => this.TrySaveUpdatePreferences(
+            autoUpdateCheckbox.Value,
+            skipBetaCheckbox.Value
         )
-        dismiss := (*) => (saveChoices(), updateGui.Destroy())
+        saveSkippedChoices := (*) => this.TrySaveUpdatePreferences(
+            autoUpdateCheckbox.Value,
+            skipBetaCheckbox.Value,
+            updateInfo.latestVersion
+        )
+        dismiss := (*) => (saveChoices() && updateGui.Destroy())
 
         ; Buttons
         buttonGroup := updateGui.Add("GroupBox", "y+15 w400 h50")
         updateGui.Add("Button", "xp+10 yp+15 w120", "Update Now").OnEvent("Click", (*) => (
-            saveChoices(),
-            this.PerformUpdate(updateInfo, updateGui)
+            saveChoices() && this.PerformUpdate(updateInfo, updateGui)
         ))
         updateGui.Add("Button", "x+10 w120", "Remind Me Later").OnEvent("Click", (*) => (
-            this.lastRemindTime := A_TickCount,  ; Set the remind time
-            dismiss()
+            saveChoices() && (
+                this.lastRemindTime := A_TickCount,  ; Set the remind time
+                updateGui.Destroy()
+            )
         ))
         updateGui.Add("Button", "x+10 w120", "Skip This Version").OnEvent("Click", (*) => (
-            this.SkipVersion(updateInfo.latestVersion),
-            dismiss()
+            saveSkippedChoices() && updateGui.Destroy()
         ))
 
-        updateGui.OnEvent("Close", saveChoices)
+        updateGui.OnEvent("Close", dismiss)
 
         updateGui.Show()
     }

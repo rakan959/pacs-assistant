@@ -23,6 +23,8 @@ class UpdateCheckerTest {
         "TestUpdaterScriptRecoversAfterPreSwapFailure",
         "TestUpdaterUsesPrivateTemporaryScript",
         "TestCleanupDoesNotOwnGenericScript",
+        "TestUpdateDialogPreferencesCommitTogether",
+        "TestUpdateDialogPreferenceFailurePreservesEveryValue",
         "TestSkippedVersionPersistsAcrossReload"
     ]
 
@@ -242,6 +244,35 @@ class UpdateCheckerTest {
         Assert.Equal(2, names.Length)
     }
 
+    TestUpdateDialogPreferencesCommitTogether() {
+        UpdateChecker.SaveUpdatePreferences(false, false, "v2.3.0")
+
+        Assert.False(Settings.Get("AutoUpdate"))
+        Assert.False(Settings.Get("SkipBetaVersions"))
+        Assert.Equal("v2.3.0", Settings.Get("SkippedUpdateVersion"))
+        Assert.Equal("v2.3.0", UpdateChecker.skippedVersion)
+    }
+
+    TestUpdateDialogPreferenceFailurePreservesEveryValue() {
+        before := FileRead(Settings.settingsFile)
+
+        Assert.Throws(
+            () => UpdateChecker.SaveUpdatePreferences(
+                false,
+                false,
+                "v2.3.0",
+                FailUpdatePreferenceReplace
+            ),
+            "simulated update preference replace failure"
+        )
+
+        Assert.Equal(before, FileRead(Settings.settingsFile))
+        Assert.True(Settings.Get("AutoUpdate"))
+        Assert.True(Settings.Get("SkipBetaVersions"))
+        Assert.Equal("", Settings.Get("SkippedUpdateVersion"))
+        Assert.Equal("", UpdateChecker.skippedVersion)
+    }
+
     TestSkippedVersionPersistsAcrossReload() {
         UpdateChecker.SkipVersion("v2.2.0")
         UpdateChecker.skippedVersion := ""
@@ -276,4 +307,8 @@ class UpdateCheckerTest {
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalSettingsFile
     }
+}
+
+FailUpdatePreferenceReplace(*) {
+    throw Error("simulated update preference replace failure")
 }

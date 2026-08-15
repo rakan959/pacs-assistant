@@ -119,6 +119,17 @@ Main() {
     Check("settings dialog builds", () => Settings.ShowDialog())
     CloseWindow("PACS Assistant - Settings")
 
+    updateInfo := {
+        hasUpdate: true,
+        currentVersion: "v2.0.0",
+        latestVersion: "v2.1.0",
+        releaseNotes: "Smoke-test release"
+    }
+    Check("update dialog builds", () => UpdateChecker.ShowUpdateDialog(updateInfo))
+    CloseWindow("PACS Assistant - Update Available")
+    Assert(!WinExist("PACS Assistant - Update Available"), "closing update dialog commits preferences and closes")
+    UpdateChecker.StopAutoCheck()
+
     registeredBeforeSwitch := HotkeyManager.activeHotkeys.Count
     Check("profile selector builds", () => kb.OpenProfileSelector())
     Assert(HotkeyManager.activeHotkeys.Count = 0, "profile selection suspends the prior profile hotkeys")
@@ -141,6 +152,7 @@ Main() {
 
     ; Leave no hotkeys registered behind
     HotkeyManager.DisableAllHotkeys()
+    UpdateChecker.StopAutoCheck()
     try kb.gui.Destroy()
 
     ProfileManager.configPath := originalConfigPath
