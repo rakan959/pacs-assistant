@@ -29,6 +29,8 @@ class KeybindGUITest {
         "TestStaleRenameDialogCannotRenameAnotherProfile",
         "TestDestroyedRenameDialogCannotMutateProfile",
         "TestRenameDialogCannotMutateSameNameReplacement",
+        "TestRenamePromptHonorsDirtyCancel",
+        "TestCaseOnlyRenamePersistsResolvedDirtyChanges",
         "TestSuccessfulMainRenameDoesNotReapplyHotkeys",
         "TestCreateProfileSurfacesStorageRecovery",
         "TestDirtyScopeEditBlocksProfileSwitchWhenCancelled",
@@ -825,6 +827,79 @@ class KeybindGUITest {
         Assert.False(result)
         Assert.True(keptReplacement)
         Assert.Equal(0, gui.createCalls)
+    }
+
+    TestRenamePromptHonorsDirtyCancel() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        profile := ProfileManager.NewProfile()
+        gui := {
+            base: DirtyRenameTestGUI.Prototype,
+            dialogCreateCalls: 0,
+            profileLeaveDriver: FixedProfileLeaveDriver("Cancel")
+        }
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            gui.MarkProfileDirty("Test")
+            result := gui.PromptRenameProfile("Test")
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.False(result)
+        Assert.True(gui.IsProfileDirty("Test"))
+        Assert.Equal(0, gui.dialogCreateCalls)
+    }
+
+    TestCaseOnlyRenamePersistsResolvedDirtyChanges() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        originalRevisions := ProfileManager.profileRevisions
+        tempRoot := A_Temp "\pacs_dirty_case_rename_" A_TickCount
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := ""
+        profile.scopes["Sign Report"] := "Any"
+        dialog := FakeProfileDialog("Night")
+        gui := {
+            base: DirtyRenameTestGUI.Prototype,
+            createCalls: 0,
+            applyCalls: 0,
+            dialogCreateCalls: 0,
+            profileLeaveDriver: FixedProfileLeaveDriver("Yes")
+        }
+        gui.gui := FakeProfileDialog()
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profileRevisions := Map()
+            ProfileManager.profiles := Map("Night", profile)
+            ProfileManager.currentProfile := "Night"
+            ProfileManager.SaveProfile("Night", profile)
+            profile.scopes["Sign Report"] := "PACS"
+            gui.MarkProfileDirty("Night")
+
+            Assert.True(gui.ResolveDirtyProfileBeforeLeaving())
+            Assert.True(gui.CaptureRenameDialogState(dialog, "Night"))
+            Assert.True(gui.RenameProfile("Night", "night", dialog))
+            reloaded := ProfileManager.LoadProfile(ProfileManager.ProfilePath("night"))
+            persistedScope := reloaded.scopes["Sign Report"]
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profilesPath := originalProfilesPath
+            ProfileManager.profileRevisions := originalRevisions
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.Equal("PACS", persistedScope)
+        Assert.False(gui.IsProfileDirty("Night"))
+        Assert.False(gui.IsProfileDirty("night"))
     }
 
     TestSuccessfulMainRenameDoesNotReapplyHotkeys() {
@@ -1646,6 +1721,23 @@ class DirtyLeaveTestGUI extends KeybindGUI {
 
     RequestExit() {
         this.exitCalls++
+    }
+}
+
+class DirtyRenameTestGUI extends DirtyLeaveTestGUI {
+    GuiIsLive(gui) {
+        return !HasProp(gui, "destroyed") || !gui.destroyed
+    }
+
+    NewProfileDialog(*) {
+        this.dialogCreateCalls++
+        throw Error("rename dialog must not be created")
+    }
+
+    CreateMainGUI(applyBinds := true) {
+        this.createCalls++
+        if applyBinds
+            this.applyCalls++
     }
 }
 

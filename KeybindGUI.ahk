@@ -1054,8 +1054,15 @@ class KeybindGUI {
     PromptRenameProfile(name, parentGui := 0) {
         if (name = "") {
             MsgBox("Please select a profile first.", "Error", "Icon!")
-            return
+            return false
         }
+        ; A case-only rename moves the existing file rather than rewriting it. Make
+        ; the current in-memory profile match disk before capturing the dialog so no
+        ; dirty binding can be silently discarded when the dirty flag is rekeyed.
+        if (!parentGui
+            && name == ProfileManager.currentProfile
+            && !this.ResolveDirtyProfileBeforeLeaving())
+            return false
 
         renameGui := this.NewProfileDialog(
             "PACS Assistant - Rename Profile",
@@ -1134,6 +1141,7 @@ class KeybindGUI {
         valid := this.GuiIsLive(renameGui)
             && capturedName == oldName
             && ProfileManager.profiles.Has(oldName)
+            && !this.IsProfileDirty(oldName)
             && HasProp(renameGui, "profilePointer")
             && ObjPtr(ProfileManager.profiles[oldName]) = renameGui.profilePointer
             && HasProp(renameGui, "profileRevision")
