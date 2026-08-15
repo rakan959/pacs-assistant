@@ -51,6 +51,7 @@ $main = Get-Content -Raw (Join-Path $repoRoot 'main.ahk')
 $profileManager = Get-Content -Raw (Join-Path $repoRoot 'ProfileManager.ahk')
 $powerScribe = Get-Content -Raw (Join-Path $repoRoot 'PowerScribe.ahk')
 $wetRead = Get-Content -Raw (Join-Path $repoRoot 'WetRead.ahk')
+$updateChecker = Get-Content -Raw (Join-Path $repoRoot 'UpdateChecker.ahk')
 $noticesPath = Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md'
 $autoHotkeyLicensePath = Join-Path $repoRoot 'licenses/AutoHotkey-v2.0.26.txt'
 
@@ -84,8 +85,16 @@ Assert-Matches $workflow '(?m)^\s*AutoHotkey-v2\.0\.26-source\.zip\s*$' 'Build a
 Assert-Matches $workflow "Join-Path \`$PWD 'release/AutoHotkey-v2\.0\.26-source\.zip'" 'Tagged releases must publish the AutoHotkey corresponding-source archive.'
 Assert-NotMatches $workflow '\$env:RELEASE_TAG\.Contains\(''-''\)' 'Release publication must not classify build-metadata hyphens as prerelease markers.'
 Assert-Matches $workflow "\`$env:RELEASE_TAG\s+-match\s+'\^v\(\?:0\|\[1-9\]\\d\*\).*-'" 'Release publication must detect a prerelease marker only between the core version and build metadata.'
+Assert-NotMatches $workflow '(?m)^\s*''--clobber''\s*$' 'Published release assets must never be replaced in place.'
+Assert-Matches $workflow 'Get-FileHash\s+-LiteralPath\s+\$asset\s+-Algorithm\s+SHA256' 'Existing releases must compare each local asset SHA-256.'
+Assert-Matches $workflow '\$remoteAsset\.digest' 'Existing releases must compare the API-provided asset digest.'
+Assert-Matches $workflow '\$remoteAsset\.size\s+-ne\s+\$localFile\.Length' 'Existing releases must compare asset sizes before becoming a no-op.'
 
-foreach ($match in [regex]::Matches($workflow, '(?m)^\s*uses:\s*(?<reference>\S+)\s*$')) {
+$actionReferencePattern = '(?m)^\s*uses:\s*(?<reference>\S+?)(?:\s+#.*)?\s*$'
+$usesLineCount = [regex]::Matches($workflow, '(?m)^\s*uses:\s*').Count
+$validatedActionCount = 0
+foreach ($match in [regex]::Matches($workflow, $actionReferencePattern)) {
+    $validatedActionCount++
     $reference = $match.Groups['reference'].Value
     if ($reference -notmatch '@[0-9a-f]{40}$') {
         $failures.Add("GitHub Action is not pinned to an immutable commit: $reference")
@@ -93,6 +102,24 @@ foreach ($match in [regex]::Matches($workflow, '(?m)^\s*uses:\s*(?<reference>\S+
     $action = $reference.Split('@')[0]
     if ($action -notin @('actions/checkout', 'actions/upload-artifact', 'actions/download-artifact')) {
         $failures.Add("GitHub Action is not on the reviewed first-party allowlist: $action")
+    }
+}
+if ($validatedActionCount -ne $usesLineCount) {
+    $failures.Add("Every workflow uses entry must be validated (found $usesLineCount, validated $validatedActionCount).")
+}
+
+# Keep the parser honest for both forms used by contributors. Each fixture is
+# intentionally floating and must be extracted as the same invalid reference even
+# when an inline human-readable version comment follows it.
+foreach ($fixture in @(
+    'uses: actions/checkout@v4',
+    'uses: actions/checkout@v4 # v4'
+)) {
+    $matches = [regex]::Matches($fixture, $actionReferencePattern)
+    if ($matches.Count -ne 1 -or $matches[0].Groups['reference'].Value -ne 'actions/checkout@v4') {
+        $failures.Add("The action-reference parser did not cover negative fixture: $fixture")
+    } elseif ($matches[0].Groups['reference'].Value -match '@[0-9a-f]{40}$') {
+        $failures.Add("A floating action negative fixture was incorrectly accepted: $fixture")
     }
 }
 
@@ -106,6 +133,8 @@ Assert-Matches $wetRead '(?m)^#Include\s+ProfileManager\.ahk\s*$' 'The wet-read 
 foreach ($subscriber in @('UpdateChecker', 'PACSMonitor', 'MicrophoneManager')) {
     Assert-Matches $main ("Settings\.AddChangeListener\(ObjBindMethod\(" + $subscriber) ("main.ahk must explicitly subscribe " + $subscriber + " to settings changes.")
 }
+Assert-Matches $updateChecker 'CreateRequest\(url,\s*true\)' 'Automatic update metadata requests must use WinHTTP asynchronous mode.'
+Assert-Matches $main '(?s)PACSMonitor\.Start\(\).*MicrophoneManager\.Start\(\).*kbGUI\s*:=\s*KeybindGUI\(\).*UpdateChecker\.Start\(\)' 'Clinical services, GUI, and hotkeys must initialize before automatic network checks start.'
 
 Assert-Matches $readme 'git clone --recurse-submodules' 'README must document cloning with submodules.'
 Assert-Matches $readme 'AutoHotkey v2\.0\.26' 'README must state the AutoHotkey version used by CI.'
@@ -113,6 +142,8 @@ Assert-Matches $readme 'Ahk2Exe v1\.1\.37\.02a2' 'README must state the Ahk2Exe 
 Assert-Matches $readme 'THIRD_PARTY_NOTICES\.md' 'README must link the bundled dependency notices.'
 Assert-Matches $readme 'AutoHotkey-v2\.0\.26-source\.zip' 'README must identify the corresponding-source release asset.'
 Assert-Matches $readme 'GPL-3\.0' 'README must identify the project license.'
+Assert-Matches $readme 'Start-Process\s+-FilePath\s+\$ahk.*-Wait\s+-PassThru' 'Local AutoHotkey test commands must wait for the GUI-subsystem process.'
+Assert-Matches $readme '\$process\.ExitCode\s+-ne\s+0' 'Local AutoHotkey test commands must propagate the process exit code.'
 
 Assert-NotMatches $issueTemplate '(?i)\bsmartphone\b|\bbrowser\b|\biOS\b' 'The bug template must not ask irrelevant browser or smartphone questions.'
 Assert-Matches $issueTemplate 'PowerScribe' 'The bug template must request PowerScribe context.'

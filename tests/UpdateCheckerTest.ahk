@@ -11,11 +11,14 @@ class UpdateCheckerTest {
         "TestVersionEquivalence",
         "TestAutoCheckTimerRespectsSettings",
         "TestSettingsChangeRestartsTimer",
+        "TestAutomaticCheckUsesAsyncTransport",
+        "TestSettingsChangeCancelsInFlightAutomaticCheck",
         "TestVersionComesFromAppVersion",
         "TestJsonParserHandlesEscapesAndUnicode",
         "TestJsonParserRejectsUppercaseTokensAndEscapes",
         "TestReleaseParserKeepsAssetMetadataTogether",
         "TestReleaseParserAcceptsArrayResponse",
+        "TestReleaseStatusDistinguishesExpectedAbsenceFromFailure",
         "TestDownloadUrlMustBelongToThisRepository",
         "TestSha256KnownVector",
         "TestArtifactValidationRejectsNonExecutable",
@@ -33,6 +36,8 @@ class UpdateCheckerTest {
         this.tempSettings := A_Temp "\update_settings_" A_TickCount ".ini"
         Settings.settingsFile := this.tempSettings
         Settings.SaveAllSettings()
+        this.originalTransport := UpdateChecker.transport
+        UpdateChecker.activeRequest := 0
     }
     
     TestVersionParsing() {
@@ -90,6 +95,10 @@ class UpdateCheckerTest {
             ["v2.1.0-beta.1", "v2.1.0"],
             ["v2.1.0-beta.1", "v2.1.0-beta.2"],
             ["v2.1.0-beta.2", "v2.1.0-beta.10"],
+            [
+                "v2.1.0-alpha.2",
+                "v2.1.0-alpha.99999999999999999999999999999999999999999999999999"
+            ],
             ["v2.1.0-alpha.1", "v2.1.0-beta.1"],
             ["v2.1.0-beta", "v2.1.0-beta.1"],
             ; Numeric identifiers rank below alphanumeric ones
@@ -171,6 +180,23 @@ class UpdateCheckerTest {
         release := UpdateChecker.ParseReleaseResponse(json)
         Assert.Equal("v2.2.0-beta.1", release.version)
         Assert.Equal(42, release.assetSize)
+    }
+
+    TestReleaseStatusDistinguishesExpectedAbsenceFromFailure() {
+        Assert.True(UpdateChecker.ReleaseResponseAvailable(200, true))
+        Assert.False(UpdateChecker.ReleaseResponseAvailable(404, true))
+        Assert.Throws(
+            () => UpdateChecker.ReleaseResponseAvailable(403, true),
+            "HTTP 403"
+        )
+        Assert.Throws(
+            () => UpdateChecker.ReleaseResponseAvailable(503, false),
+            "HTTP 503"
+        )
+        Assert.Throws(
+            () => UpdateChecker.ReleaseResponseAvailable(404, false),
+            "HTTP 404"
+        )
     }
 
     TestDownloadUrlMustBelongToThisRepository() {
@@ -299,13 +325,79 @@ class UpdateCheckerTest {
         UpdateChecker.OnSettingsChanged()
         Assert.True(UpdateChecker.updateTimer != 0)
     }
+
+    TestAutomaticCheckUsesAsyncTransport() {
+        transport := FakeAsyncUpdateTransport()
+        UpdateChecker.transport := transport
+        Settings.Set("SkipBetaVersions", true)
+
+        Assert.True(UpdateChecker.BeginAutoCheck(true))
+        Assert.Equal(1, transport.asyncCalls)
+        Assert.Equal(0, transport.syncCalls)
+        Assert.True(UpdateChecker.activeRequest != 0)
+
+        transport.Resolve({status: 404, body: ""})
+        Assert.Equal(0, UpdateChecker.activeRequest)
+    }
+
+    TestSettingsChangeCancelsInFlightAutomaticCheck() {
+        transport := FakeAsyncUpdateTransport()
+        UpdateChecker.transport := transport
+        Settings.Set("AutoUpdate", true)
+        Assert.True(UpdateChecker.BeginAutoCheck(true))
+
+        Settings.Set("AutoUpdate", false)
+        UpdateChecker.OnSettingsChanged()
+
+        Assert.True(transport.handle.cancelled)
+        Assert.Equal(0, UpdateChecker.activeRequest)
+        Assert.Equal(0, UpdateChecker.updateTimer)
+    }
     
     Teardown() {
+        try UpdateChecker.CancelActiveCheck()
         UpdateChecker.StopAutoCheck()
+        UpdateChecker.transport := this.originalTransport
         UpdateChecker.skippedVersion := ""
         UpdateChecker.lastRemindTime := 0
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalSettingsFile
+    }
+}
+
+class FakeAsyncUpdateTransport {
+    __New() {
+        this.asyncCalls := 0
+        this.syncCalls := 0
+        this.onComplete := 0
+        this.onError := 0
+        this.handle := FakeAsyncUpdateHandle()
+    }
+
+    GetText(*) {
+        this.syncCalls++
+        throw Error("synchronous transport must not be used")
+    }
+
+    GetTextAsync(url, onComplete, onError) {
+        this.asyncCalls++
+        this.onComplete := onComplete
+        this.onError := onError
+        return this.handle
+    }
+
+    Resolve(response) {
+        this.onComplete.Call(response)
+    }
+}
+
+class FakeAsyncUpdateHandle {
+    __New() {
+        this.cancelled := false
+    }
+
+    Cancel() {
+        this.cancelled := true
     }
 }
 

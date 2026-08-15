@@ -14,9 +14,6 @@ Settings.AddChangeListener(ObjBindMethod(UpdateChecker, "OnSettingsChanged"))
 Settings.AddChangeListener(ObjBindMethod(PACSMonitor, "OnSettingsChanged"))
 Settings.AddChangeListener(ObjBindMethod(MicrophoneManager, "OnSettingsChanged"))
 
-; Initialize the update checker
-UpdateChecker.Start()
-
 ; Start PACS monitoring
 PACSMonitor.Start()
 
@@ -25,3 +22,7 @@ MicrophoneManager.Start()
 
 ; Initialize the GUI when the script starts
 kbGUI := KeybindGUI()
+
+; Start bounded asynchronous network checks only after clinical services, the GUI,
+; and profile hotkeys are available.
+UpdateChecker.Start()

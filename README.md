@@ -108,13 +108,24 @@ All suites exit non-zero on failure.
 ```powershell
 $ahk = "$Env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe"
 
+function Invoke-AutoHotkeyChecked {
+  param([Parameter(Mandatory)][string[]] $ArgumentList)
+
+  # AutoHotkey is a GUI-subsystem executable. Start-Process is required here so
+  # PowerShell waits for completion and observes the suite's real exit code.
+  $process = Start-Process -FilePath $ahk -ArgumentList $ArgumentList -NoNewWindow -Wait -PassThru
+  if ($process.ExitCode -ne 0) {
+    throw "AutoHotkey failed with exit code $($process.ExitCode): $($ArgumentList -join ' ')"
+  }
+}
+
 # Syntax and deterministic unit tests; both run in CI.
-& $ahk /validate /ErrorStdOut main.ahk
-& $ahk /ErrorStdOut tests/RunTests.ahk
+Invoke-AutoHotkeyChecked @('/validate', '/ErrorStdOut', 'main.ahk')
+Invoke-AutoHotkeyChecked @('/ErrorStdOut', 'tests/RunTests.ahk')
 
 # Desktop integration checks; these register hotkeys and open real windows, so run locally.
-& $ahk /ErrorStdOut tests/run-hotkey-tests.ahk
-& $ahk /ErrorStdOut tests/run-gui-smoke.ahk
+Invoke-AutoHotkeyChecked @('/ErrorStdOut', 'tests/run-hotkey-tests.ahk')
+Invoke-AutoHotkeyChecked @('/ErrorStdOut', 'tests/run-gui-smoke.ahk')
 
 # CI, dependency, documentation, and distribution invariants.
 & tests/RepositoryContract.ps1

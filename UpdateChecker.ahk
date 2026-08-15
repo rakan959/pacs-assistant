@@ -3,17 +3,14 @@
 #Include Version.ahk
 #Include JsonParser.ahk
 
-/**
- * Bounded GitHub HTTP transport. The synchronous calls remain simple for the timer
- * workflow, while explicit WinHTTP timeouts prevent startup from hanging forever.
- */
+/** Bounded WinHTTP transport for asynchronous checks and interactive downloads. */
 class WinHttpTransport {
     static resolveTimeoutMs := 2000
     static connectTimeoutMs := 3000
     static sendTimeoutMs := 5000
     static receiveTimeoutMs := 10000
 
-    CreateRequest(url) {
+    CreateRequest(url, async := false) {
         request := ComObject("WinHttp.WinHttpRequest.5.1")
         request.SetTimeouts(
             WinHttpTransport.resolveTimeoutMs,
@@ -21,7 +18,7 @@ class WinHttpTransport {
             WinHttpTransport.sendTimeoutMs,
             WinHttpTransport.receiveTimeoutMs
         )
-        request.Open("GET", url, false)
+        request.Open("GET", url, async)
         request.SetRequestHeader("User-Agent", "PACS-Assistant-Update-Checker")
         request.SetRequestHeader("Accept", "application/vnd.github+json")
         return request
@@ -31,6 +28,12 @@ class WinHttpTransport {
         request := this.CreateRequest(url)
         request.Send()
         return {status: request.Status, body: request.ResponseText}
+    }
+
+    GetTextAsync(url, onComplete, onError) {
+        request := this.CreateRequest(url, true)
+        operation := WinHttpTextRequest(request, onComplete, onError)
+        return operation.Start()
     }
 
     Download(url, destination) {
@@ -51,6 +54,88 @@ class WinHttpTransport {
     }
 }
 
+class WinHttpTextRequest {
+    __New(request, onComplete, onError) {
+        this.request := request
+        this.onComplete := onComplete
+        this.onError := onError
+        this.done := false
+        this.pollTimer := 0
+        this.startedAt := 0
+    }
+
+    Start() {
+        try {
+            this.startedAt := A_TickCount
+            this.request.Send()
+            this.pollTimer := ObjBindMethod(this, "Poll")
+            SetTimer(this.pollTimer, 50)
+            return this
+        } catch as err {
+            this.Fail(err)
+            return 0
+        }
+    }
+
+    Poll() {
+        if this.done
+            return
+        try {
+            if !this.request.WaitForResponse(0) {
+                maxDuration := WinHttpTransport.resolveTimeoutMs
+                    + WinHttpTransport.connectTimeoutMs
+                    + WinHttpTransport.sendTimeoutMs
+                    + WinHttpTransport.receiveTimeoutMs
+                    + 2000
+                if (A_TickCount - this.startedAt > maxDuration)
+                    this.Fail(Error("WinHTTP asynchronous request timed out"))
+                return
+            }
+            response := {status: this.request.Status, body: this.request.ResponseText}
+        } catch as err {
+            this.Fail(err)
+            return
+        }
+
+        callback := this.onComplete
+        this.Disconnect()
+        try callback.Call(response)
+        catch as err {
+            OutputDebug("Asynchronous update completion failed: " err.Message)
+        }
+    }
+
+    Fail(error) {
+        if this.done
+            return
+        callback := this.onError
+        this.Disconnect()
+        try callback.Call(error)
+        catch as err {
+            OutputDebug("Asynchronous update error handling failed: " err.Message)
+        }
+    }
+
+    Disconnect() {
+        if this.done
+            return
+        this.done := true
+        if this.pollTimer {
+            SetTimer(this.pollTimer, 0)
+            this.pollTimer := 0
+        }
+        this.request := 0
+    }
+
+    Cancel() {
+        if this.done
+            return
+        request := this.request
+        this.Disconnect()
+        try request.Abort()
+    }
+}
+
 class UpdateChecker {
     ; Read through a property rather than copied into a static, so there is no second
     ; place a version is stated and can drift from the tag
@@ -63,6 +148,7 @@ class UpdateChecker {
     static transport := WinHttpTransport()
 
     static updateTimer := 0
+    static activeRequest := 0
     static cleanupTimer := 0
     static skippedVersion := ""  ; Track which version the user chose to skip
     static lastRemindTime := 0   ; Track when the user last clicked "Remind Me Later"
@@ -70,28 +156,17 @@ class UpdateChecker {
     static Start() {
         this.LoadSkippedVersion()
         this.ScheduleUpdateArtifactCleanup()
-        if !Settings.Get("AutoUpdate")
-            return
-
-        ; Check for updates immediately, reusing the result rather than asking again
-        updateInfo := this.CheckForUpdates()
-        if updateInfo.hasUpdate {
-            this.ShowUpdateDialog(updateInfo)
-        }
-
         this.StartAutoCheck()
+        if Settings.Get("AutoUpdate")
+            this.BeginAutoCheck()
     }
     
     static StartAutoCheck() {
-        ; Clear any existing timer
-        if this.updateTimer {
-            SetTimer(this.updateTimer, 0)
-            this.updateTimer := 0
-        }
+        this.StopAutoCheck()
         
         ; Set up new timer if auto-update is enabled
         if Settings.Get("AutoUpdate") {
-            this.updateTimer := ObjBindMethod(this, "AutoCheck")
+            this.updateTimer := ObjBindMethod(this, "BeginAutoCheck")
             SetTimer(this.updateTimer, 3600000)  ; Check every hour (3600000 ms)
         }
     }
@@ -101,13 +176,75 @@ class UpdateChecker {
             SetTimer(this.updateTimer, 0)
             this.updateTimer := 0
         }
+        this.CancelActiveCheck()
     }
-    
-    static AutoCheck() {
-        updateInfo := this.CheckForUpdates()
-        if updateInfo.hasUpdate {
-            this.ShowUpdateDialog(updateInfo)
+
+    static CancelActiveCheck() {
+        if !this.activeRequest
+            return
+        slot := this.activeRequest
+        this.activeRequest := 0
+        slot.completed := true
+        if slot.handle
+            try slot.handle.Cancel()
+    }
+
+    static BeginAutoCheck(force := false) {
+        if this.activeRequest
+            return false
+        if (!force && (!A_IsCompiled || AppVersion.isDevBuild))
+            return false
+
+        stableOnly := Settings.Get("SkipBetaVersions")
+        url := stableOnly ? this.latestStableUrl : this.newestReleaseUrl
+        slot := {handle: 0, completed: false}
+        this.activeRequest := slot
+
+        try {
+            slot.handle := this.transport.GetTextAsync(
+                url,
+                ObjBindMethod(this, "CompleteAutoCheck", slot, stableOnly),
+                ObjBindMethod(this, "FailAutoCheck", slot)
+            )
+        } catch as err {
+            slot.completed := true
+            if (this.activeRequest = slot)
+                this.activeRequest := 0
+            OutputDebug("Update check failed: " err.Message)
+            return false
         }
+
+        if (!slot.handle && !slot.completed) {
+            this.activeRequest := 0
+            return false
+        }
+        return true
+    }
+
+    static CompleteAutoCheck(slot, stableOnly, response) {
+        if slot.completed
+            return
+        slot.completed := true
+        if (this.activeRequest = slot)
+            this.activeRequest := 0
+
+        try {
+            updateInfo := this.ProcessReleaseResponse(response, stableOnly)
+            if updateInfo.hasUpdate
+                this.ShowUpdateDialog(updateInfo)
+        } catch as err {
+            OutputDebug("Update check failed: " err.Message)
+        }
+    }
+
+    static FailAutoCheck(slot, error) {
+        if slot.completed
+            return
+        slot.completed := true
+        if (this.activeRequest = slot)
+            this.activeRequest := 0
+        message := IsObject(error) && HasProp(error, "Message") ? error.Message : String(error)
+        OutputDebug("Update check failed: " message)
     }
     
     static OnSettingsChanged() {
@@ -272,8 +409,8 @@ class UpdateChecker {
             yIsNum := RegExMatch(y, "^\d+$") > 0
 
             if (xIsNum && yIsNum) {
-                if (Integer(x) != Integer(y))
-                    return this.Sign(Integer(x), Integer(y))
+                if (result := this.CompareNumericIdentifiers(x, y))
+                    return result
                 continue
             }
             if (xIsNum)
@@ -286,6 +423,18 @@ class UpdateChecker {
         }
 
         return 0
+    }
+
+    ; SemVer does not bound numeric identifier length. Compare normalized digit
+    ; strings by magnitude rather than coercing them into AutoHotkey's fixed-width
+    ; Integer representation.
+    static CompareNumericIdentifiers(left, right) {
+        left := RegExReplace(left, "^0+(?=\d)")
+        right := RegExReplace(right, "^0+(?=\d)")
+        if (StrLen(left) != StrLen(right))
+            return this.Sign(StrLen(left), StrLen(right))
+        result := StrCompare(left, right, true)
+        return result < 0 ? -1 : (result > 0 ? 1 : 0)
     }
     
     static ParseReleaseResponse(responseText) {
@@ -349,6 +498,41 @@ class UpdateChecker {
             ) > 0
     }
 
+    static ReleaseResponseAvailable(status, stableOnly) {
+        if (status = 200)
+            return true
+        ; GitHub's /releases/latest endpoint returns 404 when a repository has only
+        ; prereleases. That is an expected "nothing eligible" result for users who
+        ; skip betas; every other status is operational failure evidence.
+        if (stableOnly && status = 404)
+            return false
+        throw Error("GitHub release request returned HTTP " status)
+    }
+
+    static ProcessReleaseResponse(response, stableOnly) {
+        if !this.ReleaseResponseAvailable(response.status, stableOnly)
+            return { hasUpdate: false }
+
+        release := this.ParseReleaseResponse(response.body)
+        latestVersion := release.version
+        if (latestVersion = this.skippedVersion)
+            return { hasUpdate: false }
+        if (this.lastRemindTime && (A_TickCount - this.lastRemindTime) < 14400000)
+            return { hasUpdate: false }
+        if (this.CompareVersions(this.currentVersion, latestVersion) >= 0)
+            return { hasUpdate: false }
+
+        return {
+            hasUpdate: true,
+            currentVersion: this.currentVersion,
+            latestVersion: latestVersion,
+            downloadUrl: release.downloadUrl,
+            downloadSize: release.assetSize,
+            downloadSha256: release.assetSha256,
+            releaseNotes: release.notes
+        }
+    }
+
     static CheckForUpdates() {
         ; Never offer to update an uncompiled run: PerformUpdate replaces
         ; A_ScriptFullPath, which for a script is main.ahk, so it would drop an EXE on
@@ -362,39 +546,12 @@ class UpdateChecker {
         ; prerelease flag GitHub actually stores, and - because every published release
         ; was named like a beta while SkipBetaVersions defaults on - meant no user with
         ; default settings was ever offered an update.
-        url := Settings.Get("SkipBetaVersions") ? this.latestStableUrl : this.newestReleaseUrl
+        stableOnly := Settings.Get("SkipBetaVersions")
+        url := stableOnly ? this.latestStableUrl : this.newestReleaseUrl
 
         try {
             response := this.transport.GetText(url)
-
-            ; 404 is expected from /releases/latest when every release is a prerelease
-            if (response.status = 200) {
-                release := this.ParseReleaseResponse(response.body)
-                latestVersion := release.version
-
-                ; Check if user chose to skip this version
-                if (latestVersion = this.skippedVersion)
-                    return { hasUpdate: false }
-                    
-                ; Check if we should wait before reminding again (4 hours)
-                if (this.lastRemindTime && (A_TickCount - this.lastRemindTime) < 14400000)
-                    return { hasUpdate: false }
-                
-                ; Compare versions using comparison logic
-                compareResult := this.CompareVersions(this.currentVersion, latestVersion)
-                
-                if (compareResult < 0) {
-                    return {
-                        hasUpdate: true,
-                        currentVersion: this.currentVersion,
-                        latestVersion: latestVersion,
-                        downloadUrl: release.downloadUrl,
-                        downloadSize: release.assetSize,
-                        downloadSha256: release.assetSha256,
-                        releaseNotes: release.notes
-                    }
-                }
-            }
+            return this.ProcessReleaseResponse(response, stableOnly)
         } catch as err {
             ; Log quietly to avoid interrupting the user
             OutputDebug("Update check failed: " err.Message)
