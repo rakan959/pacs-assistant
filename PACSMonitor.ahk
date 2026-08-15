@@ -359,8 +359,10 @@ class PACSMonitor {
                 pos += StrLen(accMatch[0])
             }
 
-            ; Find study type (any uppercase string that starts with two letters)
-            if RegExMatch(rowText, "[A-Z]{2}\s[A-Z\s]+?(?=\s+\d|$)", &studyMatch) {
+            ; Start at a complete 2+-letter modality token. Without the word
+            ; boundary, the engine could start on the second character of MRI/CTA
+            ; and label alerts as "RI ..." or "TA ...".
+            if RegExMatch(rowText, "\b[A-Z]{2,}\s[A-Z\s]+?(?=\s+\d|$)", &studyMatch) {
                 studyType := Trim(studyMatch[0])
 
                 for acc in accessions {

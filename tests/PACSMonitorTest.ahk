@@ -7,6 +7,7 @@ class PACSMonitorTest {
     static Tests := [
         "TestHasAccession",
         "TestProcessRowsFindsNewStudies",
+        "TestProcessRowsPreservesLongModalityPrefix",
         "TestRepeatedAccessionAlertsOnce",
         "TestInterruptedScanDoesNotConsumeUnalertedAccessions",
         "TestMonitoringUsesTestMode",
@@ -63,6 +64,16 @@ class PACSMonitorTest {
         Assert.True(PACSMonitor.HasAccession("87654321"))
         Assert.True(PACSMonitor.HasAccession("99887766"))
         Assert.Equal(3, PACSMonitor.testLastNewStudies.Length)
+    }
+
+    TestProcessRowsPreservesLongModalityPrefix() {
+        PACSMonitor.ProcessRows([
+            {Name: "MRI BRAIN WITHOUT CONTRAST 12345678"},
+            {Name: "CTA HEAD AND NECK 87654321"}
+        ], true)
+
+        Assert.Equal("MRI BRAIN WITHOUT CONTRAST", PACSMonitor.testLastNewStudies[1].studyType)
+        Assert.Equal("CTA HEAD AND NECK", PACSMonitor.testLastNewStudies[2].studyType)
     }
     
     ; An accession can appear in more than one row of a single refresh. It must be
