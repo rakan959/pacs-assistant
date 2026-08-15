@@ -4,6 +4,7 @@
 #Include UpdateCheckerTest.ahk
 #Include SettingsTest.ahk
 #Include PACSMonitorTest.ahk
+#Include MicrophoneManagerTest.ahk
 #Include HotkeyManagerTest.ahk
 #Include ProfileManagerTest.ahk
 #Include PACSCommandsTest.ahk
@@ -16,6 +17,7 @@ TestRunner.AddTest(TestRunnerTest)
 TestRunner.AddTest(UpdateCheckerTest)
 TestRunner.AddTest(SettingsTest)
 TestRunner.AddTest(PACSMonitorTest)
+TestRunner.AddTest(MicrophoneManagerTest)
 TestRunner.AddTest(HotkeyManagerTest)
 TestRunner.AddTest(ProfileManagerTest)
 TestRunner.AddTest(PACSCommandsTest)

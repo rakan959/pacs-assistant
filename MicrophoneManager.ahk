@@ -31,6 +31,9 @@ class MicrophoneManager {
     static attemptedWindow := 0
     static attempts := 0
     static maxAttempts := 3
+    static failureNotified := false
+    static lastError := ""
+    static notifier := (text, title, options) => TrayTip(text, title, options)
 
     static Start() {
         this.StartMonitoring()
@@ -55,6 +58,8 @@ class MicrophoneManager {
         }
         this.attemptedWindow := 0
         this.attempts := 0
+        this.failureNotified := false
+        this.lastError := ""
     }
 
     static OnSettingsChanged() {
@@ -68,12 +73,16 @@ class MicrophoneManager {
                 ; PowerScribe closed - allow the next login to be handled
                 this.attemptedWindow := 0
                 this.attempts := 0
+                this.failureNotified := false
+                this.lastError := ""
                 return
             }
 
             if (hwnd != this.attemptedWindow) {
                 this.attemptedWindow := hwnd
                 this.attempts := 0
+                this.failureNotified := false
+                this.lastError := ""
             }
 
             if (this.attempts >= this.maxAttempts)
@@ -84,11 +93,41 @@ class MicrophoneManager {
                 return  ; Not on the login screen, or the picker has not rendered yet
 
             this.attempts++
-            if this.SelectMicrophone(hwnd, combo, Settings.Get("MicrophoneName"))
+            micName := Settings.Get("MicrophoneName")
+            if this.SelectMicrophone(hwnd, combo, micName)
                 this.attempts := this.maxAttempts  ; Done with this window
-        } catch {
-            ; Background polling must never surface an error dialog over PowerScribe
+            else
+                this.RecordSelectionFailure(micName)
+        } catch as err {
+            ; Background polling must never surface an error dialog over PowerScribe,
+            ; but it must leave evidence and eventually notify instead of disappearing.
+            this.attempts++
+            this.RecordOperationalError(err)
+            this.RecordSelectionFailure(Settings.Get("MicrophoneName"))
         }
+    }
+
+    static Notify(text, title, options := "") {
+        try this.notifier.Call(text, title, options)
+        catch as err {
+            OutputDebug("Microphone notification failed: " err.Message)
+        }
+    }
+
+    static RecordOperationalError(error) {
+        this.lastError := IsObject(error) && HasProp(error, "Message") ? error.Message : String(error)
+        OutputDebug("PowerScribe microphone selection failed: " this.lastError)
+    }
+
+    static RecordSelectionFailure(micName) {
+        if (this.attempts < this.maxAttempts || this.failureNotified)
+            return
+        this.failureNotified := true
+        this.Notify(
+            "PACS Assistant could not confirm microphone '" Trim(micName) "' after " this.attempts " attempts.",
+            "PowerScribe microphone was not changed",
+            "Icon!"
+        )
     }
 
     /**
@@ -127,13 +166,13 @@ class MicrophoneManager {
 
         ; Already on the wanted microphone. Read through UIAValue: a combo box with no
         ; ValuePattern would otherwise raise an uncatchable destructor error (issue #32).
-        if InStr(UIAValue.Read(combo), micName)
+        if this.WaitForSelection(combo, micName, 0)
             return true
 
         ; Editable combo boxes accept the value directly; gated so an unsupported one
         ; falls through to the dropdown instead of erroring
         if UIAValue.Write(combo, micName) {
-            if InStr(UIAValue.Read(combo), micName)
+            if this.WaitForSelection(combo, micName, 300)
                 return true
         }
 
@@ -183,7 +222,24 @@ class MicrophoneManager {
             try combo.ExpandCollapsePattern.Collapse()
         }
 
-        return selected
+        return selected && this.WaitForSelection(combo, micName, 1000, item)
+    }
+
+    static WaitForSelection(combo, micName, timeoutMs, item := 0) {
+        started := A_TickCount
+        loop {
+            if InStr(UIAValue.Read(combo), micName)
+                return true
+            if item {
+                try {
+                    if item.GetPropertyValue(UIA.Property.SelectionItemIsSelected)
+                        return true
+                }
+            }
+            if (A_TickCount - started >= timeoutMs)
+                return false
+            Sleep(50)
+        }
     }
 
     /**

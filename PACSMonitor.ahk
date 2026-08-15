@@ -30,6 +30,11 @@ class PACSMonitor {
     static consecutiveRefreshFailures := 0
     static refreshFailureThreshold := 3
     static refreshFailureNotified := false
+    static consecutiveScanFailures := 0
+    static scanFailureThreshold := 3
+    static scanFailureNotified := false
+    static lastError := ""
+    static notifier := (text, title, options) => TrayTip(text, title, options)
 
     static Start() {
         ; Clear known accessions
@@ -84,6 +89,7 @@ class PACSMonitor {
         ; Reset failure state so a fixed setup is not still complaining
         this.consecutiveRefreshFailures := 0
         this.refreshFailureNotified := false
+        this.RecordScanSuccess()
 
         ; Restart monitoring with new settings
         this.StartMonitoring()
@@ -176,10 +182,41 @@ class PACSMonitor {
         this.consecutiveRefreshFailures++
         if (this.consecutiveRefreshFailures >= this.refreshFailureThreshold && !this.refreshFailureNotified) {
             this.refreshFailureNotified := true
-            TrayTip("PACS auto-refresh is not working",
-                    "The refresh button could not be found in Explorer Portal. New study alerts still work, but the list is not being refreshed.",
-                    "Icon!")
+            this.Notify(
+                "The refresh button could not be found in Explorer Portal. New study alerts still work, but the list is not being refreshed.",
+                "PACS auto-refresh is not working",
+                "Icon!"
+            )
         }
+    }
+
+    static Notify(text, title, options := "") {
+        try this.notifier.Call(text, title, options)
+        catch as err {
+            OutputDebug("PACS notification failed: " err.Message)
+        }
+    }
+
+    static RecordScanFailure(error) {
+        message := IsObject(error) && HasProp(error, "Message") ? error.Message : String(error)
+        this.lastError := message
+        this.consecutiveScanFailures++
+        OutputDebug("PACS background monitoring failed: " message)
+
+        if (this.consecutiveScanFailures >= this.scanFailureThreshold && !this.scanFailureNotified) {
+            this.scanFailureNotified := true
+            this.Notify(
+                "Explorer Portal could not be read after " this.consecutiveScanFailures " attempts. Last error: " message,
+                "PACS background monitoring failed",
+                "Icon!"
+            )
+        }
+    }
+
+    static RecordScanSuccess() {
+        this.consecutiveScanFailures := 0
+        this.scanFailureNotified := false
+        this.lastError := ""
     }
 
     static RefreshAndCheck() {
@@ -217,14 +254,16 @@ class PACSMonitor {
             ; Get current accession numbers and study info
             root := UIA.ElementFromHandle(this.portalTitle)
             studyList := this.FindStudyList(root)
-            if !studyList
+            if !studyList {
+                this.RecordScanFailure("study list was not found")
                 return
+            }
 
             this.ProcessRows(studyList)
+            this.RecordScanSuccess()
 
         } catch as err {
-            ; Silent fail - we don't want to interrupt the user with error messages
-            ; during background monitoring
+            this.RecordScanFailure(err)
 
             ; Still try to restore the active window if we have it
             if (IsSet(previousWindow) && previousWindow && WinExist("ahk_id " previousWindow)) {
@@ -298,15 +337,17 @@ class PACSMonitor {
         if Settings.Get("MessageBoxNewCase") {
             ; Create a TrayTip for each new study
             for study in newStudies {
-                TrayTip("New Study Available", study.studyType, "Iconi")
+                this.Notify(study.studyType, "New Study Available", "Iconi")
             }
 
             ; If there are multiple studies, show a summary notification
             if newStudies.Length > 1 {
                 Sleep(1000)  ; Wait a bit to not overlap notifications
-                TrayTip("Multiple New Studies",
-                       newStudies.Length " new studies available",
-                       "Iconi")
+                this.Notify(
+                    newStudies.Length " new studies available",
+                    "Multiple New Studies",
+                    "Iconi"
+                )
             }
         }
     }

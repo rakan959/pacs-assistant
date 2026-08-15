@@ -9,11 +9,15 @@ class PACSMonitorTest {
         "TestProcessRowsFindsNewStudies",
         "TestRepeatedAccessionAlertsOnce",
         "TestMonitoringUsesTestMode",
-        "TestOnSettingsChangedRespectsAutoRefresh"
+        "TestOnSettingsChangedRespectsAutoRefresh",
+        "TestRefreshFailureNotificationUsesTextThenTitle",
+        "TestScanFailuresNotifyOnceAndReset",
+        "TestNewStudyNotificationUsesTextThenTitle"
     ]
     
     Setup() {
         this.originalSettings := Settings.settingsFile
+        this.originalNotifier := PACSMonitor.notifier
         this.tempSettings := A_Temp "\pacs_monitor_settings_" A_TickCount ".ini"
         Settings.settingsFile := this.tempSettings
         Settings.SaveAllSettings()
@@ -24,6 +28,17 @@ class PACSMonitorTest {
         PACSMonitor.testRefreshCalls := 0
         PACSMonitor.testLastNewStudies := []
         PACSMonitor.refreshTimer := 0
+        PACSMonitor.consecutiveRefreshFailures := 0
+        PACSMonitor.refreshFailureNotified := false
+        PACSMonitor.consecutiveScanFailures := 0
+        PACSMonitor.scanFailureNotified := false
+        PACSMonitor.lastError := ""
+        this.notifications := []
+        PACSMonitor.notifier := (text, title, options) => this.notifications.Push({
+            text: text,
+            title: title,
+            options: options
+        })
     }
     
     TestHasAccession() {
@@ -84,6 +99,41 @@ class PACSMonitorTest {
         PACSMonitor.OnSettingsChanged()
         Assert.Equal(0, PACSMonitor.refreshTimer)
     }
+
+    TestRefreshFailureNotificationUsesTextThenTitle() {
+        loop PACSMonitor.refreshFailureThreshold
+            PACSMonitor.RecordRefreshResult(false)
+
+        Assert.Equal(1, this.notifications.Length)
+        Assert.True(InStr(this.notifications[1].text, "refresh button") > 0)
+        Assert.Equal("PACS auto-refresh is not working", this.notifications[1].title)
+    }
+
+    TestScanFailuresNotifyOnceAndReset() {
+        loop PACSMonitor.scanFailureThreshold + 2
+            PACSMonitor.RecordScanFailure("study list unavailable")
+
+        Assert.Equal(1, this.notifications.Length)
+        Assert.True(InStr(this.notifications[1].text, "study list unavailable") > 0)
+        Assert.Equal("PACS background monitoring failed", this.notifications[1].title)
+        Assert.Equal("study list unavailable", PACSMonitor.lastError)
+
+        PACSMonitor.RecordScanSuccess()
+        Assert.Equal(0, PACSMonitor.consecutiveScanFailures)
+        Assert.False(PACSMonitor.scanFailureNotified)
+    }
+
+    TestNewStudyNotificationUsesTextThenTitle() {
+        Settings.Set("MessageBoxNewCase", true)
+        Settings.Set("AudioAlertNewCase", false)
+        PACSMonitor.testMode := false
+
+        PACSMonitor.AlertNewCases([{studyType: "CT HEAD", accession: "12345678"}])
+
+        Assert.Equal(1, this.notifications.Length)
+        Assert.Equal("CT HEAD", this.notifications[1].text)
+        Assert.Equal("New Study Available", this.notifications[1].title)
+    }
     
     Teardown() {
         PACSMonitor.StopMonitoring()
@@ -91,6 +141,10 @@ class PACSMonitorTest {
         PACSMonitor.testStudyRows := []
         PACSMonitor.testLastNewStudies := []
         PACSMonitor.knownAccessions := Map()
+        PACSMonitor.notifier := this.originalNotifier
+        PACSMonitor.consecutiveScanFailures := 0
+        PACSMonitor.scanFailureNotified := false
+        PACSMonitor.lastError := ""
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalSettings
     }
