@@ -20,6 +20,7 @@ class MicrophoneManagerTest {
         "FinalSelectionFailureNotifiesOnce",
         "OperationalErrorIsRecorded",
         "PickerReappearanceStartsANewLoginSession",
+        "PickerUncertaintyConsumesOneBoundedSessionBudget",
         "RecycledWindowHandleWithNewProcessStartsANewLoginSession"
     ]
 
@@ -278,7 +279,24 @@ class MicrophoneManagerTest {
         MicrophoneManager.attempts := MicrophoneManager.maxAttempts
         MicrophoneManager.RecordPickerPresence(true)
         Assert.True(MicrophoneManager.pickerPresent)
-        Assert.Equal(0, MicrophoneManager.attempts)
+        Assert.Equal(MicrophoneManager.maxAttempts, MicrophoneManager.attempts)
+    }
+
+    PickerUncertaintyConsumesOneBoundedSessionBudget() {
+        fixture := MicrophoneFixture([])
+        driver := SequencedMicrophoneSessionDriver(
+            fixture.session,
+            fixture.root,
+            ["unique", "error", "unique", "error"]
+        )
+        MicrophoneManager.sessionDriver := driver
+
+        Loop 4
+            MicrophoneManager.CheckForLogin()
+
+        Assert.Equal(MicrophoneManager.maxAttempts, MicrophoneManager.attempts)
+        Assert.True(MicrophoneManager.failureNotified)
+        Assert.Equal(1, this.notifications.Length)
     }
 
     RecycledWindowHandleWithNewProcessStartsANewLoginSession() {
@@ -367,6 +385,30 @@ class FakeMicrophoneSessionDriver {
         if (this.rootError != "")
             throw Error(this.rootError)
         return this.IsLive(session) ? this._root : 0
+    }
+}
+
+class SequencedMicrophoneSessionDriver extends FakeMicrophoneSessionDriver {
+    __New(session, root, statuses) {
+        super.__New(session, root)
+        this.statuses := statuses
+        this.captureCalls := 0
+        this.rootCallsThisPoll := 0
+    }
+
+    CaptureResult() {
+        this.captureCalls++
+        this.rootCallsThisPoll := 0
+        index := Min(this.captureCalls, this.statuses.Length)
+        status := this.statuses[index]
+        if (status == "unique")
+            return {status: "unique", session: this.session}
+        return {status: status, session: 0, error: "simulated provider uncertainty"}
+    }
+
+    Root(session) {
+        this.rootCallsThisPoll++
+        return this.rootCallsThisPoll = 1 ? this._root : 0
     }
 }
 

@@ -286,7 +286,8 @@ class PACSMonitor {
             current := this.ResolveRefreshButton(root)
             if (current.status != "found"
                 || !this.SameElement(initial.button, current.button)
-                || !this.driver.SessionIsLive(session))
+                || !this.driver.SessionIsLive(session)
+                || this.driver.IsActive(session))
                 return false
             return !!current.button.Click()
         }

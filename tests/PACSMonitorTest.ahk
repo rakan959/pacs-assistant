@@ -16,6 +16,7 @@ class PACSMonitorTest {
         "TestRefreshButtonMustBeUniqueWithinThePortal",
         "TestRefreshButtonEnumerationErrorFailsClosed",
         "TestDuplicateRefreshAppearingBeforeClickDoesNotInvoke",
+        "TestPortalActivationBeforeClickDoesNotInvokeRefresh",
         "TestRefreshAndScanUseOneCapturedPortalSession",
         "TestAmbiguousPortalWindowsAreReportedAsScanFailure",
         "TestStudyListFallbackRequiresExpectedTypeAndProcess",
@@ -179,6 +180,37 @@ class PACSMonitorTest {
         Assert.Equal(2, root.findCalls)
         Assert.Equal(0, saved.clickCalls)
         Assert.Equal(0, duplicate.clickCalls)
+    }
+
+    TestPortalActivationBeforeClickDoesNotInvokeRefresh() {
+        originalTestMode := PACSMonitor.testMode
+        originalDriver := PACSMonitor.driver
+        session := {
+            hwnd: 100,
+            target: "ahk_id 100",
+            processId: 42,
+            title: "Explorer Portal",
+            exe: "msedge.exe"
+        }
+        button := FakePACSActionButton(42, 100, "Refresh", "refreshPrimary")
+        studyList := FakePACSStudyList(
+            42,
+            100,
+            {Name: "CT HEAD WITHOUT CONTRAST 12345678"}
+        )
+        driver := ActivationChangingPortalDriver(session, button, studyList)
+
+        try {
+            PACSMonitor.testMode := false
+            PACSMonitor.driver := driver
+            PACSMonitor.RefreshAndCheck()
+        } finally {
+            PACSMonitor.driver := originalDriver
+            PACSMonitor.testMode := originalTestMode
+        }
+
+        Assert.True(driver.activeChecks >= 2)
+        Assert.Equal(0, button.clickCalls)
     }
 
     TestRefreshAndScanUseOneCapturedPortalSession() {
@@ -512,6 +544,18 @@ class PinnedPortalMonitorDriver {
     }
 
     WaitForRefresh() {
+    }
+}
+
+class ActivationChangingPortalDriver extends PinnedPortalMonitorDriver {
+    __New(session, button, studyList) {
+        super.__New(session, button, studyList)
+        this.activeChecks := 0
+    }
+
+    IsActive(*) {
+        this.activeChecks++
+        return this.activeChecks > 1
     }
 }
 

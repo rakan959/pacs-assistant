@@ -109,7 +109,6 @@ class MicrophoneManager {
                 return
             }
             if (resolution.status == "ambiguous" || resolution.status == "error") {
-                this.RecordPickerPresence(false)
                 if (this.attempts >= this.maxAttempts)
                     return
                 this.attempts++
@@ -134,7 +133,6 @@ class MicrophoneManager {
                 return  ; Logged in, or the picker has not rendered yet
             }
             if !(comboResult.status == "found") {
-                this.RecordPickerPresence(false)
                 if (this.attempts >= this.maxAttempts)
                     return
                 this.attempts++
@@ -157,6 +155,8 @@ class MicrophoneManager {
         } catch as err {
             ; Background polling must never surface an error dialog over PowerScribe,
             ; but it must leave evidence and eventually notify instead of disappearing.
+            if (this.attempts >= this.maxAttempts)
+                return
             this.attempts++
             this.RecordOperationalError(err)
             this.RecordSelectionFailure(Settings.Get("MicrophoneName"))
@@ -195,12 +195,15 @@ class MicrophoneManager {
         return true
     }
 
-    ; A picker presence interval is one login session. Once it disappears, a later
-    ; reappearance in the same HWND must receive a fresh bounded set of attempts.
+    ; Only a confirmed picker absence ends the current login interval. Provider errors
+    ; and ambiguity are uncertainty, not evidence of disappearance, and must continue
+    ; consuming the same bounded retry budget.
     static RecordPickerPresence(present) {
         present := present ? true : false
-        if (present = this.pickerPresent)
+        if present {
+            this.pickerPresent := true
             return
+        }
         this.pickerPresent := present
         this.ResetAttemptState()
     }
