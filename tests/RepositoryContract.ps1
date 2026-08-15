@@ -57,6 +57,7 @@ $main = Get-Content -Raw (Join-Path $repoRoot 'main.ahk')
 $profileManager = Get-Content -Raw (Join-Path $repoRoot 'ProfileManager.ahk')
 $powerScribe = Get-Content -Raw (Join-Path $repoRoot 'PowerScribe.ahk')
 $wetRead = Get-Content -Raw (Join-Path $repoRoot 'WetRead.ahk')
+$pacsMonitor = Get-Content -Raw (Join-Path $repoRoot 'PACSMonitor.ahk')
 $updateChecker = Get-Content -Raw (Join-Path $repoRoot 'UpdateChecker.ahk')
 $noticesPath = Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md'
 $autoHotkeyLicensePath = Join-Path $repoRoot 'licenses/AutoHotkey-v2.0.26.txt'
@@ -142,6 +143,7 @@ Assert-NotMatches $workflow 'Ahk2Exe-SetCopyright\s+MIT' 'Executable copyright m
 Assert-NotMatches $profileManager '(?m)^#Include\s+PACSCommands\.ahk\s*$' 'Profile persistence must not depend on the clinical command graph.'
 Assert-NotMatches $powerScribe '\bProfileManager\b' 'PowerScribe automation must not reach profile state through an implicit global.'
 Assert-Matches $wetRead '(?m)^#Include\s+ProfileManager\.ahk\s*$' 'The wet-read composition layer must declare its profile dependency.'
+Assert-NotMatches $pacsMonitor '\btest(?:Mode|StudyRows|RefreshCalls|LastNewStudies)\b' 'Production PACS monitoring must use injected boundaries rather than compiled test-mode state.'
 Assert-Matches $main '(?m)^#SingleInstance\s+Ignore\s*$' 'A second launch must never force-terminate a dirty or in-flight clinical instance.'
 Assert-NotMatches $main '(?m)^#SingleInstance\s+Force\s*$' 'Force replacement bypasses shutdown and clinical transaction gates.'
 Assert-Matches $main 'OnExit\(\(exitReason, exitCode\) => kbGUI\.HandleProcessExit\(exitReason, exitCode\)\)' 'Tray and external exits must use the authoritative shutdown coordinator.'

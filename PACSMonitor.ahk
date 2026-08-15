@@ -35,6 +35,16 @@ class NativePACSMonitorDriver {
     }
 }
 
+class NativePACSMonitorTimerDriver {
+    Start(callback, interval) {
+        SetTimer(callback, interval)
+    }
+
+    Stop(callback) {
+        SetTimer(callback, 0)
+    }
+}
+
 class PACSMonitor {
     ; Only these leading modality tokens may enter a desktop notification. Parsing
     ; arbitrary uppercase row text risks treating a patient-name column as the study.
@@ -50,12 +60,8 @@ class PACSMonitor {
     static knownAccessions := Map()
     static refreshTimer := 0
 
-    static testMode := false          ; When true, avoid UI automation and use test data
-    static testStudyRows := []        ; Rows to process in test mode
-    static testRefreshCalls := 0      ; Counter for RefreshAndCheck invocations in test mode
-    static testLastNewStudies := []   ; Captured new studies in test mode
-
     static driver := NativePACSMonitorDriver()
+    static timerDriver := NativePACSMonitorTimerDriver()
     static automationAcquire := (*) => {status: "acquired", busyCommand: ""}
     static automationRelease := (*) => 0
 
@@ -89,39 +95,25 @@ class PACSMonitor {
     static StartMonitoring() {
         ; Clear any existing timer
         if this.refreshTimer {
-            if (this.refreshTimer != -1) {
-                SetTimer(this.refreshTimer, 0)
-            }
+            this.timerDriver.Stop(this.refreshTimer)
             this.refreshTimer := 0
         }
 
         ; Set up new timer if auto-refresh is enabled
         if Settings.Get("AutoRefreshPACS") {
-            ; In tests, skip real timers and just run once
-            if (this.testMode) {
-                this.refreshTimer := -1  ; Sentinel to show monitoring is active in tests
-                this.RefreshAndCheck()
-            } else {
-                interval := Settings.Get("RefreshInterval") * 1000  ; Convert to milliseconds
-                this.refreshTimer := ObjBindMethod(this, "RefreshAndCheck")
-                SetTimer(this.refreshTimer, interval)
+            interval := Settings.Get("RefreshInterval") * 1000  ; Convert to milliseconds
+            this.refreshTimer := ObjBindMethod(this, "RefreshAndCheck")
+            this.timerDriver.Start(this.refreshTimer, interval)
 
-                ; Do an initial refresh
-                this.RefreshAndCheck()
-            }
+            ; Do an initial refresh
+            this.RefreshAndCheck()
         }
     }
 
     static StopMonitoring() {
         if this.refreshTimer {
-            if (this.refreshTimer != -1) {
-                SetTimer(this.refreshTimer, 0)
-            }
+            this.timerDriver.Stop(this.refreshTimer)
             this.refreshTimer := 0
-        }
-        if (this.testMode) {
-            this.testStudyRows := []
-            this.testLastNewStudies := []
         }
     }
 
@@ -361,11 +353,6 @@ class PACSMonitor {
     }
 
     static RefreshAndCheck() {
-        if (this.testMode) {
-            this.testRefreshCalls++
-            return this.ProcessRows(this.testStudyRows, true)
-        }
-
         session := 0
         refreshed := false
         skipScan := false
@@ -492,7 +479,7 @@ class PACSMonitor {
         this.knownAccessions[accession] := true
     }
 
-    static ProcessRows(rows, isTest := false) {
+    static ProcessRows(rows, alertAction := 0) {
         newStudies := []
         pendingAccessions := Map()
 
@@ -535,12 +522,9 @@ class PACSMonitor {
         ; Alert if new studies found
         delivered := false
         if newStudies.Length > 0 {
-            if (isTest || this.testMode) {
-                this.testLastNewStudies := newStudies
-                delivered := true
-            } else {
-                delivered := this.AlertNewCases(newStudies)
-            }
+            if !alertAction
+                alertAction := ObjBindMethod(this, "AlertNewCases")
+            delivered := alertAction.Call(newStudies) ? true : false
         }
 
         ; Commit only after the complete traversal and alert path succeed. Retrying a
@@ -590,10 +574,6 @@ class PACSMonitor {
     }
 
     static AlertNewCases(newStudies) {
-        if (this.testMode) {
-            this.testLastNewStudies := newStudies
-            return true
-        }
         audioEnabled := Settings.Get("AudioAlertNewCase")
         notificationEnabled := Settings.Get("MessageBoxNewCase")
         if (!audioEnabled && !notificationEnabled)
