@@ -6,14 +6,37 @@
 #Include PowerScribe.ahk
 #Include UIAValue.ahk
 
+class NativeWetReadFocusDriver {
+    RequestFocus(field) {
+        try field.SetFocus()
+        try field.Click("left")
+    }
+
+    IsExpectedFocus(targetTitle, field) {
+        try {
+            root := UIA.ElementFromHandle(targetTitle)
+            focused := UIA.GetFocusedElement()
+            return UIA.CompareElementsEx(field, focused)
+                && NativeWetReadDriver.IsExpectedNoteField(root, focused)
+        } catch {
+            return false
+        }
+    }
+}
+
 /**
  * Native side effects for the wet-read paste transaction. Keeping them behind this
  * small interface makes rollback behavior deterministic under test.
  */
 class NativeWetReadDriver {
-    __New(targetTitle := "Sticky Notes", windowDriver := NativeWindowDriver()) {
+    __New(
+        targetTitle := "Sticky Notes",
+        windowDriver := NativeWindowDriver(),
+        focusDriver := NativeWetReadFocusDriver()
+    ) {
         this.targetTitle := targetTitle
         this.windowDriver := windowDriver
+        this.focusDriver := focusDriver
     }
 
     /**
@@ -49,16 +72,21 @@ class NativeWetReadDriver {
     }
 
     Focus(field) {
+        if !this.windowDriver.IsActive(this.targetTitle)
+            throw Error(this.targetTitle " is no longer active; focus was not changed")
+
         loop 3 {
-            try field.SetFocus()
-            try field.Click("left")
+            this.focusDriver.RequestFocus(field)
+            if this.focusDriver.IsExpectedFocus(this.targetTitle, field)
+                return true
             Sleep(50)
         }
+        throw Error(this.targetTitle " expected text field did not retain focus")
     }
 
     Clear(field) {
         this.Focus(field)
-        this.SendKeysToTarget("^a{Backspace}")
+        this.SendKeysToTarget("^a{Backspace}", field)
         Sleep(50)
     }
 
@@ -80,12 +108,14 @@ class NativeWetReadDriver {
 
     PasteClipboard(field) {
         this.Focus(field)
-        this.SendKeysToTarget("^v")
+        this.SendKeysToTarget("^v", field)
     }
 
-    SendKeysToTarget(keys) {
+    SendKeysToTarget(keys, field := 0) {
         if !this.windowDriver.IsActive(this.targetTitle)
             throw Error(this.targetTitle " is no longer active; no keys were sent")
+        if field && !this.focusDriver.IsExpectedFocus(this.targetTitle, field)
+            throw Error(this.targetTitle " expected text field lost focus; no keys were sent")
         this.windowDriver.SendKeys(keys)
     }
 

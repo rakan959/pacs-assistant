@@ -22,6 +22,7 @@ class WetReadTest {
         "StickyNoteTargetRequiresExpectedTypeProcessAndCapability",
         "NativeControlWithoutHandleIsUnsupported",
         "NativeSendRefusesLostFocus",
+        "NativeSendRefusesWrongStickyControlFocus",
         "RoutingFailureReportsTheActualCause"
     ]
 
@@ -245,6 +246,18 @@ class WetReadTest {
         Assert.Equal(0, windowDriver.sent.Length)
     }
 
+    NativeSendRefusesWrongStickyControlFocus() {
+        windowDriver := FakeWetReadWindowDriver(true)
+        focusDriver := FakeWetReadFocusDriver(false)
+        driver := NativeWetReadDriver("Sticky Notes", windowDriver, focusDriver)
+
+        Assert.Throws(
+            () => driver.Clear(FakeWetReadField()),
+            "expected text field"
+        )
+        Assert.Equal(0, windowDriver.sent.Length)
+    }
+
     RoutingFailureReportsTheActualCause() {
         message := AttendingFailureMessage(
             "EXAMINATION: CT CHEST",
@@ -402,5 +415,18 @@ class FakeWetReadWindowDriver {
 
     SendKeys(keys) {
         this.sent.Push(keys)
+    }
+}
+
+class FakeWetReadFocusDriver {
+    __New(matches) {
+        this.matches := matches
+    }
+
+    RequestFocus(*) {
+    }
+
+    IsExpectedFocus(*) {
+        return this.matches
     }
 }
