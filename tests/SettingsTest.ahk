@@ -14,6 +14,7 @@ class SettingsTest {
         "TestFailedBatchPreservesOriginalFile",
         "TestBatchPreservesUnmanagedSettings",
         "TestSavingSettingsNotifiesListeners",
+        "TestSavingSettingsReportsListenerFailures",
         "TestChangeListenersAllRun",
         "TestChangeListenerFailureDoesNotBlockLaterListeners"
     ]
@@ -163,6 +164,35 @@ class SettingsTest {
         Assert.Equal(1, calls.Length)
         Assert.False(Settings.Get("AutoUpdate"))
         Assert.Equal(45, Settings.Get("RefreshInterval"))
+    }
+
+    TestSavingSettingsReportsListenerFailures() {
+        Settings.AddChangeListener(ThrowSettingsListener)
+        controls := {
+            checkboxes: Map(
+                "AutoUpdate", {Value: false},
+                "SwapMicrophoneOnLogin", {Value: false}
+            ),
+            refreshInterval: {Value: 45},
+            micName: {Value: ""},
+            soundDropDown: {Text: "Ding"},
+            customSound: {Text: ""}
+        }
+        dialog := FakeSettingsDialog()
+        reports := []
+
+        savedAndApplied := Settings.SaveSettings(
+            controls,
+            dialog,
+            (message, errors) => reports.Push({message: message, errors: errors})
+        )
+
+        Assert.False(savedAndApplied)
+        Assert.True(dialog.destroyed)
+        Assert.False(Settings.Get("AutoUpdate"))
+        Assert.Equal(1, reports.Length)
+        Assert.Equal(1, reports[1].errors.Length)
+        Assert.True(InStr(reports[1].message, "restart") > 0)
     }
 
     TestChangeListenersAllRun() {

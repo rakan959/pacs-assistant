@@ -71,12 +71,13 @@ class NativeWetReadDriver {
     WriteControl(field, value) {
         hwnd := 0
         try hwnd := field.NativeWindowHandle
-        if hwnd {
-            ControlFocus(hwnd)
-            ControlSetText(value, hwnd)
-        } else {
-            ControlSetText(value, "", "Sticky Notes")
-        }
+        ; ControlSetText requires a concrete ControlID in AutoHotkey v2. An empty
+        ; identifier raises before mutation, so report this mode as unsupported rather
+        ; than entering rollback and claiming an untouched note could not be restored.
+        if !hwnd
+            return false
+        ControlFocus(hwnd)
+        ControlSetText(value, hwnd)
         return true
     }
 
@@ -204,8 +205,10 @@ class WetReadPasteEngine {
                     ? driver.WriteUIA(field, text)
                     : driver.WriteControl(field, text)
 
-                if (mode = "uia" && !wrote) {
-                    ; UIAValue.Write checks pattern support before changing the field.
+                if !wrote {
+                    ; Both native adapters check target capability before changing the
+                    ; field. A false result is therefore unsupported, not a failed
+                    ; mutation which needs a speculative rollback.
                     result.unsupported := true
                     result.reason := "unsupported"
                     if priorFieldChange
@@ -363,7 +366,8 @@ wetRead() {
 	result := WetReadPasteEngine.Paste(noteField, clipText, pasteMode)
 
 	if result.unsupported {
-		MsgBox("This Sticky Notes field does not accept the UIA Value method. Run the wet read again and choose Original (Ctrl+V) or ControlSetText.", "Paste Method Unavailable", "Icon!")
+		method := pasteMode = "uia" ? "UIA Value" : "ControlSetText"
+		MsgBox("This Sticky Notes field does not expose a verified target for the " method " method. Run the wet read again and choose another paste method.", "Paste Method Unavailable", "Icon!")
 	} else if !result.success {
 		if !result.restored {
 			MsgBox("The wet read failed and PACS Assistant could not restore the previous sticky note. Keep the window open and verify the note manually.", "Sticky Note Restore Failed", "Icon!")

@@ -93,6 +93,7 @@ class AppControl {
     ; A window title or body that looks like an unsaved-changes prompt
     static savePromptPattern := "i)(save|unsaved)"
     static activationTimeoutSeconds := 2
+    static maxMatchingProcesses := 32
     static windowDriver := NativeWindowDriver()
     static lifecycleDriver := NativeAppLifecycleDriver()
 
@@ -142,11 +143,24 @@ class AppControl {
     static StopTarget(target) {
         driver := this.lifecycleDriver
 
-        try pid := driver.FindProcess(target)
-        catch as err
-            return {found: false, stopped: false, error: err.Message}
+        foundProcess := false
+        stoppedProcesses := 0
+        loop {
+            try pid := driver.FindProcess(target)
+            catch as err
+                return {found: foundProcess, stopped: false, error: err.Message}
+            if !pid
+                break
 
-        if pid {
+            foundProcess := true
+            if (stoppedProcesses >= this.maxMatchingProcesses) {
+                return {
+                    found: true,
+                    stopped: false,
+                    error: "Too many matching processes remained after bounded termination"
+                }
+            }
+
             try stopped := driver.StopProcess(pid)
             catch as err {
                 ; A process may exit between discovery and termination. Verify the
@@ -154,10 +168,18 @@ class AppControl {
                 try alreadyStopped := !driver.ProcessExists(pid)
                 catch
                     alreadyStopped := false
-                return {found: true, stopped: alreadyStopped, error: err.Message}
+                if !alreadyStopped
+                    return {found: true, stopped: false, error: err.Message}
+                stoppedProcesses++
+                continue
             }
-            return {found: true, stopped: stopped ? true : false}
+            if !stopped
+                return {found: true, stopped: false}
+            stoppedProcesses++
         }
+
+        if foundProcess
+            return {found: true, stopped: true}
 
         try hwnd := driver.FindWindow(target)
         catch as err

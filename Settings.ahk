@@ -402,7 +402,7 @@ class Settings {
     }
     
     ; Save settings from GUI
-    static SaveSettings(controls, settingsGui) {
+    static SaveSettings(controls, settingsGui, liveRefreshFailureNotifier?) {
         ; Validate refresh interval
         try interval := Integer(controls.refreshInterval.Value)
         catch {
@@ -445,7 +445,20 @@ class Settings {
         }
 
         settingsGui.Destroy()
-        this.NotifyChanged()
+        listenerErrors := this.NotifyChanged()
+        if listenerErrors.Length {
+            details := ""
+            for message in listenerErrors
+                details .= (details = "" ? "" : "`n") "- " message
+            warning := "The settings were saved, but " listenerErrors.Length
+                . " running service(s) could not apply them. Restart PACS Assistant to apply every change."
+                . (details = "" ? "" : "`n`n" details)
+            if IsSet(liveRefreshFailureNotifier)
+                liveRefreshFailureNotifier.Call(warning, listenerErrors)
+            else
+                MsgBox(warning, "Settings Need Restart", "Icon!")
+            return false
+        }
         return true
     }
 }

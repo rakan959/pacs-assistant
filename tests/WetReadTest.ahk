@@ -11,11 +11,13 @@ class WetReadTest {
         "FailedUIAVerificationRestoresThePreviousNote",
         "UIABecomingUnsupportedStillRestoresAnEarlierWrite",
         "FailedControlVerificationRestoresThePreviousNote",
+        "UnsupportedControlDoesNotAttemptRollback",
         "SendExceptionRestoresThePreviousNoteAndClipboard",
         "ClearFailureAfterMutationRestoresThePreviousNote",
         "ClipboardRestoreFailureIsReported",
         "UnreadableNoteDoesNotAttemptPaste",
         "UnreadableNativeFieldFailsClosed",
+        "NativeControlWithoutHandleIsUnsupported",
         "NativeSendRefusesLostFocus",
         "RoutingFailureReportsTheActualCause"
     ]
@@ -106,6 +108,19 @@ class WetReadTest {
         Assert.Equal("existing note", driver.fieldValue)
     }
 
+    UnsupportedControlDoesNotAttemptRollback() {
+        driver := FakeWetReadDriver("existing note", "original clipboard")
+        driver.controlSupported := false
+
+        result := WetReadPasteEngine.Paste(1, "new wet read", "control", driver)
+
+        Assert.False(result.success)
+        Assert.True(result.unsupported)
+        Assert.True(result.restored)
+        Assert.Equal("existing note", driver.fieldValue)
+        Assert.Equal(1, driver.controlCalls)
+    }
+
     SendExceptionRestoresThePreviousNoteAndClipboard() {
         driver := FakeWetReadDriver("existing note", "original clipboard")
         driver.throwOnFailedText := "new wet read"
@@ -163,6 +178,12 @@ class WetReadTest {
         )
     }
 
+    NativeControlWithoutHandleIsUnsupported() {
+        driver := NativeWetReadDriver()
+
+        Assert.False(driver.WriteControl({NativeWindowHandle: 0}, "new wet read"))
+    }
+
     NativeSendRefusesLostFocus() {
         windowDriver := FakeWetReadWindowDriver(false)
         driver := NativeWetReadDriver("Sticky Notes", windowDriver)
@@ -195,6 +216,8 @@ class FakeWetReadDriver {
         this.uiaSupported := true
         this.uiaSupportedCalls := 0
         this.uiaCalls := 0
+        this.controlSupported := true
+        this.controlCalls := 0
         this.throwOnClipboardRestore := false
         this.throwOnRead := false
         this.clearCalls := 0
@@ -252,6 +275,9 @@ class FakeWetReadDriver {
     }
 
     WriteControl(field, value) {
+        this.controlCalls++
+        if !this.controlSupported
+            return false
         this.fieldValue := value = this.failedText ? "partial value" : value
         return true
     }

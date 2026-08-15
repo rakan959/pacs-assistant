@@ -17,6 +17,9 @@ class ClinicalAutomationTest {
         "FailedAttendingControlIsReported",
         "RestartTreatsAlreadyExitedProcessAsStopped",
         "RestartDetectsStubbornProcess",
+        "RestartStopsEveryMatchingProcess",
+        "RestartCapsRespawningProcessTermination",
+        "RestartRecheckUncertaintyFailsClosed",
         "NativeLookupErrorsAreNotAbsence",
         "RestartLookupUncertaintyCancelsStop",
         "WindowOwnershipUncertaintyCancelsStop",
@@ -182,6 +185,43 @@ class ClinicalAutomationTest {
         Assert.False(result.stopped)
     }
 
+    RestartStopsEveryMatchingProcess() {
+        driver := MultipleProcessLifecycleDriver([101, 202])
+        AppControl.lifecycleDriver := driver
+
+        result := AppControl.StopTarget("mp.exe")
+
+        Assert.True(result.found)
+        Assert.True(result.stopped)
+        Assert.Equal(2, driver.stoppedPids.Length)
+        Assert.Equal(101, driver.stoppedPids[1])
+        Assert.Equal(202, driver.stoppedPids[2])
+    }
+
+    RestartCapsRespawningProcessTermination() {
+        driver := RespawningProcessLifecycleDriver()
+        AppControl.lifecycleDriver := driver
+
+        result := AppControl.StopTarget("mp.exe")
+
+        Assert.True(result.found)
+        Assert.False(result.stopped)
+        Assert.Equal(AppControl.maxMatchingProcesses, driver.stopCalls)
+        Assert.True(InStr(result.error, "Too many") > 0)
+    }
+
+    RestartRecheckUncertaintyFailsClosed() {
+        driver := UncertainRecheckLifecycleDriver()
+        AppControl.lifecycleDriver := driver
+
+        result := AppControl.StopTarget("mp.exe")
+
+        Assert.True(result.found)
+        Assert.False(result.stopped)
+        Assert.Equal(1, driver.stopCalls)
+        Assert.True(InStr(result.error, "recheck failed") > 0)
+    }
+
     NativeLookupErrorsAreNotAbsence() {
         driver := NativeAppLifecycleDriver()
 
@@ -307,6 +347,7 @@ class FakeAppLifecycleDriver {
         this.mode := mode
         this.launches := []
         this.killCalls := 0
+        this.processAvailable := true
     }
 
     FindProcess(target) {
@@ -314,7 +355,7 @@ class FakeAppLifecycleDriver {
             throw Error("lookup failed")
         if (this.mode = "ownership-error")
             return 0
-        return 4242
+        return this.processAvailable ? 4242 : 0
     }
 
     FindWindow(target) {
@@ -330,7 +371,7 @@ class FakeAppLifecycleDriver {
     }
 
     ProcessExists(pid) {
-        return this.mode = "stubborn"
+        return this.mode = "stubborn" && this.processAvailable
     }
 
     WindowExists(hwnd) {
@@ -338,9 +379,14 @@ class FakeAppLifecycleDriver {
     }
 
     StopProcess(pid) {
-        if (this.mode = "already-exited")
+        if (this.mode = "already-exited") {
+            this.processAvailable := false
             throw Error("process disappeared before termination")
-        return false
+        }
+        if (this.mode = "stubborn")
+            return false
+        this.processAvailable := false
+        return true
     }
 
     KillWindow(hwnd) {
@@ -351,5 +397,72 @@ class FakeAppLifecycleDriver {
     Launch(path) {
         this.launches.Push(path)
         return true
+    }
+}
+
+class MultipleProcessLifecycleDriver {
+    __New(pids) {
+        this.pids := pids.Clone()
+        this.stoppedPids := []
+    }
+
+    FindProcess(target) {
+        return this.pids.Length ? this.pids[1] : 0
+    }
+
+    StopProcess(pid) {
+        this.stoppedPids.Push(pid)
+        this.pids.RemoveAt(1)
+        return true
+    }
+
+    ProcessExists(pid) {
+        return false
+    }
+
+    FindWindow(target) {
+        return 0
+    }
+}
+
+class RespawningProcessLifecycleDriver {
+    __New() {
+        this.stopCalls := 0
+    }
+
+    FindProcess(target) {
+        return 101
+    }
+
+    StopProcess(pid) {
+        this.stopCalls++
+        return true
+    }
+
+    ProcessExists(pid) {
+        return false
+    }
+}
+
+class UncertainRecheckLifecycleDriver {
+    __New() {
+        this.lookupCalls := 0
+        this.stopCalls := 0
+    }
+
+    FindProcess(target) {
+        this.lookupCalls++
+        if (this.lookupCalls > 1)
+            throw Error("recheck failed")
+        return 101
+    }
+
+    StopProcess(pid) {
+        this.stopCalls++
+        return true
+    }
+
+    ProcessExists(pid) {
+        return false
     }
 }
