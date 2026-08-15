@@ -17,27 +17,7 @@ class ClinicalAutomationTest {
         "TargetedCustomCommandUsesConfirmedTarget",
         "ClinicalCommandGateRejectsNestedBuiltIn",
         "ShutdownGateRejectsNewClinicalCommand",
-        "AttendingTargetRequiresSemanticControlIdentity",
-        "NativeAttendingWriteRefusesLostControlFocus",
-        "AttendingVerificationRejectsSubstringNearMatch",
-        "NativeAttendingPickerAbsenceRejectsReplacementControl",
-        "NativeAttendingPickerRequiresUniqueSemanticControl",
-        "NativeAttendingPickerUncertaintyCannotManufactureUniqueness",
-        "NativeAttendingRequiresCapturedExactAutomationId",
-        "UnavailableNativeAttendingTransactionHasNoWindowSideEffects",
-        "AttendingNameUsesLiteralText",
-        "AttendingConfirmationNeverUsesPositionalKeys",
-        "AttendingStopsBeforeTextWhenControlMissing",
-        "AttendingStopsBeforeConfirmationWhenValueUnverified",
-        "AttendingStopsBeforeConfirmationWhenPickerLosesFocus",
-        "AttendingReportsUnconfirmedSubmission",
-        "AttendingRejectsClosureWithoutCommittedReadback",
-        "AttendingRequiresVerificationPickerDismissal",
-        "AttendingFinalReadbackMustStillMatchBeforeDismissal",
-        "AttendingTransactionUsesCapturedExactWindow",
-        "CapturedReportSessionRoutesToSameWindow",
-        "AttendingRejectsSameWindowReportChange",
-        "AttendingStopsBeforeTextWhenFocusMoves",
+        "UnavailableAttendingAssignmentHasNoWindowSideEffects",
         "AttendingRoutingUsesInjectedDependencies",
         "BlankAttendingSkipsPowerScribeWrite",
         "UnknownExaminationRequiresManualAssignment",
@@ -45,13 +25,20 @@ class ClinicalAutomationTest {
         "NativeLookupErrorsAreNotAbsence",
         "WindowCloseUncertaintyCancelsStop",
         "WindowCloseCarriesAndRevalidatesCapturedSession",
-        "SharedHostWindowStopDoesNotTerminateOwner",
+        "AmbiguousSharedHostWindowsAreNotClosed",
         "RestartRejectsBareProcessTermination",
         "RestartSpecsNeverHardStopPowerScribe",
         "RestartAbortsWhenPowerScribeSaveIsUnverified",
         "RestartAbortsForUnverifiedPowerScribeProcess",
+        "RestartAbortsWhenAnotherPowerScribeProcessSurvivesGracefulClose",
+        "RestartPreparationFailureHasNoClinicalSideEffects",
+        "RestartPreparationCapturesHiddenTrustedVueProcesses",
         "RestartAbortsWhenTargetReappearsBeforeLaunch",
+        "RestartStopBoundaryFailureCancelsLaunch",
+        "RestartRejectsMalformedStopResult",
+        "RestartLaunchBoundaryFailuresAreReported",
         "RestartRequiresExpectedVueWindowAfterLaunch",
+        "RestartLaunchProofRequiresANewStableVueSession",
         "GracefulCloseTimesOutAcross32BitTickWrap",
         "GracefulCloseRequiresCapturedProcessIdentity",
         "GracefulCloseRejectsSameProcessWrongTitleBeforeRequest",
@@ -59,6 +46,7 @@ class ClinicalAutomationTest {
         "RestartTargetsUseExactClinicalIdentities",
         "PacsLauncherRejectsNonShortcutMatch",
         "PacsLauncherRejectsRetargetedShortcut",
+        "PacsLauncherRejectsUntrustedSameNamedExecutable",
         "PacsLauncherAcceptsInstalledShortcut",
         "ReportSelectionUsesOnlyReportShapedText",
         "ReportSelectionRejectsMultipleReportCandidates",
@@ -71,14 +59,9 @@ class ClinicalAutomationTest {
     Setup() {
         this.originalDriver := AppControl.windowDriver
         this.originalLifecycleDriver := HasProp(AppControl, "lifecycleDriver") ? AppControl.lifecycleDriver : 0
-        this.originalAttendingDriver := HasProp(PowerScribe, "attendingControlDriver")
-            ? PowerScribe.attendingControlDriver
-            : 0
         this.originalPowerScribeSessionDriver := HasProp(PowerScribe, "sessionDriver")
             ? PowerScribe.sessionDriver
             : 0
-        this.originalApprovedAttendingIds := NativeAttendingControlDriver.approvedAutomationIds
-        this.originalApprovedConfirmationIds := NativeAttendingControlDriver.approvedConfirmationAutomationIds
         this.originalProfiles := ProfileManager.profiles
         this.originalCurrentProfile := ProfileManager.currentProfile
         this.originalClinicalCommandActive := PACSCommands.clinicalCommandActive
@@ -86,10 +69,7 @@ class ClinicalAutomationTest {
         this.originalBusyNotifier := PACSCommands.busyNotifier
         this.originalCommandAvailabilityProbe := PACSCommands.commandAvailabilityProbe
         this.busyNotifications := []
-        PowerScribe.attendingControlDriver := FakeAttendingControlDriver()
         PowerScribe.sessionDriver := FakePowerScribeSessionDriver()
-        NativeAttendingControlDriver.approvedAutomationIds := ["attendingPicker"]
-        NativeAttendingControlDriver.approvedConfirmationAutomationIds := ["confirmAttending"]
         ProfileManager.profiles := Map()
         ProfileManager.currentProfile := ""
         PACSCommands.clinicalCommandActive := false
@@ -305,296 +285,15 @@ class ClinicalAutomationTest {
         Assert.True(InStr(this.busyNotifications[1].text, "shutting down") > 0)
     }
 
-    AttendingTargetRequiresSemanticControlIdentity() {
-        root := FakeAttendingTargetElement(UIA.Type.Window, 42)
-        valid := FakeAttendingTargetElement(UIA.Type.ComboBox, 42, "Attending", "attendingPicker", true)
-        wrongType := FakeAttendingTargetElement(UIA.Type.Button, 42, "Attending", "attendingPicker", true)
-        wrongMeaning := FakeAttendingTargetElement(UIA.Type.Edit, 42, "Report", "reportEditor", true)
-        wrongProcess := FakeAttendingTargetElement(UIA.Type.Edit, 99, "Attending", "attendingPicker", true)
-        wrongWindow := FakeAttendingTargetElement(UIA.Type.Edit, 42, "Attending", "attendingPicker", true, 200)
-
-        Assert.True(NativeAttendingControlDriver.IsExpectedControl(root, valid))
-        Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, wrongType))
-        Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, wrongMeaning))
-        Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, wrongProcess))
-        Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, wrongWindow))
-    }
-
-    NativeAttendingRequiresCapturedExactAutomationId() {
-        root := FakeAttendingTargetElement(UIA.Type.Window, 42)
-        candidate := FakeAttendingTargetElement(
-            UIA.Type.ComboBox,
-            42,
-            "Attending",
-            "attendingPicker",
-            true
-        )
-        NativeAttendingControlDriver.approvedAutomationIds := []
-
-        Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, candidate))
-    }
-
-    UnavailableNativeAttendingTransactionHasNoWindowSideEffects() {
+    UnavailableAttendingAssignmentHasNoWindowSideEffects() {
         windowDriver := FakeWindowDriver()
         sessionDriver := FakePowerScribeSessionDriver()
-        PowerScribe.attendingControlDriver := NativeAttendingControlDriver()
         PowerScribe.sessionDriver := sessionDriver
         AppControl.windowDriver := windowDriver
 
-        NativeAttendingControlDriver.approvedAutomationIds := []
-        NativeAttendingControlDriver.approvedConfirmationAutomationIds := []
         Assert.False(PowerScribe.SetAttending("Smith"))
         Assert.Equal(0, sessionDriver.captureCalls)
         Assert.Equal(0, windowDriver.calls.Length)
-
-        ; A picker identity alone is insufficient: the semantic confirmation
-        ; capability must be approved before any window action is allowed.
-        NativeAttendingControlDriver.approvedAutomationIds := ["attendingPicker"]
-        Assert.False(PowerScribe.SetAttending("Smith"))
-        Assert.Equal(0, sessionDriver.captureCalls)
-        Assert.Equal(0, windowDriver.calls.Length)
-
-        ; Placeholder strings must not enable mutation before the semantic confirm
-        ; resolver/action is implemented.
-        NativeAttendingControlDriver.approvedConfirmationAutomationIds := ["confirmAttending"]
-        Assert.False(PowerScribe.SetAttending("Smith"))
-        Assert.Equal(0, sessionDriver.captureCalls)
-        Assert.Equal(0, windowDriver.calls.Length)
-    }
-
-    NativeAttendingWriteRefusesLostControlFocus() {
-        control := {writeCalls: 0}
-        driver := NativeAttendingControlDriver((*) => false)
-
-        Assert.False(driver.WriteAndVerify(PowerScribe.windowTitle, control, "Smith"))
-        Assert.Equal(0, control.writeCalls)
-    }
-
-    AttendingVerificationRejectsSubstringNearMatch() {
-        driver := NativeAttendingControlDriver()
-
-        Assert.True(driver.HasExpectedValue(FakeAttendingValueElement(" Smith "), "smith"))
-        Assert.False(driver.HasExpectedValue(FakeAttendingValueElement("Smithson"), "Smith"))
-    }
-
-    NativeAttendingPickerAbsenceRejectsReplacementControl() {
-        driver := NativeAttendingControlDriver()
-        replacement := FakeAttendingTargetElement(
-            UIA.Type.Edit,
-            42,
-            "Attending",
-            "attendingPicker",
-            true
-        )
-
-        Assert.False(driver.PickerIsAbsentFromRoot(FakeAttendingRoot([replacement])))
-        Assert.True(driver.PickerIsAbsentFromRoot(FakeAttendingRoot()))
-    }
-
-    NativeAttendingPickerRequiresUniqueSemanticControl() {
-        driver := NativeAttendingControlDriver()
-        first := FakeAttendingTargetElement(UIA.Type.Edit, 42, "Attending", "attendingPicker", true)
-        second := FakeAttendingTargetElement(UIA.Type.ComboBox, 42, "Attending", "attendingPicker", true)
-
-        Assert.Equal(0, driver.UniqueExpectedControl(FakeAttendingRoot([first], [second])))
-        Assert.True(driver.UniqueExpectedControl(FakeAttendingRoot([first])) = first)
-    }
-
-    NativeAttendingPickerUncertaintyCannotManufactureUniqueness() {
-        driver := NativeAttendingControlDriver()
-        valid := FakeAttendingTargetElement(
-            UIA.Type.Edit,
-            42,
-            "Attending",
-            "attendingPicker",
-            true
-        )
-        unreadable := ThrowingAttendingTargetElement()
-
-        Assert.Equal(0, driver.UniqueExpectedControl(FakeAttendingRoot([valid, unreadable])))
-        Assert.False(driver.PickerIsAbsentFromRoot(FakeAttendingRoot([unreadable])))
-    }
-
-    AttendingNameUsesLiteralText() {
-        driver := FakeWindowDriver()
-        AppControl.windowDriver := driver
-        attendingDriver := FakeAttendingControlDriver()
-        PowerScribe.attendingControlDriver := attendingDriver
-        attending := "Smith + Jones {Neuro}"
-
-        Assert.True(PowerScribe.SetAttending(attending))
-        Assert.Equal(11, driver.calls.Length)
-        Assert.Equal("activate", driver.calls[1].kind)
-        Assert.Equal("ahk_id 100", driver.calls[1].value)
-        Assert.Equal("active", driver.calls[2].kind)
-        Assert.Equal("keys", driver.calls[3].kind)
-        Assert.Equal("{Alt down}ta{Alt up}", driver.calls[3].value)
-        Assert.Equal("active", driver.calls[5].kind)
-        Assert.Equal(1, attendingDriver.writes.Length)
-        Assert.Equal(attending, attendingDriver.writes[1].value)
-        Assert.Equal(1, attendingDriver.semanticConfirmations)
-        Assert.Equal("active", driver.calls[7].kind)
-        Assert.Equal("{Alt down}ta{Alt up}", driver.calls[8].value)
-        Assert.Equal("active", driver.calls[10].kind)
-        Assert.Equal("{Escape}", driver.calls[11].value)
-    }
-
-    AttendingConfirmationNeverUsesPositionalKeys() {
-        driver := FakeWindowDriver()
-        AppControl.windowDriver := driver
-
-        Assert.True(PowerScribe.SetAttending("Smith"))
-        Assert.False(this.DriverSentKeys(driver, "{tab}{space}{tab}{Enter}"))
-        Assert.Equal(1, PowerScribe.attendingControlDriver.semanticConfirmations)
-    }
-
-    AttendingStopsBeforeTextWhenControlMissing() {
-        driver := FakeWindowDriver()
-        AppControl.windowDriver := driver
-        PowerScribe.attendingControlDriver := FakeAttendingControlDriver(0)
-
-        Assert.False(PowerScribe.SetAttending("Smith"))
-        for call in driver.calls
-            Assert.False(call.kind = "text", "Attending text must not be sent to an unidentified control")
-    }
-
-    AttendingStopsBeforeConfirmationWhenValueUnverified() {
-        driver := FakeWindowDriver()
-        AppControl.windowDriver := driver
-        PowerScribe.attendingControlDriver := FakeAttendingControlDriver({}, false)
-
-        Assert.False(PowerScribe.SetAttending("Smith"))
-        Assert.Equal(1, PowerScribe.attendingControlDriver.writes.Length)
-        for call in driver.calls
-            Assert.False(call.kind = "keys" && call.value = "{tab}{space}{tab}{Enter}", "Unverified attending must not be confirmed")
-    }
-
-    AttendingStopsBeforeConfirmationWhenPickerLosesFocus() {
-        driver := FakeWindowDriver()
-        AppControl.windowDriver := driver
-        PowerScribe.attendingControlDriver := FakeAttendingControlDriver({}, true, false)
-
-        Assert.False(PowerScribe.SetAttending("Smith"))
-        for call in driver.calls
-            Assert.False(call.kind = "keys" && call.value = "{tab}{space}{tab}{Enter}", "Attending confirmation requires the verified picker to retain focus")
-    }
-
-    AttendingReportsUnconfirmedSubmission() {
-        driver := FakeWindowDriver()
-        AppControl.windowDriver := driver
-        attendingDriver := FakeAttendingControlDriver({}, true, true, false)
-        PowerScribe.attendingControlDriver := attendingDriver
-
-        Assert.False(PowerScribe.SetAttending("Smith"))
-        Assert.Equal(1, attendingDriver.confirmationChecks)
-    }
-
-    AttendingRejectsClosureWithoutCommittedReadback() {
-        driver := FakeWindowDriver()
-        AppControl.windowDriver := driver
-        attendingDriver := FakeAttendingControlDriver({}, true, true, true, false)
-        PowerScribe.attendingControlDriver := attendingDriver
-
-        Assert.False(PowerScribe.SetAttending("Smith"))
-        Assert.Equal(1, attendingDriver.committedValueChecks)
-        Assert.Equal(2, attendingDriver.confirmationChecks)
-        Assert.True(this.DriverSentKeys(driver, "{Escape}"))
-    }
-
-    AttendingRequiresVerificationPickerDismissal() {
-        driver := FakeWindowDriver()
-        AppControl.windowDriver := driver
-        attendingDriver := FakeAttendingControlDriver({}, true, true, true, true, false)
-        PowerScribe.attendingControlDriver := attendingDriver
-
-        Assert.False(PowerScribe.SetAttending("Smith"))
-        Assert.Equal(2, attendingDriver.confirmationChecks)
-    }
-
-    AttendingFinalReadbackMustStillMatchBeforeDismissal() {
-        driver := FakeWindowDriver()
-        AppControl.windowDriver := driver
-        attendingDriver := FakeAttendingControlDriver({}, true, [true, false])
-        PowerScribe.attendingControlDriver := attendingDriver
-
-        Assert.False(PowerScribe.SetAttending("Smith"))
-        Assert.False(this.DriverSentKeys(driver, "{Escape}"))
-    }
-
-    AttendingTransactionUsesCapturedExactWindow() {
-        session := {hwnd: 701, target: "ahk_id 701", processId: 42}
-        sessionDriver := FakePowerScribeSessionDriver(session)
-        PowerScribe.sessionDriver := sessionDriver
-        driver := FakeWindowDriver()
-        AppControl.windowDriver := driver
-
-        Assert.True(PowerScribe.SetAttending("Smith", session))
-
-        Assert.Equal(0, sessionDriver.captureCalls)
-        for call in driver.calls {
-            if (call.kind = "activate" || call.kind = "active")
-                Assert.Equal(session.target, call.value)
-        }
-    }
-
-    CapturedReportSessionRoutesToSameWindow() {
-        profile := ProfileManager.NewProfile()
-        profile.modalityAttendings["Chest"] := "Smith"
-        ProfileManager.profiles["Test"] := profile
-        ProfileManager.currentProfile := "Test"
-        session := {hwnd: 702, target: "ahk_id 702", processId: 42}
-        sessionDriver := FakePowerScribeSessionDriver(session)
-        PowerScribe.sessionDriver := sessionDriver
-        driver := FakeWindowDriver()
-        AppControl.windowDriver := driver
-
-        Assert.Equal("Chest", checkAttending("EXAMINATION: CT CHEST", session))
-
-        Assert.Equal(0, sessionDriver.captureCalls)
-        for call in driver.calls {
-            if (call.kind = "activate" || call.kind = "active")
-                Assert.Equal(session.target, call.value)
-        }
-    }
-
-    AttendingRejectsSameWindowReportChange() {
-        originalReport := "EXAMINATION: CT CHEST`nFINDINGS: Original"
-        session := {
-            hwnd: 703,
-            target: "ahk_id 703",
-            processId: 42,
-            reportText: originalReport
-        }
-        sessionDriver := FakePowerScribeSessionDriver(
-            session,
-            "EXAMINATION: MRI BRAIN`nFINDINGS: Different study"
-        )
-        PowerScribe.sessionDriver := sessionDriver
-        driver := FakeWindowDriver()
-        AppControl.windowDriver := driver
-
-        Assert.False(PowerScribe.SetAttending("Smith", session, originalReport))
-        Assert.False(this.DriverSentKeys(driver, "{Alt down}ta{Alt up}"))
-    }
-
-    DriverSentKeys(driver, expected) {
-        for call in driver.calls {
-            if (call.kind = "keys" && call.value = expected)
-                return true
-        }
-        return false
-    }
-
-    AttendingStopsBeforeTextWhenFocusMoves() {
-        driver := FakeWindowDriver(true, [true, false])
-        AppControl.windowDriver := driver
-
-        Assert.False(PowerScribe.SetAttending("Smith"))
-
-        for call in driver.calls
-            Assert.False(call.kind = "text", "Attending text must not be sent after focus moves")
-        Assert.Equal(5, driver.calls.Length)
-        Assert.Equal("active", driver.calls[5].kind)
     }
 
     AttendingRoutingUsesInjectedDependencies() {
@@ -690,7 +389,7 @@ class ClinicalAutomationTest {
         Assert.True(driver.titleReads >= 2)
     }
 
-    SharedHostWindowStopDoesNotTerminateOwner() {
+    AmbiguousSharedHostWindowsAreNotClosed() {
         driver := SharedHostWindowLifecycleDriver()
         AppControl.lifecycleDriver := driver
         AppControl.windowDriver := driver
@@ -701,13 +400,13 @@ class ClinicalAutomationTest {
         )
 
         Assert.True(result.found)
-        Assert.True(result.stopped)
+        Assert.False(result.stopped)
+        Assert.True(InStr(result.error, "multiple") > 0)
         Assert.Equal(0, driver.processLookupCalls)
-        Assert.Equal(2, driver.closeCalls)
+        Assert.Equal(0, driver.closeCalls)
         Assert.Equal(0, driver.killCalls)
         Assert.Equal(0, driver.stopProcessCalls)
-        Assert.Equal(1, driver.windows.Length)
-        Assert.Equal(51515, driver.windows[1])
+        Assert.Equal(3, driver.windows.Length)
     }
 
     RestartRejectsBareProcessTermination() {
@@ -755,6 +454,64 @@ class ClinicalAutomationTest {
         Assert.Equal(0, driver.launchCalls)
     }
 
+    RestartAbortsWhenAnotherPowerScribeProcessSurvivesGracefulClose() {
+        driver := FakePacsRestartDriver([{
+            hwnd: 601,
+            target: "ahk_id 601",
+            processId: 77
+        }], 88, true)
+
+        Assert.False(restartPACS(driver))
+        Assert.Equal(1, driver.closeCalls)
+        Assert.Equal(0, driver.stopCalls)
+        Assert.Equal(0, driver.launchCalls)
+    }
+
+    RestartPreparationFailureHasNoClinicalSideEffects() {
+        driver := FakePacsRestartDriver([{
+            hwnd: 601,
+            target: "ahk_id 601",
+            processId: 77
+        }], 0, true)
+        driver.prepareResult := false
+
+        Assert.False(restartPACS(driver))
+        Assert.Equal(1, driver.prepareCalls)
+        Assert.Equal(0, driver.closeCalls)
+        Assert.Equal(0, driver.stopCalls)
+        Assert.Equal(0, driver.launchCalls)
+    }
+
+    RestartPreparationCapturesHiddenTrustedVueProcesses() {
+        originalWindowDriver := AppControl.windowDriver
+        originalLifecycleDriver := AppControl.lifecycleDriver
+        trustedPath := A_Temp "\Philips\Vue\mp.exe"
+        try {
+            AppControl.windowDriver := FakeExactWindowDriver([{
+                hwnd: 501,
+                title: AppControl.vuePacsTitle,
+                exe: AppControl.vuePacsExecutable,
+                pid: 42
+            }])
+            AppControl.lifecycleDriver := FakeProcessInventoryLifecycleDriver(
+                Map(42, trustedPath, 99, trustedPath),
+                [
+                    {processId: 42, name: AppControl.vuePacsExecutable, path: trustedPath},
+                    {processId: 99, name: AppControl.vuePacsExecutable, path: trustedPath}
+                ]
+            )
+            driver := NativePacsRestartDriver()
+
+            Assert.True(driver.PrepareRestart())
+            Assert.True(driver.priorVueProcessIds.Has(42))
+            Assert.True(driver.priorVueProcessIds.Has(99))
+            Assert.Equal(trustedPath, driver.trustedVueExecutablePath)
+        } finally {
+            AppControl.windowDriver := originalWindowDriver
+            AppControl.lifecycleDriver := originalLifecycleDriver
+        }
+    }
+
     RestartAbortsWhenTargetReappearsBeforeLaunch() {
         driver := FakePacsRestartDriver([], 0, true)
         driver.quiescent := false
@@ -765,6 +522,38 @@ class ClinicalAutomationTest {
         Assert.Equal(0, driver.launchCalls)
     }
 
+    RestartStopBoundaryFailureCancelsLaunch() {
+        driver := FakePacsRestartDriver([], 0, true)
+        driver.stopError := "simulated stop failure"
+
+        Assert.False(restartPACS(driver))
+        Assert.Equal(1, driver.stopCalls)
+        Assert.Equal(0, driver.launchCalls)
+    }
+
+    RestartRejectsMalformedStopResult() {
+        driver := FakePacsRestartDriver([], 0, true)
+        driver.stopResult := {anyStopped: false}
+
+        Assert.False(restartPACS(driver))
+        Assert.Equal(1, driver.stopCalls)
+        Assert.Equal(0, driver.launchCalls)
+    }
+
+    RestartLaunchBoundaryFailuresAreReported() {
+        launchDriver := FakePacsRestartDriver([], 0, true)
+        launchDriver.launchError := "simulated launch failure"
+        Assert.False(restartPACS(launchDriver))
+        Assert.Equal(1, launchDriver.launchCalls)
+        Assert.Equal(0, launchDriver.waitForLaunchCalls)
+
+        verifyDriver := FakePacsRestartDriver([], 0, true)
+        verifyDriver.waitForLaunchError := "simulated launch verification failure"
+        Assert.False(restartPACS(verifyDriver))
+        Assert.Equal(1, verifyDriver.launchCalls)
+        Assert.Equal(1, verifyDriver.waitForLaunchCalls)
+    }
+
     RestartRequiresExpectedVueWindowAfterLaunch() {
         driver := FakePacsRestartDriver([], 0, true)
         driver.launchVerified := false
@@ -772,6 +561,48 @@ class ClinicalAutomationTest {
         Assert.False(restartPACS(driver))
         Assert.Equal(1, driver.launchCalls)
         Assert.Equal(1, driver.waitForLaunchCalls)
+    }
+
+    RestartLaunchProofRequiresANewStableVueSession() {
+        originalWindowDriver := AppControl.windowDriver
+        originalLifecycleDriver := AppControl.lifecycleDriver
+        trustedPath := A_Temp "\Philips\Vue\mp.exe"
+        try {
+            native := NativePacsRestartDriver()
+            native.trustedVueExecutablePath := trustedPath
+            AppControl.lifecycleDriver := FakeProcessInventoryLifecycleDriver(
+                Map(
+                    42, trustedPath,
+                    43, trustedPath,
+                    51, trustedPath,
+                    52, trustedPath,
+                    61, trustedPath
+                ),
+                []
+            )
+            native.priorVueProcessIds := Map(42, true)
+            AppControl.windowDriver := SequencedLaunchWindowDriver([
+                [{hwnd: 701, pid: 42}],
+                [{hwnd: 702, pid: 43}]
+            ])
+            Assert.False(native.WaitForLaunch(350))
+
+            native.priorVueProcessIds := Map()
+            AppControl.windowDriver := SequencedLaunchWindowDriver([
+                [{hwnd: 801, pid: 51}],
+                [{hwnd: 802, pid: 52}]
+            ])
+            Assert.False(native.WaitForLaunch(350))
+
+            AppControl.windowDriver := SequencedLaunchWindowDriver([
+                [{hwnd: 901, pid: 61}],
+                [{hwnd: 901, pid: 61}]
+            ])
+            Assert.True(native.WaitForLaunch(350))
+        } finally {
+            AppControl.windowDriver := originalWindowDriver
+            AppControl.lifecycleDriver := originalLifecycleDriver
+        }
     }
 
     GracefulCloseTimesOutAcross32BitTickWrap() {
@@ -858,7 +689,29 @@ class ClinicalAutomationTest {
         driver.shortcutTarget := target
         AppControl.lifecycleDriver := driver
 
-        try Assert.False(AppControl.LaunchVuePacs(root))
+        try Assert.False(AppControl.LaunchVuePacs(root, root "\mp.exe"))
+        finally DirDelete(root, true)
+
+        Assert.Equal(0, driver.launches.Length)
+    }
+
+    PacsLauncherRejectsUntrustedSameNamedExecutable() {
+        root := A_Temp "\pacs_launch_untrusted_" A_TickCount "_" Random(1000, 9999)
+        trustedRoot := root "\trusted"
+        otherRoot := root "\other"
+        DirCreate(trustedRoot)
+        DirCreate(otherRoot)
+        shortcut := root "\Vue Client (Integrated).lnk"
+        trustedTarget := trustedRoot "\mp.exe"
+        otherTarget := otherRoot "\mp.exe"
+        FileAppend("test shortcut", shortcut)
+        FileAppend("trusted target", trustedTarget)
+        FileAppend("untrusted target", otherTarget)
+        driver := FakeAppLifecycleDriver("launcher")
+        driver.shortcutTarget := otherTarget
+        AppControl.lifecycleDriver := driver
+
+        try Assert.False(AppControl.LaunchVuePacs(root, trustedTarget))
         finally DirDelete(root, true)
 
         Assert.Equal(0, driver.launches.Length)
@@ -876,7 +729,7 @@ class ClinicalAutomationTest {
         AppControl.lifecycleDriver := driver
 
         try {
-            Assert.True(AppControl.LaunchVuePacs(root))
+            Assert.True(AppControl.LaunchVuePacs(root, target))
             Assert.Equal(1, driver.launches.Length)
             Assert.Equal(shortcut, driver.launches[1])
         } finally {
@@ -965,10 +818,7 @@ class ClinicalAutomationTest {
         AppControl.windowDriver := this.originalDriver
         if this.originalLifecycleDriver
             AppControl.lifecycleDriver := this.originalLifecycleDriver
-        PowerScribe.attendingControlDriver := this.originalAttendingDriver
         PowerScribe.sessionDriver := this.originalPowerScribeSessionDriver
-        NativeAttendingControlDriver.approvedAutomationIds := this.originalApprovedAttendingIds
-        NativeAttendingControlDriver.approvedConfirmationAutomationIds := this.originalApprovedConfirmationIds
         ProfileManager.profiles := this.originalProfiles
         ProfileManager.currentProfile := this.originalCurrentProfile
         PACSCommands.clinicalCommandActive := this.originalClinicalCommandActive
@@ -1091,6 +941,30 @@ class ToggleRaceWindowDriver extends FakeExactWindowDriver {
     }
 }
 
+class SequencedLaunchWindowDriver extends FakeExactWindowDriver {
+    __New(snapshots) {
+        this.snapshots := snapshots.Clone()
+        this.snapshotIndex := 0
+        super.__New([])
+    }
+
+    ListWindowsByExecutable(executable) {
+        if (executable != AppControl.vuePacsExecutable)
+            return []
+        this.snapshotIndex := Min(this.snapshotIndex + 1, this.snapshots.Length)
+        this.windows := []
+        for item in this.snapshots[this.snapshotIndex] {
+            this.windows.Push({
+                hwnd: item.hwnd,
+                title: AppControl.vuePacsTitle,
+                exe: AppControl.vuePacsExecutable,
+                pid: item.pid
+            })
+        }
+        return super.ListWindowsByExecutable(executable)
+    }
+}
+
 class FakePacsRestartDriver {
     __New(powerScribeWindows, powerScribePid, closeResult) {
         this.powerScribeWindows := powerScribeWindows
@@ -1101,8 +975,19 @@ class FakePacsRestartDriver {
         this.launchCalls := 0
         this.verifyCalls := 0
         this.waitForLaunchCalls := 0
+        this.prepareCalls := 0
+        this.prepareResult := true
         this.quiescent := true
         this.launchVerified := true
+        this.stopResult := {anyStopped: false, failedTargets: []}
+        this.stopError := ""
+        this.launchError := ""
+        this.waitForLaunchError := ""
+    }
+
+    PrepareRestart() {
+        this.prepareCalls++
+        return this.prepareResult
     }
 
     FindPowerScribeWindows() {
@@ -1120,7 +1005,9 @@ class FakePacsRestartDriver {
 
     StopTargets(*) {
         this.stopCalls++
-        return {anyStopped: false, failedTargets: []}
+        if (this.stopError != "")
+            throw Error(this.stopError)
+        return this.stopResult
     }
 
     Pause(*) {
@@ -1128,6 +1015,8 @@ class FakePacsRestartDriver {
 
     Launch() {
         this.launchCalls++
+        if (this.launchError != "")
+            throw Error(this.launchError)
         return true
     }
 
@@ -1141,7 +1030,26 @@ class FakePacsRestartDriver {
 
     WaitForLaunch(*) {
         this.waitForLaunchCalls++
+        if (this.waitForLaunchError != "")
+            throw Error(this.waitForLaunchError)
         return this.launchVerified
+    }
+}
+
+class FakeProcessInventoryLifecycleDriver {
+    __New(pathsByProcessId, processes) {
+        this.pathsByProcessId := pathsByProcessId
+        this.processes := processes
+    }
+
+    ProcessPath(processId) {
+        if !this.pathsByProcessId.Has(processId)
+            throw Error("unknown process")
+        return this.pathsByProcessId[processId]
+    }
+
+    ListProcessesByExecutable(*) {
+        return this.processes
     }
 }
 
@@ -1181,67 +1089,6 @@ class FakeGracefulCloseDriver {
     Pause(milliseconds) {
         this.pauseCalls++
         this.now += milliseconds
-    }
-}
-
-class FakeAttendingControlDriver {
-    __New(
-        control := {},
-        valueMatches := true,
-        canConfirm := true,
-        confirmationCompleted := true,
-        committedValueMatches := true,
-        verificationDismissed := true
-    ) {
-        this.control := control
-        this.valueMatches := valueMatches
-        this.confirmationAllowed := canConfirm is Array ? canConfirm.Clone() : canConfirm
-        this.pickerClosures := [confirmationCompleted, verificationDismissed]
-        this.confirmationChecks := 0
-        this.committedValueMatches := committedValueMatches
-        this.committedValueChecks := 0
-        this.semanticConfirmations := 0
-        this.writes := []
-    }
-
-    CanAutomateAttendingTransaction() {
-        return true
-    }
-
-    FindExpectedControl(*) {
-        return this.control
-    }
-
-    WriteAndVerify(windowTitle, control, value) {
-        this.writes.Push({windowTitle: windowTitle, control: control, value: value})
-        return this.valueMatches
-    }
-
-    CanConfirm(*) {
-        if this.confirmationAllowed is Array
-            return this.confirmationAllowed.Length
-                ? this.confirmationAllowed.RemoveAt(1)
-                : false
-        return this.confirmationAllowed
-    }
-
-    ConfirmExpectedAttending(*) {
-        this.semanticConfirmations++
-        return true
-    }
-
-    WaitForPickerAbsent(*) {
-        this.confirmationChecks++
-        return this.pickerClosures.Length ? this.pickerClosures.RemoveAt(1) : false
-    }
-
-    WaitForStableExpectedValue(*) {
-        this.committedValueChecks++
-        return this.committedValueMatches
-    }
-
-    ControlHasExpectedFocus(*) {
-        return true
     }
 }
 
@@ -1356,60 +1203,6 @@ class UncertainReportRoot {
 
     ElementFromPath(*) {
         throw Error("no positional fallback")
-    }
-}
-
-class FakeAttendingTargetElement {
-    __New(type, processId, name := "", automationId := "", writable := false, windowId := 100) {
-        this.Type := type
-        this.ProcessId := processId
-        this.WinId := windowId
-        this.Name := name
-        this.AutomationId := automationId
-        this.IsEnabled := true
-        this.IsValuePatternAvailable := writable
-        this.IsLegacyIAccessiblePatternAvailable := false
-        this.NativeWindowHandle := 0
-    }
-}
-
-class ThrowingAttendingTargetElement {
-    Type {
-        get {
-            throw Error("simulated provider failure")
-        }
-    }
-}
-
-class FakeAttendingValueElement {
-    __New(value) {
-        this.value := value
-    }
-
-    GetPropertyValue(propertyId) {
-        switch propertyId {
-            case UIA.Property.ValueValue: return this.value
-            case UIA.Property.IsValuePatternAvailable: return true
-            case UIA.Property.IsLegacyIAccessiblePatternAvailable: return false
-        }
-        return ""
-    }
-}
-
-class FakeAttendingRoot {
-    __New(editControls := [], comboControls := []) {
-        this.ProcessId := 42
-        this.WinId := 100
-        this.editControls := editControls
-        this.comboControls := comboControls
-    }
-
-    FindElements(condition) {
-        if (condition.Type = "Edit")
-            return this.editControls
-        if (condition.Type = "ComboBox")
-            return this.comboControls
-        return []
     }
 }
 

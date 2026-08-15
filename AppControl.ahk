@@ -102,6 +102,40 @@ class NativeAppLifecycleDriver {
         FileGetShortcut(path, &target)
         return target
     }
+
+    ProcessPath(pid) {
+        if (!(pid is Integer) || pid <= 0)
+            throw ValueError("A positive process ID is required")
+        processes := this.QueryProcesses("ProcessId = " pid)
+        if (processes.Length != 1 || processes[1].path = "")
+            throw Error("Process executable path could not be verified")
+        return processes[1].path
+    }
+
+    ListProcessesByExecutable(executable) {
+        if (Type(executable) != "String" || executable = "")
+            throw ValueError("An executable name is required")
+        escaped := StrReplace(executable, "'", "''")
+        return this.QueryProcesses("Name = '" escaped "'")
+    }
+
+    QueryProcesses(whereClause) {
+        locator := ComObject("WbemScripting.SWbemLocator")
+        service := locator.ConnectServer(".", "root\cimv2")
+        results := []
+        for process in service.ExecQuery(
+            "SELECT ProcessId, Name, ExecutablePath FROM Win32_Process WHERE " whereClause
+        ) {
+            path := ""
+            try path := String(process.ExecutablePath)
+            results.Push({
+                processId: Integer(process.ProcessId),
+                name: String(process.Name),
+                path: path
+            })
+        }
+        return results
+    }
 }
 
 /**
@@ -109,7 +143,6 @@ class NativeAppLifecycleDriver {
  */
 class AppControl {
     static activationTimeoutSeconds := 2
-    static maxMatchingWindows := 32
     static powerScribeExecutable := "Nuance.PowerScribe360.exe"
     static powerScribeReportingTitle := "PowerScribe 360 | Reporting"
     static vuePacsExecutable := "mp.exe"
@@ -277,6 +310,41 @@ class AppControl {
         return sessions.Length = 1 ? sessions[1] : 0
     }
 
+    static ResolveUniqueExactWindowAcross(specs) {
+        if !IsObject(specs) || !specs.Length
+            throw ValueError("At least one exact window spec is required")
+        sessions := []
+        seen := Map()
+        for spec in specs {
+            for session in this.ResolveExactWindows(spec) {
+                if seen.Has(session.hwnd)
+                    continue
+                seen[session.hwnd] := true
+                sessions.Push(session)
+            }
+        }
+        return sessions.Length = 1 ? sessions[1] : 0
+    }
+
+    static ExactSessionIsUniqueAcross(session, specs) {
+        try current := this.ResolveUniqueExactWindowAcross(specs)
+        catch
+            return false
+        return current
+            && current.hwnd = session.hwnd
+            && current.processId = session.processId
+    }
+
+    static IsUniqueExactWindowActive(specs) {
+        try session := this.ResolveUniqueExactWindowAcross(specs)
+        catch
+            return false
+        if !session || !this.ExactSessionIsUniqueAcross(session, specs)
+            return false
+        try return this.windowDriver.IsActive(session.target)
+        return false
+    }
+
     static ExactSessionIsUniqueAndLive(session) {
         return this.ExactSessionIsLive(session, true)
     }
@@ -379,32 +447,34 @@ class AppControl {
     }
 
     static CloseExactWindowTarget(spec) {
-        foundWindow := false
-        stoppedWindows := 0
-        loop {
-            try sessions := this.ResolveExactWindows(spec)
-            catch as err
-                return {found: foundWindow, stopped: false, error: err.Message}
-            if !sessions.Length
-                return {found: foundWindow, stopped: true}
-            foundWindow := true
-
-            for session in sessions {
-                if (stoppedWindows >= this.maxMatchingWindows) {
-                    return {
-                        found: true,
-                        stopped: false,
-                        error: "Too many matching windows remained after bounded closure"
-                    }
-                }
-                try windowStopped := this.lifecycleDriver.CloseWindow(session)
-                catch as err
-                    return {found: true, stopped: false, error: err.Message}
-                if !windowStopped
-                    return {found: true, stopped: false}
-                stoppedWindows++
+        try sessions := this.ResolveExactWindows(spec)
+        catch as err
+            return {found: false, stopped: false, error: err.Message}
+        if !sessions.Length
+            return {found: false, stopped: true}
+        ; Exact title/executable equality is still not ownership proof for a shared
+        ; host such as Edge. Multiple matches are ambiguity, not a set of windows
+        ; PACS Assistant is authorized to close.
+        if (sessions.Length != 1) {
+            return {
+                found: true,
+                stopped: false,
+                error: "multiple exact windows matched; none were closed"
             }
         }
+
+        try windowStopped := this.lifecycleDriver.CloseWindow(sessions[1])
+        catch as err
+            return {found: true, stopped: false, error: err.Message}
+        if !windowStopped
+            return {found: true, stopped: false, error: "the exact window did not close"}
+
+        try remaining := this.ResolveExactWindows(spec)
+        catch as err
+            return {found: true, stopped: false, error: err.Message}
+        return remaining.Length
+            ? {found: true, stopped: false, error: "the exact window remained or reappeared"}
+            : {found: true, stopped: true, error: ""}
     }
 
     static PacsRestartTargetSpecs() {
@@ -453,7 +523,11 @@ class AppControl {
         return {anyStopped: anyStopped, failedTargets: failedTargets}
     }
 
-    static LaunchVuePacs(directory) {
+    static LaunchVuePacs(directory, expectedExecutablePath := "") {
+        if (Type(expectedExecutablePath) != "String"
+            || expectedExecutablePath = ""
+            || !this.IsExpectedVueLaunchTarget(expectedExecutablePath))
+            return false
         try {
             ; Only the installed Windows shortcut is a valid launch target. A broad
             ; substring match could treat a similarly named script as PACS and report
@@ -462,6 +536,8 @@ class AppControl {
                 try {
                     target := this.lifecycleDriver.ResolveShortcut(A_LoopFileFullPath)
                     if !this.IsExpectedVueLaunchTarget(target)
+                        return false
+                    if !this.PathsEqual(target, expectedExecutablePath)
                         return false
                     return this.lifecycleDriver.Launch(A_LoopFileFullPath) ? true : false
                 }
@@ -478,6 +554,30 @@ class AppControl {
         SplitPath(path, &fileName, , &extension)
         return StrCompare(fileName, this.vuePacsExecutable, false) = 0
             && StrCompare(extension, "exe", false) = 0
+    }
+
+    static PathsEqual(left, right) {
+        try return StrCompare(
+            this.NormalizePath(left),
+            this.NormalizePath(right),
+            false
+        ) = 0
+        return false
+    }
+
+    static NormalizePath(path) {
+        pathBuffer := Buffer(32768 * 2, 0)
+        length := DllCall(
+            "GetFullPathNameW",
+            "WStr", path,
+            "UInt", 32768,
+            "Ptr", pathBuffer.Ptr,
+            "Ptr", 0,
+            "UInt"
+        )
+        if (!length || length >= 32768)
+            throw OSError(A_LastError, "GetFullPathNameW")
+        return StrGet(pathBuffer, length, "UTF-16")
     }
 }
 
@@ -574,6 +674,11 @@ closeWithSavePrompt(session, timeoutMs := 8000, driver := 0) {
 }
 
 class NativePacsRestartDriver {
+    __New() {
+        this.priorVueProcessIds := Map()
+        this.trustedVueExecutablePath := ""
+    }
+
     FindPowerScribeWindows() {
         return AppControl.ResolveExactWindows(AppControl.PowerScribeWindowSpec())
     }
@@ -586,8 +691,53 @@ class NativePacsRestartDriver {
         return closeWithSavePrompt(session, 8000)
     }
 
+    PrepareRestart() {
+        ; Establish the installed Vue identity and complete pre-restart process set
+        ; before any clinical window is closed. The restart cannot safely infer an
+        ; installation from an arbitrary same-named shortcut target.
+        this.priorVueProcessIds := this.CaptureVueProcessIds()
+        return true
+    }
+
     StopTargets() {
         return AppControl.StopTargetSpecs(AppControl.PacsRestartTargetSpecs())
+    }
+
+    CaptureVueProcessIds() {
+        sessions := []
+        for spec in [AppControl.VuePacsWindowSpec(), AppControl.VuePacsClientWindowSpec()] {
+            for session in AppControl.ResolveExactWindows(spec)
+                sessions.Push(session)
+        }
+        if !sessions.Length
+            throw Error("A running exact Vue PACS window is required to verify the installed executable")
+
+        trustedPath := ""
+        for session in sessions {
+            path := AppControl.lifecycleDriver.ProcessPath(session.processId)
+            if (path = "")
+                throw Error("Vue PACS process path could not be verified")
+            if (trustedPath = "")
+                trustedPath := path
+            else if !AppControl.PathsEqual(path, trustedPath)
+                throw Error("Vue PACS windows are owned by different executable paths")
+        }
+
+        processIds := Map()
+        for process in AppControl.lifecycleDriver.ListProcessesByExecutable(
+            AppControl.vuePacsExecutable
+        ) {
+            if (process.path = "")
+                throw Error("An mp.exe process path could not be verified")
+            if AppControl.PathsEqual(process.path, trustedPath)
+                processIds[process.processId] := true
+        }
+        for session in sessions {
+            if !processIds.Has(session.processId)
+                throw Error("Vue PACS process inventory changed during capture")
+        }
+        this.trustedVueExecutablePath := trustedPath
+        return processIds
     }
 
     Pause(milliseconds) {
@@ -600,6 +750,18 @@ class NativePacsRestartDriver {
                 return {clear: false, error: "PowerScribe reporting window reappeared"}
             if AppControl.lifecycleDriver.FindProcess(AppControl.powerScribeExecutable)
                 return {clear: false, error: "PowerScribe process is still running"}
+            for processId in this.priorVueProcessIds {
+                if AppControl.lifecycleDriver.ProcessExists(processId)
+                    return {clear: false, error: "A previous Vue PACS process is still running"}
+            }
+            for process in AppControl.lifecycleDriver.ListProcessesByExecutable(
+                AppControl.vuePacsExecutable
+            ) {
+                if (process.path = "")
+                    return {clear: false, error: "An mp.exe process path could not be verified"}
+                if AppControl.PathsEqual(process.path, this.trustedVueExecutablePath)
+                    return {clear: false, error: "A Vue PACS process appeared before launch"}
+            }
             for spec in AppControl.PacsRestartTargetSpecs() {
                 if AppControl.ResolveExactWindows(spec.target).Length
                     return {clear: false, error: spec.label " reappeared"}
@@ -611,13 +773,16 @@ class NativePacsRestartDriver {
     }
 
     Launch() {
-        return AppControl.LaunchVuePacs(A_DesktopCommon)
-            || AppControl.LaunchVuePacs(A_Desktop)
+        if (this.trustedVueExecutablePath = "")
+            return false
+        return AppControl.LaunchVuePacs(A_DesktopCommon, this.trustedVueExecutablePath)
+            || AppControl.LaunchVuePacs(A_Desktop, this.trustedVueExecutablePath)
     }
 
     WaitForLaunch(timeoutMs := 15000) {
         deadline := DllCall("GetTickCount64", "UInt64") + timeoutMs
         stableReads := 0
+        stableSession := 0
         while (DllCall("GetTickCount64", "UInt64") < deadline) {
             try sessions := AppControl.ResolveExactWindows(AppControl.VuePacsWindowSpec())
             catch
@@ -625,11 +790,27 @@ class NativePacsRestartDriver {
             if (sessions.Length > 1)
                 return false
             if (sessions.Length = 1) {
+                session := sessions[1]
+                if this.priorVueProcessIds.Has(session.processId)
+                    return false
+                try processPath := AppControl.lifecycleDriver.ProcessPath(session.processId)
+                catch
+                    return false
+                if !AppControl.PathsEqual(processPath, this.trustedVueExecutablePath)
+                    return false
+                if stableSession {
+                    if (session.hwnd != stableSession.hwnd
+                        || session.processId != stableSession.processId)
+                        return false
+                } else {
+                    stableSession := session
+                }
                 stableReads++
                 if (stableReads >= 2)
                     return true
             } else {
                 stableReads := 0
+                stableSession := 0
             }
             Sleep(100)
         }
@@ -640,6 +821,26 @@ class NativePacsRestartDriver {
 restartPACS(driver := 0) {
     driver := driver ? driver : NativePacsRestartDriver()
     anyClosed := false
+
+    ; Resolve the installed Vue executable and every already-running instance
+    ; before touching PowerScribe or PACS. Failure here must have no side effects.
+    try prepared := driver.PrepareRestart()
+    catch as err {
+        MsgBox(
+            "The installed Vue PACS client could not be verified. The restart was cancelled before closing any clinical window.``n``n" err.Message,
+            "PACS Restart Cancelled",
+            "Icon!"
+        )
+        return false
+    }
+    if !prepared {
+        MsgBox(
+            "The installed Vue PACS client could not be verified. The restart was cancelled before closing any clinical window.",
+            "PACS Restart Cancelled",
+            "Icon!"
+        )
+        return false
+    }
 
     ; PowerScribe is never a force-kill target. A failed/slow save or an unverified
     ; running process aborts the restart rather than risking an in-progress report.
@@ -673,27 +874,48 @@ restartPACS(driver := 0) {
             return false
         }
         anyClosed := true
-    } else {
-        try powerScribePid := driver.FindPowerScribeProcess()
-        catch as err {
-            MsgBox(
-                "PowerScribe process state could not be verified. The restart was cancelled.`n`n" err.Message,
-                "PACS Restart Cancelled",
-                "Icon!"
-            )
-            return false
-        }
-        if powerScribePid {
-            MsgBox(
-                "PowerScribe is running without a uniquely verified reporting window. Close it manually before restarting PACS.",
-                "PACS Restart Cancelled",
-                "Icon!"
-            )
-            return false
-        }
     }
 
-    stopResult := driver.StopTargets()
+    ; A second/background PowerScribe process may have no reporting window. Check
+    ; again even after the verified reporting process exits, before closing PACS.
+    try powerScribePid := driver.FindPowerScribeProcess()
+    catch as err {
+        MsgBox(
+            "PowerScribe process state could not be verified. The restart was cancelled.`n`n" err.Message,
+            "PACS Restart Cancelled",
+            "Icon!"
+        )
+        return false
+    }
+    if powerScribePid {
+        MsgBox(
+            "PowerScribe is running without a uniquely verified reporting window. Close it manually before restarting PACS.",
+            "PACS Restart Cancelled",
+            "Icon!"
+        )
+        return false
+    }
+
+    try stopResult := driver.StopTargets()
+    catch as err {
+        MsgBox(
+            "PACS target shutdown could not be completed or verified. The restart was cancelled.``n``n" err.Message,
+            "PACS Restart Cancelled",
+            "Icon!"
+        )
+        return false
+    }
+    if (!IsObject(stopResult)
+        || !HasProp(stopResult, "anyStopped")
+        || !HasProp(stopResult, "failedTargets")
+        || Type(stopResult.failedTargets) != "Array") {
+        MsgBox(
+            "PACS target shutdown returned an invalid verification result. The restart was cancelled.",
+            "PACS Restart Cancelled",
+            "Icon!"
+        )
+        return false
+    }
     anyClosed := anyClosed || stopResult.anyStopped
     failedTargets := stopResult.failedTargets
 
@@ -710,7 +932,15 @@ restartPACS(driver := 0) {
     }
 
     if anyClosed {
-        driver.Pause(500)
+        try driver.Pause(500)
+        catch as err {
+            MsgBox(
+                "The restart stabilization wait failed. PACS was not relaunched.``n``n" err.Message,
+                "PACS Restart Cancelled",
+                "Icon!"
+            )
+            return false
+        }
     }
 
 
@@ -730,11 +960,29 @@ restartPACS(driver := 0) {
     }
 
     ; The shortcut sits on either the all-users desktop or this user's own
-    if !driver.Launch() {
+    try launched := driver.Launch()
+    catch as err {
+        MsgBox(
+            "The verified PACS shortcut could not be launched.``n``n" err.Message,
+            "PACS Launch Failed",
+            "Icon!"
+        )
+        return false
+    }
+    if !launched {
         MsgBox "ERROR: PACS not found..."
         return false
     }
-    if !driver.WaitForLaunch() {
+    try launchVerified := driver.WaitForLaunch()
+    catch as err {
+        MsgBox(
+            "The PACS shortcut ran, but the new Vue PACS window could not be verified.``n``n" err.Message,
+            "PACS Launch Not Verified",
+            "Icon!"
+        )
+        return false
+    }
+    if !launchVerified {
         MsgBox(
             "The PACS shortcut ran, but one unique Vue PACS window did not appear. Check the client before trying again.",
             "PACS Launch Not Verified",

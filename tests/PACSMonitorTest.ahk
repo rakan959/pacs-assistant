@@ -23,6 +23,7 @@ class PACSMonitorTest {
         "TestDuplicateRefreshAppearingBeforeClickDoesNotInvoke",
         "TestPortalActivationBeforeClickDoesNotInvokeRefresh",
         "TestActiveClinicalLeaseSkipsBackgroundMonitor",
+        "TestRefreshWaitDoesNotHoldClinicalLease",
         "TestRefreshAndScanUseOneCapturedPortalSession",
         "TestAmbiguousPortalWindowsAreReportedAsScanFailure",
         "TestStudyListFallbackRequiresExpectedTypeAndProcess",
@@ -319,6 +320,52 @@ class PACSMonitorTest {
 
         Assert.False(result)
         Assert.Equal(0, driver.resolveCalls)
+    }
+
+    TestRefreshWaitDoesNotHoldClinicalLease() {
+        originalTestMode := PACSMonitor.testMode
+        originalDriver := PACSMonitor.driver
+        originalClinicalActive := PACSCommands.clinicalCommandActive
+        originalClinicalName := PACSCommands.activeClinicalCommand
+        session := {
+            hwnd: 100,
+            target: "ahk_id 100",
+            processId: 42,
+            title: "Explorer Portal",
+            exe: "msedge.exe"
+        }
+        button := FakePACSActionButton(42, 100, "Refresh", "refreshPrimary")
+        studyList := FakePACSStudyList(
+            42,
+            100,
+            {Name: "CT HEAD WITHOUT CONTRAST 12345678"}
+        )
+        driver := LeaseObservingPortalDriver(session, button, studyList)
+
+        try {
+            PACSMonitor.testMode := false
+            PACSMonitor.driver := driver
+            PACSMonitor.automationAcquire := ObjBindMethod(
+                PACSCommands,
+                "AcquireClinicalAutomation"
+            )
+            PACSMonitor.automationRelease := ObjBindMethod(
+                PACSCommands,
+                "ReleaseClinicalAutomation"
+            )
+            PACSCommands.clinicalCommandActive := false
+            PACSCommands.activeClinicalCommand := ""
+
+            PACSMonitor.RefreshAndCheck()
+        } finally {
+            PACSCommands.clinicalCommandActive := originalClinicalActive
+            PACSCommands.activeClinicalCommand := originalClinicalName
+            PACSMonitor.driver := originalDriver
+            PACSMonitor.testMode := originalTestMode
+        }
+
+        Assert.Equal("acquired", driver.waitLeaseStatus)
+        Assert.False(PACSCommands.clinicalCommandActive)
     }
 
     TestRefreshAndScanUseOneCapturedPortalSession() {
@@ -669,6 +716,20 @@ class ActivationChangingPortalDriver extends PinnedPortalMonitorDriver {
     IsActive(*) {
         this.activeChecks++
         return this.activeChecks > 1
+    }
+}
+
+class LeaseObservingPortalDriver extends PinnedPortalMonitorDriver {
+    __New(session, button, studyList) {
+        super.__New(session, button, studyList)
+        this.waitLeaseStatus := ""
+    }
+
+    WaitForRefresh() {
+        lease := PACSCommands.AcquireClinicalAutomation("interrupting clinical command")
+        this.waitLeaseStatus := lease.status
+        if (lease.status = "acquired")
+            PACSCommands.ReleaseClinicalAutomation()
     }
 }
 

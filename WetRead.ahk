@@ -102,15 +102,34 @@ class NativeStickyNoteWindowDriver {
         return 0
     }
 
-    FindExactStickyWindows(processId) {
+    FindProcessWindows(processId) {
         matches := []
-        try windows := WinGetList("ahk_pid " processId)
-        catch
+        previousHiddenSetting := A_DetectHiddenWindows
+        DetectHiddenWindows(true)
+        try {
+            try windows := WinGetList("ahk_pid " processId)
+            catch
+                return 0
+            for hwnd in windows {
+                try {
+                    if (WinGetPID("ahk_id " hwnd) = processId)
+                        matches.Push(hwnd)
+                } catch {
+                    return 0
+                }
+            }
+            return matches
+        } finally DetectHiddenWindows(previousHiddenSetting)
+    }
+
+    FindExactStickyWindows(processId) {
+        windows := this.FindProcessWindows(processId)
+        if !IsObject(windows)
             return 0
+        matches := []
         for hwnd in windows {
             try {
-                if (WinGetPID("ahk_id " hwnd) = processId
-                    && WinGetTitle("ahk_id " hwnd) == "Sticky Notes")
+                if (WinGetTitle("ahk_id " hwnd) == "Sticky Notes")
                     matches.Push(hwnd)
             } catch {
                 return 0
@@ -124,12 +143,15 @@ class NativeStickyNoteWindowDriver {
             || !HasProp(session, "pacsHwnd")
             || !HasProp(session, "stickyHwnd")
             || !HasProp(session, "processId")
-            || !HasProp(session, "preexistingSticky"))
+            || !HasProp(session, "preexistingProcessWindows"))
             return false
         windows := this.FindExactStickyWindows(session.processId)
         if !IsObject(windows)
             return false
-        delta := StickyNoteOpener.NewWindowDelta(session.preexistingSticky, windows)
+        delta := StickyNoteOpener.NewWindowDelta(
+            session.preexistingProcessWindows,
+            windows
+        )
         return IsObject(delta)
             && delta.Length = 1
             && delta[1] = session.stickyHwnd
@@ -181,8 +203,11 @@ class StickyNoteOpener {
             || !driver.IsActive(pacsHwnd))
             return 0
 
-        preexistingSticky := driver.FindExactStickyWindows(liveRoot.ProcessId)
-        if !IsObject(preexistingSticky)
+        ; Newness is an HWND property, not a title property. Snapshot every
+        ; top-level window in the PACS process so a hidden/untitled window cannot
+        ; be reused and retitled as "Sticky Notes" after the click.
+        preexistingProcessWindows := driver.FindProcessWindows(liveRoot.ProcessId)
+        if !IsObject(preexistingProcessWindows)
             return 0
         if !driver.InvokeStickyButton(button)
             return 0
@@ -195,7 +220,10 @@ class StickyNoteOpener {
         postClickSticky := driver.FindExactStickyWindows(liveRoot.ProcessId)
         if !IsObject(postClickSticky)
             return 0
-        newSticky := StickyNoteOpener.NewWindowDelta(preexistingSticky, postClickSticky)
+        newSticky := StickyNoteOpener.NewWindowDelta(
+            preexistingProcessWindows,
+            postClickSticky
+        )
         if (!IsObject(newSticky)
             || newSticky.Length != 1
             || newSticky[1] != stickyHwnd)
@@ -220,7 +248,7 @@ class StickyNoteOpener {
             stickyHwnd: stickyHwnd,
             stickyRoot: stickyRoot,
             processId: liveRoot.ProcessId,
-            preexistingSticky: preexistingSticky.Clone(),
+            preexistingProcessWindows: preexistingProcessWindows.Clone(),
             driver: driver
         }
     }
@@ -456,7 +484,6 @@ class NativeWetReadDriver {
  * restores the previous note if verification fails.
  */
 class WetReadPasteEngine {
-    static attempts := 3
     static verifyTimeoutMs := 2000
 
     static Paste(field, text, mode, driver := NativeWetReadDriver()) {
@@ -487,60 +514,73 @@ class WetReadPasteEngine {
     }
 
     static PasteDirect(field, text, originalValue, mode, driver, result) {
-        fieldMayHaveChanged := false
-
-        loop this.attempts {
-            priorFieldChange := fieldMayHaveChanged
-            try {
-                wrote := mode = "uia"
-                    ? driver.WriteUIA(field, text)
-                    : driver.WriteControl(field, text)
-
-                if !wrote {
-                    ; Both native adapters check target capability before changing the
-                    ; field. A false result is therefore unsupported, not a failed
-                    ; mutation which needs a speculative rollback.
-                    result.unsupported := true
-                    result.reason := "unsupported"
-                    if priorFieldChange
-                        result.restored := this.RestoreDirect(field, originalValue, mode, driver, result)
-                    return result
-                }
-
-                fieldMayHaveChanged := fieldMayHaveChanged || wrote
-                if wrote && driver.WaitForValue(field, text, this.verifyTimeoutMs) {
-                    result.success := true
-                    return result
-                }
-            } catch as err {
-                fieldMayHaveChanged := true
-                result.reason := "error"
-                this.AppendError(result, err.Message)
-            }
+        ; UIA exposes no generation token or atomic compare-and-set operation. Read
+        ; the exact original value at the last safe point, perform one write, and
+        ; never retry or restore after an unexpected value appears: either action
+        ; could overwrite a user's newer edit.
+        try currentValue := driver.Read(field)
+        catch as err {
+            result.reason := "precondition-read"
+            result.error := err.Message
+            return result
+        }
+        if !(currentValue == originalValue) {
+            result.reason := "precondition-changed"
+            result.error := "Sticky Notes changed before the write; no mutation was attempted"
+            return result
         }
 
-        if (result.reason = "")
+        wrote := false
+        writeError := 0
+        try wrote := mode = "uia"
+            ? driver.WriteUIA(field, text)
+            : driver.WriteControl(field, text)
+        catch as err {
+            ; Some providers throw after applying a value. Treat the state as unknown
+            ; until an exact readback proves either the requested or original value.
+            writeError := err
+        }
+
+        if (!wrote && !writeError) {
+            result.unsupported := true
+            result.reason := "unsupported"
+            return result
+        }
+
+        result.restored := false
+        if writeError {
+            result.reason := "error"
+            this.AppendError(result, writeError.Message)
+        }
+
+        try {
+            if driver.WaitForValue(field, text, this.verifyTimeoutMs) {
+                result.success := true
+                return result
+            }
+            observedValue := driver.Read(field)
+        } catch as err {
+            result.reason := "verification-error"
+            this.AppendError(result, err.Message)
+            return result
+        }
+
+        if (observedValue == text) {
+            result.success := true
+            return result
+        }
+        if (observedValue == originalValue) {
+            result.restored := true
             result.reason := "verification"
-        if fieldMayHaveChanged
-            result.restored := this.RestoreDirect(field, originalValue, mode, driver, result)
-        return result
-    }
-
-    static RestoreDirect(field, originalValue, mode, driver, result) {
-        restoreModes := mode = "uia" ? ["uia", "control"] : ["control", "uia"]
-        for restoreMode in restoreModes {
-            try {
-                restored := restoreMode = "uia"
-                    ? driver.WriteUIA(field, originalValue)
-                    : driver.WriteControl(field, originalValue)
-                if (restored && driver.WaitForValue(field, originalValue, this.verifyTimeoutMs))
-                    return true
-            } catch as err {
-                label := restoreMode = "uia" ? "UIA" : "ControlSetText"
-                this.AppendError(result, label " restore failed: " err.Message)
-            }
+            return result
         }
-        return false
+
+        result.reason := "value-changed"
+        this.AppendError(
+            result,
+            "Sticky Notes changed during verification; no retry or rollback was attempted"
+        )
+        return result
     }
 
     static AppendError(result, message) {
@@ -614,7 +654,13 @@ RunPinnedWetReadWorkflow(
 			notifier.Call(message, "Sticky Note Target Not Verified", "Icon!")
 		else
 			MsgBox(message, "Sticky Note Target Not Verified", "Icon!")
-		return false
+		return RunWetReadPasteWithAttendingOutcome(
+			(*) => false,
+			false,
+			"",
+			0,
+			notifier
+		)
 	}
 
 	attendingRouted := false
@@ -724,7 +770,9 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
 		method := pasteMode = "uia" ? "UIA Value" : "ControlSetText"
 		MsgBox("This Sticky Notes field does not expose a verified target for the " method " method. Run the wet read again and choose another paste method.", "Paste Method Unavailable", "Icon!")
 	} else if !result.success {
-		if !result.restored {
+		if (result.reason = "value-changed") {
+			MsgBox("The Sticky Notes value changed while PACS Assistant was verifying the wet read. No retry or rollback was attempted, so a newer edit was not overwritten. Keep the window open and verify the note manually.", "Sticky Note Changed", "Icon!")
+		} else if !result.restored {
 			MsgBox("The wet read failed and PACS Assistant could not restore the previous sticky note. Keep the window open and verify the note manually.", "Sticky Note Restore Failed", "Icon!")
 		} else {
 			MsgBox("The wet read was not pasted. The previous sticky note was restored; verify it before closing the window.", "Paste Failed", "Icon!")

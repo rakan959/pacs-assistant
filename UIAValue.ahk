@@ -55,10 +55,6 @@ class UIAValue {
         return {supported: legacyRead && legacySupported, value: ""}
     }
 
-    static Read(element) {
-        return this.TryRead(element).value
-    }
-
     ; Whether this element can be written through ValuePattern
     static CanWrite(element) {
         try {

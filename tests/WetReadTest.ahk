@@ -6,12 +6,12 @@ class WetReadTest {
     static Tests := [
         "ClipboardPasteModeIsRejectedWithoutMutation",
         "UnsupportedUIADoesNotClearTheNote",
-        "PostMutationUIAErrorRestoresThePreviousNote",
-        "FailedUIAVerificationRestoresThePreviousNote",
-        "UIABecomingUnsupportedStillRestoresAnEarlierWrite",
-        "FailedControlVerificationRestoresThePreviousNote",
+        "PostMutationUIAErrorCanSucceedOnlyWithExactReadback",
+        "FailedUIAVerificationDoesNotOverwriteChangedValue",
+        "UIAFailureDoesNotRetryWhenCapabilityChanges",
+        "FailedControlVerificationDoesNotOverwriteChangedValue",
         "UnsupportedControlDoesNotAttemptRollback",
-        "DirectRestoreFallsBackAfterPreferredException",
+        "ConcurrentEditAfterWritePreventsRetryAndRollback",
         "UnreadableNoteDoesNotAttemptPaste",
         "UnreadableNativeFieldFailsClosed",
         "StickyRootMustBelongToPacsProcess",
@@ -22,6 +22,7 @@ class WetReadTest {
         "StickyOpenerRejectsDuplicateAppearingBeforeInvoke",
         "StickyOpenerRejectsUnactivatedStickyWindow",
         "StickyOpenerRejectsPreexistingReactivatedStickyWindow",
+        "NativeProcessDiscoveryIncludesHiddenUntitledWindow",
         "StickyOpenerRejectsOwnerlessStickyWindow",
         "StickyOpenerPinsNewlyActiveExactWindow",
         "StickyOpenerRejectsTwoNewWindowsAfterInvoke",
@@ -37,6 +38,7 @@ class WetReadTest {
         "NativeRollbackVerificationRejectsCaseOnlyDifference",
         "RoutingFailureReportsTheActualCause",
         "AttendingFailureIsReportedAcrossEveryStickySetupExit",
+        "StickyOpenerFailureAlsoReportsAttendingOutcome",
         "StickyTargetIsPinnedBeforePowerScribeRouting"
     ]
 
@@ -67,7 +69,7 @@ class WetReadTest {
         Assert.Equal(0, driver.controlCalls)
     }
 
-    PostMutationUIAErrorRestoresThePreviousNote() {
+    PostMutationUIAErrorCanSucceedOnlyWithExactReadback() {
         field := PostMutationFailingWetReadElement("existing note", "new wet read")
         driver := NativeWetReadDriver(
             "Sticky Notes",
@@ -81,25 +83,27 @@ class WetReadTest {
             driver
         )
 
-        Assert.False(result.success)
+        Assert.True(result.success)
         Assert.False(result.unsupported)
-        Assert.True(result.restored)
-        Assert.Equal("existing note", field.storedValue)
-        Assert.True(field.writeCalls > 1)
+        Assert.False(result.restored)
+        Assert.Equal("new wet read", field.storedValue)
+        Assert.Equal(1, field.writeCalls)
     }
 
-    FailedUIAVerificationRestoresThePreviousNote() {
+    FailedUIAVerificationDoesNotOverwriteChangedValue() {
         driver := FakeWetReadDriver("existing note", "original clipboard")
         driver.failedText := "new wet read"
 
         result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
 
         Assert.False(result.success)
-        Assert.True(result.restored)
-        Assert.Equal("existing note", driver.fieldValue)
+        Assert.False(result.restored)
+        Assert.Equal("value-changed", result.reason)
+        Assert.Equal("partial value", driver.fieldValue)
+        Assert.Equal(1, driver.uiaCalls)
     }
 
-    UIABecomingUnsupportedStillRestoresAnEarlierWrite() {
+    UIAFailureDoesNotRetryWhenCapabilityChanges() {
         driver := FakeWetReadDriver("existing note", "original clipboard")
         driver.failedText := "new wet read"
         driver.uiaSupportedCalls := 1
@@ -107,20 +111,23 @@ class WetReadTest {
         result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
 
         Assert.False(result.success)
-        Assert.True(result.unsupported)
-        Assert.True(result.restored)
-        Assert.Equal("existing note", driver.fieldValue)
+        Assert.False(result.unsupported)
+        Assert.False(result.restored)
+        Assert.Equal("partial value", driver.fieldValue)
+        Assert.Equal(1, driver.uiaCalls)
     }
 
-    FailedControlVerificationRestoresThePreviousNote() {
+    FailedControlVerificationDoesNotOverwriteChangedValue() {
         driver := FakeWetReadDriver("existing note", "original clipboard")
         driver.failedText := "new wet read"
 
         result := WetReadPasteEngine.Paste(1, "new wet read", "control", driver)
 
         Assert.False(result.success)
-        Assert.True(result.restored)
-        Assert.Equal("existing note", driver.fieldValue)
+        Assert.False(result.restored)
+        Assert.Equal("value-changed", result.reason)
+        Assert.Equal("partial value", driver.fieldValue)
+        Assert.Equal(1, driver.controlCalls)
     }
 
     UnsupportedControlDoesNotAttemptRollback() {
@@ -136,22 +143,18 @@ class WetReadTest {
         Assert.Equal(1, driver.controlCalls)
     }
 
-    DirectRestoreFallsBackAfterPreferredException() {
-        driver := FakeWetReadDriver("partial value", "original clipboard")
-        driver.throwOnUiaValue := "existing note"
-        result := WetReadPasteEngine.NewResult()
+    ConcurrentEditAfterWritePreventsRetryAndRollback() {
+        driver := FakeWetReadDriver("existing note", "original clipboard")
+        driver.concurrentValueAfterWait := "user's newer note"
 
-        restored := WetReadPasteEngine.RestoreDirect(
-            1,
-            "existing note",
-            "uia",
-            driver,
-            result
-        )
+        result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
 
-        Assert.True(restored)
-        Assert.Equal("existing note", driver.fieldValue)
-        Assert.Equal(1, driver.controlCalls)
+        Assert.False(result.success)
+        Assert.False(result.restored)
+        Assert.Equal("value-changed", result.reason)
+        Assert.Equal("user's newer note", driver.fieldValue)
+        Assert.Equal(1, driver.uiaCalls)
+        Assert.Equal(0, driver.controlCalls)
     }
 
     UnreadableNoteDoesNotAttemptPaste() {
@@ -269,10 +272,28 @@ class WetReadTest {
         pacsRoot := FakeStickyTargetRoot(42, [button], 100)
         stickyRoot := FakeStickyTargetRoot(42, [], 200)
         driver := FakeStickyNoteWindowDriver(pacsRoot, stickyRoot, 200)
-        driver.preexistingStickyWindows := [200]
+        driver.preexistingProcessWindows := [100, 200]
 
         Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
         Assert.Equal(1, driver.invokeCalls)
+    }
+
+    NativeProcessDiscoveryIncludesHiddenUntitledWindow() {
+        hiddenWindow := Gui()
+        hiddenWindow.Show("Hide")
+        try {
+            windows := NativeStickyNoteWindowDriver().FindProcessWindows(
+                DllCall("GetCurrentProcessId")
+            )
+            found := false
+            for hwnd in windows {
+                if (hwnd = hiddenWindow.Hwnd) {
+                    found := true
+                    break
+                }
+            }
+            Assert.True(found)
+        } finally hiddenWindow.Destroy()
     }
 
     StickyOpenerRejectsOwnerlessStickyWindow() {
@@ -461,6 +482,28 @@ class WetReadTest {
         }
     }
 
+    StickyOpenerFailureAlsoReportsAttendingOutcome() {
+        notifications := []
+        captureCalls := 0
+
+        result := RunPinnedWetReadWorkflow(
+            "wet read",
+            "uia",
+            (*) => 0,
+            (*) => (captureCalls++, {text: "", session: 0}),
+            (*) => true,
+            (*) => true,
+            RecordWetReadNotification.Bind(notifications)
+        )
+
+        Assert.False(result)
+        Assert.Equal(0, captureCalls)
+        Assert.Equal(2, notifications.Length)
+        Assert.Equal("Sticky Note Target Not Verified", notifications[1].title)
+        Assert.Equal("Attending Not Assigned", notifications[2].title)
+        Assert.True(InStr(notifications[2].text, "Set it manually") > 0)
+    }
+
     StickyTargetIsPinnedBeforePowerScribeRouting() {
         events := []
         stickySession := {stickyHwnd: 200}
@@ -516,6 +559,7 @@ class FakeWetReadDriver {
         this.controlCalls := 0
         this.throwOnRead := false
         this.throwOnUiaValue := ""
+        this.concurrentValueAfterWait := ""
     }
 
     Read(field) {
@@ -544,6 +588,11 @@ class FakeWetReadDriver {
     }
 
     WaitForValue(field, expected, timeoutMs) {
+        if (this.concurrentValueAfterWait != "") {
+            this.fieldValue := this.concurrentValueAfterWait
+            this.concurrentValueAfterWait := ""
+            return false
+        }
         return this.fieldValue = expected
     }
 }
@@ -677,7 +726,7 @@ class FakeStickyNoteWindowDriver {
         this.invokeCalls := 0
         this.livePacsTitle := "Vue PACS"
         this.exactPacsWindowCount := 1
-        this.preexistingStickyWindows := []
+        this.preexistingProcessWindows := [pacsRoot.WinId]
         this.postClickStickyWindows := activatedStickyHwnd > 0
             ? [activatedStickyHwnd]
             : []
@@ -721,17 +770,25 @@ class FakeStickyNoteWindowDriver {
         return this.stickyOwner
     }
 
-    FindExactStickyWindows(*) {
+    FindProcessWindows(*) {
         this.stickyWindowQueries++
         return (this.stickyWindowQueries = 1
-            ? this.preexistingStickyWindows
+            ? this.preexistingProcessWindows
             : this.postClickStickyWindows).Clone()
+    }
+
+    FindExactStickyWindows(*) {
+        this.stickyWindowQueries++
+        return this.postClickStickyWindows.Clone()
     }
 
 
     IsExpectedStickySession(session) {
         windows := this.FindExactStickyWindows(session.processId)
-        delta := StickyNoteOpener.NewWindowDelta(session.preexistingSticky, windows)
+        delta := StickyNoteOpener.NewWindowDelta(
+            session.preexistingProcessWindows,
+            windows
+        )
         return IsObject(delta)
             && delta.Length = 1
             && delta[1] = session.stickyHwnd

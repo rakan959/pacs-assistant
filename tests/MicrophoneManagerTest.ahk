@@ -10,6 +10,7 @@ class MicrophoneManagerTest {
         "MicrophoneComboRequiresExactIdentityAndCapability",
         "MicrophoneComboMustBeUniqueWithinTheExactWindow",
         "UnreadableMicrophoneComboAlongsideValidFailsClosed",
+        "UnsupportedMicrophoneValuePreventsAnySelectionMutation",
         "PartialMicrophoneNameMustResolveUniquely",
         "ExactMicrophoneNameWinsOverPartialMatches",
         "MicrophoneItemMustBelongToTheExactCombo",
@@ -125,24 +126,55 @@ class MicrophoneManagerTest {
         Assert.Equal(0, result.combo)
     }
 
+    UnsupportedMicrophoneValuePreventsAnySelectionMutation() {
+        fixture := MicrophoneFixture([])
+        combo := UnsupportedValueMicrophoneCombo(
+            fixture.session.processId,
+            fixture.session.hwnd,
+            MicrophoneManager.comboAutomationId
+        )
+        item := FakeMicrophoneItem(
+            fixture.session.processId,
+            fixture.session.hwnd,
+            "PowerMic III",
+            combo
+        )
+        combo.items := [item]
+        fixture.root.combos := [combo]
+        fixture.root.items := [item]
+        MicrophoneManager.sessionDriver := fixture.driver
+
+        result := MicrophoneManager.SelectMicrophone(
+            fixture.session,
+            combo,
+            "PowerMic"
+        )
+
+        Assert.False(result)
+        Assert.Equal(0, combo.expandCalls)
+        Assert.Equal(0, item.selectCalls)
+    }
+
     PartialMicrophoneNameMustResolveUniquely() {
         fixture := MicrophoneFixture(["PowerMic III", "PowerMic Mobile"])
 
-        Assert.Equal(0, MicrophoneManager.ResolveMicrophoneItem(
+        result := MicrophoneManager.ResolveMicrophoneItemResult(
             fixture.root,
             fixture.combo,
             "PowerMic"
-        ))
+        )
+        Assert.Equal("ambiguous", result.status)
     }
 
     ExactMicrophoneNameWinsOverPartialMatches() {
         fixture := MicrophoneFixture(["PowerMic III", "PowerMic III Mobile"])
 
-        resolved := MicrophoneManager.ResolveMicrophoneItem(
+        result := MicrophoneManager.ResolveMicrophoneItemResult(
             fixture.root,
             fixture.combo,
             "PowerMic III"
         )
+        resolved := result.selection
 
         Assert.True(IsObject(resolved))
         Assert.Equal("PowerMic III", resolved.name)
@@ -160,11 +192,12 @@ class MicrophoneManagerTest {
         )
         fixture.root.items := [unrelatedItem]
 
-        Assert.Equal(0, MicrophoneManager.ResolveMicrophoneItem(
+        result := MicrophoneManager.ResolveMicrophoneItemResult(
             fixture.root,
             fixture.combo,
             "PowerMic"
-        ))
+        )
+        Assert.Equal("absent", result.status)
     }
 
     UnreadableMicrophoneItemAlongsideValidDoesNotSelect() {
@@ -485,6 +518,7 @@ class FakeMicrophoneCombo {
         this.Type := UIA.Type.ComboBox
         this.AutomationId := automationId
         this.Name := "Microphone"
+        this.ClassName := "FakeMicrophoneCombo"
         this.IsEnabled := enabled
         this.IsExpandCollapsePatternAvailable := true
         this.IsValuePatternAvailable := true
@@ -536,6 +570,24 @@ class UnreadableMicrophoneCombo {
     }
 }
 
+class UnsupportedValueMicrophoneCombo extends FakeMicrophoneCombo {
+    __New(processId, windowId, automationId) {
+        super.__New(processId, windowId, automationId)
+        this.expandCalls := 0
+        this.ExpandCollapsePattern := CountingMicrophoneExpandPattern(this)
+    }
+
+    GetPropertyValue(propertyId) {
+        switch propertyId {
+            case UIA.Property.ValueValue: return ""
+            case UIA.Property.IsValuePatternAvailable: return false
+            case UIA.Property.LegacyIAccessibleValue: return ""
+            case UIA.Property.IsLegacyIAccessiblePatternAvailable: return false
+        }
+        return ""
+    }
+}
+
 class FakeMicrophoneExpandPattern {
     __New(combo) {
         this.combo := combo
@@ -547,6 +599,13 @@ class FakeMicrophoneExpandPattern {
 
     Collapse() {
         this.combo.expanded := false
+    }
+}
+
+class CountingMicrophoneExpandPattern extends FakeMicrophoneExpandPattern {
+    Expand() {
+        this.combo.expandCalls++
+        super.Expand()
     }
 }
 

@@ -291,7 +291,7 @@ class MicrophoneManager {
     static InspectMicrophoneCombo(root, candidate) {
         if !root || !candidate
             return false
-        return root.ProcessId > 0
+        identityMatches := root.ProcessId > 0
             && root.WinId > 0
             && candidate.ProcessId = root.ProcessId
             && candidate.WinId = root.WinId
@@ -299,6 +299,11 @@ class MicrophoneManager {
             && candidate.AutomationId == this.comboAutomationId
             && candidate.IsEnabled
             && candidate.IsExpandCollapsePatternAvailable
+        if !identityMatches
+            return false
+        ; Selection is unsafe when the only authoritative postcondition cannot be
+        ; read. Reject it before expanding or selecting anything.
+        return UIAValue.TryRead(candidate).supported
     }
 
     static IsExpectedMicrophoneItem(root, combo, item) {
@@ -414,11 +419,6 @@ class MicrophoneManager {
         return {status: "absent", selection: 0, error: ""}
     }
 
-    static ResolveMicrophoneItem(root, combo, configuredName) {
-        result := this.ResolveMicrophoneItemResult(root, combo, configuredName)
-        return result.status == "found" ? result.selection : 0
-    }
-
     static RevalidateCombo(session, expectedCombo) {
         try {
             if !this.sessionDriver.IsLive(session)
@@ -500,6 +500,26 @@ class MicrophoneManager {
         if (!liveResolved
             || !(liveResolved.name == resolved.name)
             || !this.SameElement(liveResolved.item, resolved.item)) {
+            this.CollapseVerifiedCombo(session, combo)
+            return false
+        }
+
+        ; Item enumeration can yield while PowerScribe rerenders. Reacquire the
+        ; exact ComboBox one final time and prove its value remains readable at the
+        ; last safe boundary before SelectionItem.Select().
+        finalCombo := this.RevalidateCombo(session, combo)
+        if (!finalCombo
+            || !this.SameElement(finalCombo.combo, current.combo)) {
+            this.CollapseVerifiedCombo(session, combo)
+            return false
+        }
+        try readable := UIAValue.TryRead(finalCombo.combo).supported
+        catch as err {
+            this.RecordOperationalError(err)
+            this.CollapseVerifiedCombo(session, combo)
+            return false
+        }
+        if !readable {
             this.CollapseVerifiedCombo(session, combo)
             return false
         }

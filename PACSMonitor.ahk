@@ -242,10 +242,10 @@ class PACSMonitor {
             return false
 
         try {
-            type := candidate.Type
-            return type = UIA.Type.Table
-                || type = UIA.Type.DataGrid
-                || type = UIA.Type.List
+            controlType := candidate.Type
+            return controlType = UIA.Type.Table
+                || controlType = UIA.Type.DataGrid
+                || controlType = UIA.Type.List
         } catch {
             return false
         }
@@ -366,79 +366,122 @@ class PACSMonitor {
             return this.ProcessRows(this.testStudyRows, true)
         }
 
-        lease := this.automationAcquire.Call("PACS worklist refresh")
-        if (!IsObject(lease)
-            || !HasProp(lease, "status")
-            || lease.status != "acquired")
+        session := 0
+        refreshed := false
+        skipScan := false
+        phaseError := 0
+
+        refreshLease := this.automationAcquire.Call("PACS worklist refresh")
+        if (!IsObject(refreshLease)
+            || !HasProp(refreshLease, "status")
+            || refreshLease.status != "acquired")
             return false
 
         try {
             ; Resolve one exact portal session once. Every later root/action/read is
             ; pinned to its HWND/PID instead of resolving the title again.
             resolution := this.driver.ResolvePortalSession()
-            if (!IsObject(resolution) || !HasProp(resolution, "status")) {
-                this.RecordScanFailure("portal window resolution returned an invalid result")
-                return
-            }
+            if (!IsObject(resolution) || !HasProp(resolution, "status"))
+                throw Error("portal window resolution returned an invalid result")
             if (resolution.status == "absent")
-                return
-            if (resolution.status == "ambiguous") {
-                this.RecordScanFailure("multiple exact Explorer Portal windows are open")
-                return
-            }
+                skipScan := true
+            else if (resolution.status == "ambiguous")
+                throw Error("multiple exact Explorer Portal windows are open")
             if (resolution.status == "error") {
                 detail := HasProp(resolution, "error") ? resolution.error : "unknown lookup error"
-                this.RecordScanFailure("Explorer Portal lookup failed: " detail)
-                return
+                throw Error("Explorer Portal lookup failed: " detail)
             }
-            if (!(resolution.status == "unique")
-                || !HasProp(resolution, "session")
-                || !resolution.session) {
-                this.RecordScanFailure("portal window resolution returned an invalid unique result")
-                return
-            }
-            session := resolution.session
+            if (!skipScan
+                && (!(resolution.status == "unique")
+                    || !HasProp(resolution, "session")
+                    || !resolution.session))
+                throw Error("portal window resolution returned an invalid unique result")
+            if !skipScan
+                session := resolution.session
 
             ; Skip refresh if Explorer Portal is the active window
-            if this.driver.IsActive(session)
-                return
+            if (!skipScan && this.driver.IsActive(session))
+                skipScan := true
 
-            root := this.driver.RootForSession(session)
-            if !this.IsExpectedPortalRoot(session, root) {
-                this.RecordScanFailure("portal root identity changed before refresh")
-                return
+            if !skipScan {
+                root := this.driver.RootForSession(session)
+                if !this.IsExpectedPortalRoot(session, root)
+                    throw Error("portal root identity changed before refresh")
+                refreshed := this.ClickRefresh(root, session)
             }
-            refreshed := this.ClickRefresh(root, session)
+        } catch as err {
+            phaseError := err
+        } finally this.automationRelease.Call()
 
-            this.RecordRefreshResult(refreshed)
+        if phaseError {
+            this.RecordScanFailure(phaseError)
+            return false
+        }
+        if skipScan
+            return false
 
-            ; Wait a moment for the refresh to complete
-            this.driver.WaitForRefresh()
-
-            if !this.driver.SessionIsLive(session) {
-                this.RecordScanFailure("portal window changed during refresh")
-                return
+        ; Notification/error reporting and the portal's render delay do not hold the
+        ; global clinical automation lease. A user command can run during the wait;
+        ; the scan phase must then reacquire the lease and revalidate the pinned
+        ; session before touching UIA again.
+        this.RecordRefreshResult(refreshed)
+        if refreshed {
+            try this.driver.WaitForRefresh()
+            catch as err {
+                this.RecordScanFailure(err)
+                return false
             }
+        }
+
+        scanLease := this.automationAcquire.Call("PACS worklist scan")
+        if (!IsObject(scanLease)
+            || !HasProp(scanLease, "status")
+            || scanLease.status != "acquired")
+            return false
+
+        rowSnapshots := 0
+        phaseError := 0
+        try {
+            if !this.driver.SessionIsLive(session)
+                throw Error("portal window changed during refresh")
 
             ; Reacquire the UIA root from the same exact HWND after the portal has
             ; refreshed; a cached root may be stale after Edge rerenders the page.
             root := this.driver.RootForSession(session)
-            if !this.IsExpectedPortalRoot(session, root) {
-                this.RecordScanFailure("portal root identity changed before scan")
-                return
-            }
+            if !this.IsExpectedPortalRoot(session, root)
+                throw Error("portal root identity changed before scan")
             studyList := this.FindStudyList(root)
-            if !studyList {
-                this.RecordScanFailure("study list was not found")
-                return
-            }
+            if !studyList
+                throw Error("study list was not found")
+            rowSnapshots := this.SnapshotStudyRows(studyList)
+        } catch as err {
+            phaseError := err
+        } finally this.automationRelease.Call()
 
-            this.ProcessRows(studyList)
+        if phaseError {
+            this.RecordScanFailure(phaseError)
+            return false
+        }
+
+        try {
+            this.ProcessRows(rowSnapshots)
             this.RecordScanSuccess()
-
+            return true
         } catch as err {
             this.RecordScanFailure(err)
-        } finally this.automationRelease.Call()
+            return false
+        }
+    }
+
+    static SnapshotStudyRows(studyList) {
+        rows := []
+        for row in studyList {
+            rowText := row.Name
+            if (Type(rowText) != "String")
+                throw Error("study row text is unavailable")
+            rows.Push({Name: rowText})
+        }
+        return rows
     }
 
     static HasAccession(accession) {

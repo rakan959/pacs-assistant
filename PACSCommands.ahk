@@ -111,11 +111,11 @@ class PACSCommands {
         action := targetWindow != "" ?
             (*) => AppControl.SendKeysToWindow(targetWindow, keys) :
             (*) => Send(keys)
-        func := (*) => PACSCommands.RunClinicalCommand("Custom keybind", action)
+        commandCallback := (*) => PACSCommands.RunClinicalCommand("Custom keybind", action)
 
         ; Store the configuration
-        func.keys := keys
-        func.window := targetWindow
-        return func
+        commandCallback.keys := keys
+        commandCallback.window := targetWindow
+        return commandCallback
     }
 }

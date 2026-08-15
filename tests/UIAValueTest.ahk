@@ -56,17 +56,25 @@ class UIAValueTest {
     ]
 
     TestReadPrefersValueProperty() {
-        Assert.Equal("report text", UIAValue.Read(FakeElement("report text", "legacy")))
+        result := UIAValue.TryRead(FakeElement("report text", "legacy"))
+        Assert.True(result.supported)
+        Assert.Equal("report text", result.value)
     }
 
     TestReadFallsBackToLegacyValue() {
-        Assert.Equal("legacy", UIAValue.Read(FakeElement("", "legacy", false, true)))
+        result := UIAValue.TryRead(FakeElement("", "legacy", false, true))
+        Assert.True(result.supported)
+        Assert.Equal("legacy", result.value)
     }
 
     TestReadReturnsBlankWhenNothingExposed() {
-        Assert.Equal("", UIAValue.Read(FakeElement("", "")))
+        emptyResult := UIAValue.TryRead(FakeElement("", "", false, false))
+        Assert.False(emptyResult.supported)
+        Assert.Equal("", emptyResult.value)
         ; An object that raises on every property must not propagate
-        Assert.Equal("", UIAValue.Read({}))
+        missingResult := UIAValue.TryRead({})
+        Assert.False(missingResult.supported)
+        Assert.Equal("", missingResult.value)
     }
 
     TestTryReadPreservesSupportedBlank() {

@@ -34,9 +34,9 @@ class HotkeyManager {
     ; building a fresh closure per registration would create a new variant every time
     ; and leave the previous one registered and unreachable.
     static scopePredicates := Map(
-        "PACS", (*) => WinActive("ahk_exe mp.exe"),
+        "PACS", (*) => HotkeyManager.PACSIsActive(),
         "PowerScribe", (*) => HotkeyManager.PowerScribeIsActive(),
-        "PACS or PowerScribe", (*) => WinActive("ahk_exe mp.exe") || HotkeyManager.PowerScribeIsActive()
+        "PACS or PowerScribe", (*) => HotkeyManager.PACSIsActive() || HotkeyManager.PowerScribeIsActive()
     )
 
     static __New() {
@@ -55,11 +55,21 @@ class HotkeyManager {
         return HotkeyContract.ScopeFromFlags(requirePACS, requirePowerScribe)
     }
 
-    static PowerScribeIsActive(activeWindowMatcher := 0) {
-        selector := AppControl.PowerScribeProcessTarget()
-        return activeWindowMatcher
-            ? activeWindowMatcher.Call(selector)
-            : WinActive(selector)
+    static PACSIsActive(exactWindowProbe := 0) {
+        specs := [
+            AppControl.VuePacsWindowSpec(),
+            AppControl.VuePacsClientWindowSpec()
+        ]
+        return exactWindowProbe
+            ? exactWindowProbe.Call(specs)
+            : AppControl.IsUniqueExactWindowActive(specs)
+    }
+
+    static PowerScribeIsActive(exactWindowProbe := 0) {
+        specs := [AppControl.PowerScribeWindowSpec()]
+        return exactWindowProbe
+            ? exactWindowProbe.Call(specs)
+            : AppControl.IsUniqueExactWindowActive(specs)
     }
 
     ; Inverse of ScopeFromFlags
@@ -80,6 +90,32 @@ class HotkeyManager {
 
     static ExitScope() {
         HotIf()
+    }
+
+    static CallbackForScope(callback, scope) {
+        scope := this.NormalizeScope(scope)
+        if (scope == "Any")
+            return callback
+        return (args*) => HotkeyManager.InvokeCallbackForScope(
+            scope,
+            callback,
+            args*
+        )
+    }
+
+    static InvokeCallbackForScope(scope, callback, args*) {
+        ; HotIf is evaluated when AutoHotkey accepts the physical key event. Focus
+        ; can change before its callback runs, so restricted registrations require
+        ; the same exact-window predicate again at the action boundary.
+        try {
+            if !this.scopePredicates.Has(scope)
+                return false
+            if !this.scopePredicates[scope].Call()
+                return false
+        } catch {
+            return false
+        }
+        return callback.Call(args*)
     }
 
     static RegisterHotkey(funcName, hotkeyStr, scope := "Any") {
@@ -136,7 +172,10 @@ class HotkeyManager {
             ; leaves its enabled state alone, so a bind that DisableAllHotkeys turned
             ; off stayed dead after being re-registered - which is how binds silently
             ; stopped working after editing a keybind or switching profiles.
-            this.hotkeyDriver.Enable(hotkeyStr, callback)
+            this.hotkeyDriver.Enable(
+                hotkeyStr,
+                this.CallbackForScope(callback, scope)
+            )
         } catch as err {
             this.lastError := err.Message
             return false
