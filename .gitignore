@@ -14,3 +14,6 @@ settings.ini
 # Test scratch: Settings creates its ini next to whichever script runs
 tests/settings.ini
 tests/last_results.txt
+
+# Isolated development worktrees
+/.worktrees/
