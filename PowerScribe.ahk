@@ -17,12 +17,33 @@ class NativeAttendingControlDriver {
         try {
             root := UIA.ElementFromHandle(windowTitle)
             control := UIA.GetFocusedElement()
-            return NativeAttendingControlDriver.IsExpectedControl(root, control)
-                ? control
-                : 0
+            expected := this.UniqueExpectedControl(root)
+            if !expected
+                return 0
+            if !UIA.CompareElementsEx(expected, control)
+                return 0
+            return NativeAttendingControlDriver.IsExpectedControl(root, control) ? control : 0
         } catch {
             return 0
         }
+    }
+
+    ExpectedControls(root) {
+        matches := []
+        for typeName in ["Edit", "ComboBox"] {
+            for candidate in root.FindElements({Type: typeName}) {
+                if NativeAttendingControlDriver.IsExpectedControl(root, candidate)
+                    matches.Push(candidate)
+            }
+        }
+        return matches
+    }
+
+    UniqueExpectedControl(root) {
+        try matches := this.ExpectedControls(root)
+        catch
+            return 0
+        return matches.Length = 1 ? matches[1] : 0
     }
 
     static IsExpectedControl(root, control) {
@@ -104,33 +125,37 @@ class NativeAttendingControlDriver {
             && this.HasExpectedValue(control, expected)
     }
 
-    WaitForConfirmation(windowTitle, control) {
+    WaitForPickerAbsent(windowTitle) {
         loop NativeAttendingControlDriver.confirmationAttempts {
-            if this.ConfirmationControlClosed(windowTitle, control)
+            try root := UIA.ElementFromHandle(windowTitle)
+            catch
+                return false
+            if this.PickerIsAbsentFromRoot(root)
                 return true
             Sleep(NativeAttendingControlDriver.confirmationPollMs)
         }
         return false
     }
 
-    ConfirmationControlClosed(windowTitle, control) {
-        try root := UIA.ElementFromHandle(windowTitle)
+    PickerIsAbsentFromRoot(root) {
+        try return this.ExpectedControls(root).Length = 0
         catch
             return false
+    }
 
-        try {
-            for typeName in ["Edit", "ComboBox"] {
-                for candidate in root.FindElements({Type: typeName}) {
-                    if UIA.CompareElementsEx(control, candidate)
-                        return false
-                }
+    WaitForStableExpectedValue(control, expected) {
+        stableReads := 0
+        loop NativeAttendingControlDriver.confirmationAttempts {
+            if this.HasExpectedValue(control, expected) {
+                stableReads++
+                if (stableReads >= 2)
+                    return true
+            } else {
+                stableReads := 0
             }
-            ; A complete, successful traversal that no longer contains the exact
-            ; picker is the observable postcondition that its confirmation UI closed.
-            return true
-        } catch {
-            return false
+            Sleep(NativeAttendingControlDriver.confirmationPollMs)
         }
+        return false
     }
 }
 
@@ -225,10 +250,39 @@ class PowerScribe {
                 "{tab}{space}{tab}{Enter}"
             )
                 return false
-            return this.attendingControlDriver.WaitForConfirmation(
+            ; Closing the original picker proves only that the UI changed. Reopen the
+            ; same semantic picker and read the committed value back before reporting
+            ; success; a cancelled or rerendered picker therefore fails closed.
+            if !this.attendingControlDriver.WaitForPickerAbsent(this.windowTitle)
+                return false
+            if !AppControl.SendKeysToActiveWindow(
                 this.windowTitle,
-                control
+                "{Alt down}ta{Alt up}"
             )
+                return false
+            driver.Pause(100)
+
+            verificationControl := this.attendingControlDriver.FindExpectedControl(this.windowTitle)
+            if !verificationControl
+                return false
+            committed := this.attendingControlDriver.WaitForStableExpectedValue(
+                verificationControl,
+                attending
+            )
+
+            ; Escape is safe only while the unique verified attending field retains
+            ; focus in the exact reporting window. Always dismiss a safely identified
+            ; verification picker, even when its readback exposed a failed commit.
+            if !this.attendingControlDriver.ControlHasExpectedFocus(
+                this.windowTitle,
+                verificationControl
+            )
+                return false
+            if !AppControl.SendKeysToActiveWindow(this.windowTitle, "{Escape}")
+                return false
+            if !this.attendingControlDriver.WaitForPickerAbsent(this.windowTitle)
+                return false
+            return committed
         } catch {
             return false
         }

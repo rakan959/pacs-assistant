@@ -14,11 +14,15 @@ class ClinicalAutomationTest {
         "AttendingTargetRequiresSemanticControlIdentity",
         "NativeAttendingWriteRefusesLostControlFocus",
         "AttendingVerificationRejectsSubstringNearMatch",
+        "NativeAttendingPickerAbsenceRejectsReplacementControl",
+        "NativeAttendingPickerRequiresUniqueSemanticControl",
         "AttendingNameUsesLiteralText",
         "AttendingStopsBeforeTextWhenControlMissing",
         "AttendingStopsBeforeConfirmationWhenValueUnverified",
         "AttendingStopsBeforeConfirmationWhenPickerLosesFocus",
         "AttendingReportsUnconfirmedSubmission",
+        "AttendingRejectsClosureWithoutCommittedReadback",
+        "AttendingRequiresVerificationPickerDismissal",
         "AttendingStopsBeforeTextWhenFocusMoves",
         "AttendingRoutingUsesInjectedDependencies",
         "BlankAttendingSkipsPowerScribeWrite",
@@ -156,6 +160,29 @@ class ClinicalAutomationTest {
         Assert.False(driver.HasExpectedValue(FakeAttendingValueElement("Smithson"), "Smith"))
     }
 
+    NativeAttendingPickerAbsenceRejectsReplacementControl() {
+        driver := NativeAttendingControlDriver()
+        replacement := FakeAttendingTargetElement(
+            UIA.Type.Edit,
+            42,
+            "Attending",
+            "attendingPickerReplacement",
+            true
+        )
+
+        Assert.False(driver.PickerIsAbsentFromRoot(FakeAttendingRoot([replacement])))
+        Assert.True(driver.PickerIsAbsentFromRoot(FakeAttendingRoot()))
+    }
+
+    NativeAttendingPickerRequiresUniqueSemanticControl() {
+        driver := NativeAttendingControlDriver()
+        first := FakeAttendingTargetElement(UIA.Type.Edit, 42, "Attending", "attendingOne", true)
+        second := FakeAttendingTargetElement(UIA.Type.ComboBox, 42, "Attending", "attendingTwo", true)
+
+        Assert.Equal(0, driver.UniqueExpectedControl(FakeAttendingRoot([first], [second])))
+        Assert.True(driver.UniqueExpectedControl(FakeAttendingRoot([first])) = first)
+    }
+
     AttendingNameUsesLiteralText() {
         driver := FakeWindowDriver()
         AppControl.windowDriver := driver
@@ -164,7 +191,7 @@ class ClinicalAutomationTest {
         attending := "Smith + Jones {Neuro}"
 
         Assert.True(PowerScribe.SetAttending(attending))
-        Assert.Equal(8, driver.calls.Length)
+        Assert.Equal(13, driver.calls.Length)
         Assert.Equal("activate", driver.calls[1].kind)
         Assert.Equal(PowerScribe.windowTitle, driver.calls[1].value)
         Assert.Equal("active", driver.calls[2].kind)
@@ -176,6 +203,10 @@ class ClinicalAutomationTest {
         Assert.Equal("active", driver.calls[7].kind)
         Assert.Equal("keys", driver.calls[8].kind)
         Assert.Equal("{tab}{space}{tab}{Enter}", driver.calls[8].value)
+        Assert.Equal("active", driver.calls[9].kind)
+        Assert.Equal("{Alt down}ta{Alt up}", driver.calls[10].value)
+        Assert.Equal("active", driver.calls[12].kind)
+        Assert.Equal("{Escape}", driver.calls[13].value)
     }
 
     AttendingStopsBeforeTextWhenControlMissing() {
@@ -217,6 +248,36 @@ class ClinicalAutomationTest {
 
         Assert.False(PowerScribe.SetAttending("Smith"))
         Assert.Equal(1, attendingDriver.confirmationChecks)
+    }
+
+    AttendingRejectsClosureWithoutCommittedReadback() {
+        driver := FakeWindowDriver()
+        AppControl.windowDriver := driver
+        attendingDriver := FakeAttendingControlDriver({}, true, true, true, false)
+        PowerScribe.attendingControlDriver := attendingDriver
+
+        Assert.False(PowerScribe.SetAttending("Smith"))
+        Assert.Equal(1, attendingDriver.committedValueChecks)
+        Assert.Equal(2, attendingDriver.confirmationChecks)
+        Assert.True(this.DriverSentKeys(driver, "{Escape}"))
+    }
+
+    AttendingRequiresVerificationPickerDismissal() {
+        driver := FakeWindowDriver()
+        AppControl.windowDriver := driver
+        attendingDriver := FakeAttendingControlDriver({}, true, true, true, true, false)
+        PowerScribe.attendingControlDriver := attendingDriver
+
+        Assert.False(PowerScribe.SetAttending("Smith"))
+        Assert.Equal(2, attendingDriver.confirmationChecks)
+    }
+
+    DriverSentKeys(driver, expected) {
+        for call in driver.calls {
+            if (call.kind = "keys" && call.value = expected)
+                return true
+        }
+        return false
     }
 
     AttendingStopsBeforeTextWhenFocusMoves() {
@@ -543,12 +604,21 @@ class FakeWindowDriver {
 }
 
 class FakeAttendingControlDriver {
-    __New(control := {}, valueMatches := true, canConfirm := true, confirmationCompleted := true) {
+    __New(
+        control := {},
+        valueMatches := true,
+        canConfirm := true,
+        confirmationCompleted := true,
+        committedValueMatches := true,
+        verificationDismissed := true
+    ) {
         this.control := control
         this.valueMatches := valueMatches
         this.confirmationAllowed := canConfirm
-        this.confirmationCompleted := confirmationCompleted
+        this.pickerClosures := [confirmationCompleted, verificationDismissed]
         this.confirmationChecks := 0
+        this.committedValueMatches := committedValueMatches
+        this.committedValueChecks := 0
         this.writes := []
     }
 
@@ -565,9 +635,18 @@ class FakeAttendingControlDriver {
         return this.confirmationAllowed
     }
 
-    WaitForConfirmation(*) {
+    WaitForPickerAbsent(*) {
         this.confirmationChecks++
-        return this.confirmationCompleted
+        return this.pickerClosures.Length ? this.pickerClosures.RemoveAt(1) : false
+    }
+
+    WaitForStableExpectedValue(*) {
+        this.committedValueChecks++
+        return this.committedValueMatches
+    }
+
+    ControlHasExpectedFocus(*) {
+        return true
     }
 }
 
@@ -597,6 +676,23 @@ class FakeAttendingValueElement {
             case UIA.Property.IsLegacyIAccessiblePatternAvailable: return false
         }
         return ""
+    }
+}
+
+class FakeAttendingRoot {
+    __New(editControls := [], comboControls := []) {
+        this.ProcessId := 42
+        this.WinId := 100
+        this.editControls := editControls
+        this.comboControls := comboControls
+    }
+
+    FindElements(condition) {
+        if (condition.Type = "Edit")
+            return this.editControls
+        if (condition.Type = "ComboBox")
+            return this.comboControls
+        return []
     }
 }
 
