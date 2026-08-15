@@ -91,6 +91,7 @@ CI downloads the official tool archives and verifies them before execution:
 | Tool | Official archive | SHA-256 |
 |---|---|---|
 | AutoHotkey v2.0.26 | [AutoHotkey_2.0.26.zip](https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.26/AutoHotkey_2.0.26.zip) | `43522aa3122a57784ac5db30abf85c2244475c36acd7796e2c993355f9e926ae` |
+| AutoHotkey v2.0.26 source | [v2.0.26.zip](https://github.com/AutoHotkey/AutoHotkey/archive/refs/tags/v2.0.26.zip) | `765ada5ae0a543f470bcd30371a7b95438e59351b0a20508c516df76a4f73ca4` |
 | Ahk2Exe v1.1.37.02a2 | [Ahk2Exe1.1.37.02a2.zip](https://github.com/AutoHotkey/Ahk2Exe/releases/download/Ahk2Exe1.1.37.02a2/Ahk2Exe1.1.37.02a2.zip) | `c29b8c3a5124850d79fc9e66e2ca79677c377d7f31631ad3022ba159c5d9e3be` |
 
 Verify a downloaded archive before extracting it:
@@ -166,7 +167,8 @@ pinned and verified; the build job has read-only repository permission. Tagged b
 hand the verified artifact to a separate release job with narrowly scoped write access.
 
 - Tagged pushes publish `pacs-assistant.exe`, `LICENSE`,
-  `THIRD_PARTY_NOTICES.md`, and the AutoHotkey runtime license.
+  `THIRD_PARTY_NOTICES.md`, the AutoHotkey runtime license, and the exact
+  `AutoHotkey-v2.0.26-source.zip` corresponding-source archive.
 - Other pushes upload the same files as the `pacs-assistant-build` artifact.
 
 ## Versioning and releases

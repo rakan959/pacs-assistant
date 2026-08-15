@@ -8,6 +8,7 @@ permissions:
 env:
   AUTOHOTKEY_VERSION: 2.0.26
   AUTOHOTKEY_SHA256: 43522aa3122a57784ac5db30abf85c2244475c36acd7796e2c993355f9e926ae
+  AUTOHOTKEY_SOURCE_SHA256: 765ada5ae0a543f470bcd30371a7b95438e59351b0a20508c516df76a4f73ca4
   AHK2EXE_VERSION: 1.1.37.02a2
   AHK2EXE_SHA256: c29b8c3a5124850d79fc9e66e2ca79677c377d7f31631ad3022ba159c5d9e3be
 
@@ -66,6 +67,7 @@ jobs:
           $toolRoot = Join-Path $env:RUNNER_TEMP 'pacs-assistant-build-tools'
           $ahkZip = Join-Path $toolRoot 'AutoHotkey.zip'
           $ahkDir = Join-Path $toolRoot 'AutoHotkey'
+          $ahkSourceZip = Join-Path $env:GITHUB_WORKSPACE "AutoHotkey-v$($env:AUTOHOTKEY_VERSION)-source.zip"
           $ahk2ExeZip = Join-Path $toolRoot 'Ahk2Exe.zip'
           $ahk2ExeDir = Join-Path $toolRoot 'Ahk2Exe'
           New-Item -ItemType Directory -Path $toolRoot -Force | Out-Null
@@ -74,6 +76,10 @@ jobs:
           Invoke-WebRequest -Uri $ahkUrl -OutFile $ahkZip
           Assert-Sha256 -Path $ahkZip -Expected $env:AUTOHOTKEY_SHA256
           Expand-Archive -LiteralPath $ahkZip -DestinationPath $ahkDir -Force
+
+          $ahkSourceUrl = "https://github.com/AutoHotkey/AutoHotkey/archive/refs/tags/v$($env:AUTOHOTKEY_VERSION).zip"
+          Invoke-WebRequest -Uri $ahkSourceUrl -OutFile $ahkSourceZip
+          Assert-Sha256 -Path $ahkSourceZip -Expected $env:AUTOHOTKEY_SOURCE_SHA256
 
           $ahk2ExeUrl = "https://github.com/AutoHotkey/Ahk2Exe/releases/download/Ahk2Exe$($env:AHK2EXE_VERSION)/Ahk2Exe$($env:AHK2EXE_VERSION).zip"
           Invoke-WebRequest -Uri $ahk2ExeUrl -OutFile $ahk2ExeZip
@@ -169,6 +175,7 @@ jobs:
             LICENSE
             THIRD_PARTY_NOTICES.md
             licenses/AutoHotkey-v2.0.26.txt
+            AutoHotkey-v2.0.26-source.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -196,7 +203,8 @@ jobs:
             (Join-Path $PWD 'release/pacs-assistant.exe'),
             (Join-Path $PWD 'release/LICENSE'),
             (Join-Path $PWD 'release/THIRD_PARTY_NOTICES.md'),
-            (Join-Path $PWD 'release/licenses/AutoHotkey-v2.0.26.txt')
+            (Join-Path $PWD 'release/licenses/AutoHotkey-v2.0.26.txt'),
+            (Join-Path $PWD 'release/AutoHotkey-v2.0.26-source.zip')
           )
           foreach ($asset in $assets) {
             if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) {

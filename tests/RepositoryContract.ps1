@@ -65,6 +65,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Assert-Matches $workflow '(?m)^\s*AUTOHOTKEY_VERSION:\s*2\.0\.26\s*$' 'CI must pin AutoHotkey v2.0.26.'
 Assert-Matches $workflow '(?m)^\s*AUTOHOTKEY_SHA256:\s*43522aa3122a57784ac5db30abf85c2244475c36acd7796e2c993355f9e926ae\s*$' 'CI must verify the official AutoHotkey v2.0.26 ZIP digest.'
+Assert-Matches $workflow '(?m)^\s*AUTOHOTKEY_SOURCE_SHA256:\s*765ada5ae0a543f470bcd30371a7b95438e59351b0a20508c516df76a4f73ca4\s*$' 'CI must verify the exact AutoHotkey v2.0.26 source archive digest.'
 Assert-Matches $workflow '(?m)^\s*AHK2EXE_VERSION:\s*1\.1\.37\.02a2\s*$' 'CI must pin Ahk2Exe v1.1.37.02a2.'
 Assert-Matches $workflow '(?m)^\s*AHK2EXE_SHA256:\s*c29b8c3a5124850d79fc9e66e2ca79677c377d7f31631ad3022ba159c5d9e3be\s*$' 'CI must verify the official Ahk2Exe v1.1.37.02a2 ZIP digest.'
 Assert-Matches $workflow '(?m)^\s*contents:\s*read\s*$' 'The default workflow token permission must be contents: read.'
@@ -78,6 +79,9 @@ Assert-NotMatches $workflow '(?m)^\s*runs-on:\s*\S+-latest\s*$' 'Workflow runner
 Assert-Matches $workflow '(?m)^\s*& tests/RepositoryContract\.ps1\s*$' 'CI must run the repository contract check.'
 Assert-Matches $workflow '(?m)^\s*& scripts/GenerateVersion\.ps1\b' 'CI must generate Version.ahk through the tested version script.'
 Assert-Matches $workflow '(?m)^\s*licenses/AutoHotkey-v2\.0\.26\.txt\s*$' 'Release artifacts must include the AutoHotkey runtime license.'
+Assert-Matches $workflow 'https://github\.com/AutoHotkey/AutoHotkey/archive/refs/tags/v\$\(\$env:AUTOHOTKEY_VERSION\)\.zip' 'CI must download source from the exact AutoHotkey version tag.'
+Assert-Matches $workflow '(?m)^\s*AutoHotkey-v2\.0\.26-source\.zip\s*$' 'Build artifacts must include the AutoHotkey corresponding-source archive.'
+Assert-Matches $workflow "Join-Path \`$PWD 'release/AutoHotkey-v2\.0\.26-source\.zip'" 'Tagged releases must publish the AutoHotkey corresponding-source archive.'
 Assert-NotMatches $workflow '\$env:RELEASE_TAG\.Contains\(''-''\)' 'Release publication must not classify build-metadata hyphens as prerelease markers.'
 Assert-Matches $workflow "\`$env:RELEASE_TAG\s+-match\s+'\^v\(\?:0\|\[1-9\]\\d\*\).*-'" 'Release publication must detect a prerelease marker only between the core version and build metadata.'
 
@@ -107,6 +111,7 @@ Assert-Matches $readme 'git clone --recurse-submodules' 'README must document cl
 Assert-Matches $readme 'AutoHotkey v2\.0\.26' 'README must state the AutoHotkey version used by CI.'
 Assert-Matches $readme 'Ahk2Exe v1\.1\.37\.02a2' 'README must state the Ahk2Exe version used by CI.'
 Assert-Matches $readme 'THIRD_PARTY_NOTICES\.md' 'README must link the bundled dependency notices.'
+Assert-Matches $readme 'AutoHotkey-v2\.0\.26-source\.zip' 'README must identify the corresponding-source release asset.'
 Assert-Matches $readme 'GPL-3\.0' 'README must identify the project license.'
 
 Assert-NotMatches $issueTemplate '(?i)\bsmartphone\b|\bbrowser\b|\biOS\b' 'The bug template must not ask irrelevant browser or smartphone questions.'
@@ -189,6 +194,7 @@ if (-not (Test-Path -LiteralPath $noticesPath -PathType Leaf)) {
     Assert-Matches $notices 'UIA-v2' 'Third-party notices must name UIA-v2.'
     Assert-Matches $notices 'AutoHotkey v2\.0\.26' 'Third-party notices must name the embedded AutoHotkey runtime.'
     Assert-Matches $notices 'licenses/AutoHotkey-v2\.0\.26\.txt' 'Third-party notices must link the AutoHotkey runtime license.'
+    Assert-Matches $notices 'AutoHotkey-v2\.0\.26-source\.zip' 'Third-party notices must identify the runtime corresponding-source release asset.'
     Assert-Matches $notices 'MIT License' 'Third-party notices must include the UIA-v2 MIT license.'
     Assert-Matches $notices 'Copyright \(c\) 2023 Descolada' 'Third-party notices must preserve the UIA-v2 copyright notice.'
 }
