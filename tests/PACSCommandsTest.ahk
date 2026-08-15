@@ -56,9 +56,13 @@ class PACSCommandsTest {
         Assert.Equal("Peds", ReportModality.Classify("EXAMINATION: US RIGHT LOWER QUADRANT"))
         Assert.Equal("Peds", ReportModality.Classify("EXAMINATION: US NEUROSONOGRAPHY"))
         Assert.Equal("Ultrasound", ReportModality.Classify("EXAMINATION: US RENAL"))
-        ; Anything unmatched falls through to MSK
+        ; Known musculoskeletal examinations route explicitly.
         Assert.Equal("MSK", ReportModality.Classify("EXAMINATION: XR KNEE"))
-        Assert.Equal("MSK", ReportModality.Classify(""))
+        Assert.Equal("MSK", ReportModality.Classify("EXAMINATION: MRI SHOULDER"))
+        ; Malformed and newly named examinations fail closed instead of silently
+        ; assigning the MSK attending.
+        Assert.Equal("Unknown", ReportModality.Classify("EXAMINATION: PET UNKNOWN PROTOCOL"))
+        Assert.Equal("Unknown", ReportModality.Classify(""))
         ; Matching is case insensitive
         Assert.Equal("Chest", ReportModality.Classify("examination: ct chest"))
     }
@@ -75,12 +79,7 @@ class PACSCommandsTest {
             Assert.True(found, "Modality not listed in names: " rule.name)
         }
 
-        fallbackListed := false
-        for name in ReportModality.names {
-            if (name == ReportModality.fallback)
-                fallbackListed := true
-        }
-        Assert.True(fallbackListed, "Fallback modality not listed in names")
+        Assert.Equal("Unknown", ReportModality.fallback)
     }
 
     ; Picks the report body out of the other text fields in the PowerScribe window,

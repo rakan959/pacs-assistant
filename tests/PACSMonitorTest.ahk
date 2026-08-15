@@ -10,6 +10,8 @@ class PACSMonitorTest {
         "TestRepeatedAccessionAlertsOnce",
         "TestInterruptedScanDoesNotConsumeUnalertedAccessions",
         "TestMonitoringUsesTestMode",
+        "TestRefreshFallbackRequiresSemanticButtonIdentity",
+        "TestStudyListFallbackRequiresExpectedTypeAndProcess",
         "TestOnSettingsChangedRespectsAutoRefresh",
         "TestRefreshFailureNotificationUsesTextThenTitle",
         "TestScanFailuresNotifyOnceAndReset",
@@ -82,6 +84,36 @@ class PACSMonitorTest {
         PACSMonitor.testLastNewStudies := []
         PACSMonitor.RefreshAndCheck()
         Assert.Equal(0, PACSMonitor.testLastNewStudies.Length)
+    }
+
+    TestRefreshFallbackRequiresSemanticButtonIdentity() {
+        root := FakePACSTargetElement(UIA.Type.Window, 42)
+        valid := FakePACSTargetElement(UIA.Type.Button, 42, "Refresh studies", "refreshButton", true)
+        wrongType := FakePACSTargetElement(UIA.Type.Edit, 42, "Refresh", "refreshButton", true)
+        wrongMeaning := FakePACSTargetElement(UIA.Type.Button, 42, "Delete", "deleteButton", true)
+        wrongProcess := FakePACSTargetElement(UIA.Type.Button, 99, "Refresh", "refreshButton", true)
+
+        Assert.True(PACSMonitor.IsExpectedRefreshButton(root, valid))
+        Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongType))
+        Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongMeaning))
+        Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongProcess))
+    }
+
+    TestStudyListFallbackRequiresExpectedTypeAndProcess() {
+        root := FakePACSTargetElement(UIA.Type.Window, 42)
+
+        Assert.True(PACSMonitor.IsExpectedStudyList(
+            root,
+            FakePACSTargetElement(UIA.Type.DataGrid, 42)
+        ))
+        Assert.False(PACSMonitor.IsExpectedStudyList(
+            root,
+            FakePACSTargetElement(UIA.Type.Button, 42)
+        ))
+        Assert.False(PACSMonitor.IsExpectedStudyList(
+            root,
+            FakePACSTargetElement(UIA.Type.List, 99)
+        ))
     }
 
     ; UIA enumeration can fail after some rows have already been read. Accessions from
@@ -179,6 +211,18 @@ class PACSMonitorTest {
         PACSMonitor.lastError := ""
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalSettings
+    }
+}
+
+class FakePACSTargetElement {
+    __New(type, processId, name := "", automationId := "", invoke := false) {
+        this.Type := type
+        this.ProcessId := processId
+        this.Name := name
+        this.AutomationId := automationId
+        this.IsInvokePatternAvailable := invoke
+        this.IsLegacyIAccessiblePatternAvailable := false
+        this.NativeWindowHandle := 0
     }
 }
 

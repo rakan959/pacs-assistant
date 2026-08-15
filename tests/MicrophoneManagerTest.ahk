@@ -7,6 +7,7 @@ class MicrophoneManagerTest {
         "WaitForSelectionRequiresTheRequestedValue",
         "WaitForSelectionIgnoresDisplayCasing",
         "FindMicrophoneComboUsesFallbackAfterPrimaryFailure",
+        "FindMicrophoneComboUsesSinglePrimarySearch",
         "FindMicrophoneComboReturnsZeroWhenLookupsFail",
         "PostMutationWriteErrorUsesVerifiedSelection",
         "FinalSelectionFailureNotifiesOnce",
@@ -49,6 +50,16 @@ class MicrophoneManagerTest {
         actual := MicrophoneManager.FindMicrophoneComboInRoot(root)
 
         Assert.Equal(expected, actual)
+    }
+
+    FindMicrophoneComboUsesSinglePrimarySearch() {
+        expected := FakeMicrophoneElement(MicrophoneManager.comboAutomationId)
+        root := FakeMicrophoneRoot(false, expected)
+
+        MicrophoneManager.FindMicrophoneComboInRoot(root)
+
+        Assert.Equal(1, root.findCalls)
+        Assert.Equal(0, root.waitCalls)
     }
 
     FindMicrophoneComboReturnsZeroWhenLookupsFail() {
@@ -155,9 +166,19 @@ class FakeMicrophoneRoot {
         this.waitThrows := waitThrows
         this.fallback := fallback
         this.fallbackThrows := fallbackThrows
+        this.findCalls := 0
+        this.waitCalls := 0
     }
 
     WaitElement(criteria, timeoutMs) {
+        this.waitCalls++
+        if this.waitThrows
+            throw Error("simulated primary lookup failure")
+        return 0
+    }
+
+    ElementExist(criteria) {
+        this.findCalls++
         if this.waitThrows
             throw Error("simulated primary lookup failure")
         return 0

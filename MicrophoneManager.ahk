@@ -160,7 +160,10 @@ class MicrophoneManager {
 
     static FindMicrophoneComboInRoot(root) {
         combo := 0
-        try combo := root.WaitElement({AutomationId: this.comboAutomationId}, 500)
+        ; CheckForLogin already runs on a one-second timer. A WaitElement here turns
+        ; each absent picker into ~25 full descendant searches, so do one bounded
+        ; tree query per tick and let the timer provide retry behavior.
+        try combo := root.ElementExist({AutomationId: this.comboAutomationId})
         if combo
             return combo
 

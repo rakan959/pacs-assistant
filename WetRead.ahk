@@ -16,6 +16,31 @@ class NativeWetReadDriver {
         this.windowDriver := windowDriver
     }
 
+    /**
+     * Positional UIA paths are permitted only as locators. Verify that the result
+     * is an enabled, writable text control owned by the Sticky Notes process before
+     * any paste transaction can mutate it.
+     */
+    static IsExpectedNoteField(root, field) {
+        if !root || !field
+            return false
+
+        try {
+            rootProcess := root.ProcessId
+            if (rootProcess <= 0 || field.ProcessId != rootProcess)
+                return false
+            if (field.Type != UIA.Type.Document && field.Type != UIA.Type.Edit)
+                return false
+            if !field.IsEnabled
+                return false
+            return field.IsValuePatternAvailable
+                || field.IsLegacyIAccessiblePatternAvailable
+                || field.NativeWindowHandle
+        } catch {
+            return false
+        }
+    }
+
     Read(field) {
         result := UIAValue.TryRead(field)
         if !result.supported
@@ -357,6 +382,10 @@ wetRead() {
 	}
 	if (!noteField) {
 		MsgBox("Could not locate Sticky Notes text field.")
+		return
+	}
+	if !NativeWetReadDriver.IsExpectedNoteField(sticky, noteField) {
+		MsgBox("Sticky Notes returned an unexpected text target. Nothing was pasted; verify the window and try again.", "Sticky Note Target Not Verified", "Icon!")
 		return
 	}
 

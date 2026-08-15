@@ -108,16 +108,43 @@ class PACSMonitor {
         ]
         for condition in conditions {
             try {
-                return root.FindElement(condition)
+                candidate := root.FindElement(condition)
+                if this.IsExpectedRefreshButton(root, candidate)
+                    return candidate
             }
         }
 
         ; Positional fallback
         try {
-            return root.ElementFromPath(this.refreshButtonPath)
+            candidate := root.ElementFromPath(this.refreshButtonPath)
+            if this.IsExpectedRefreshButton(root, candidate)
+                return candidate
         }
 
         return 0
+    }
+
+    /**
+     * A positional path is only a locator hint, never proof of target identity.
+     * Require a refresh-labelled, actionable button in the same process before a
+     * caller is allowed to click it.
+     */
+    static IsExpectedRefreshButton(root, candidate) {
+        if !this.IsSameProcess(root, candidate)
+            return false
+
+        try {
+            if (candidate.Type != UIA.Type.Button)
+                return false
+            label := candidate.Name " " candidate.AutomationId
+            if !InStr(StrLower(label), "refresh")
+                return false
+            return candidate.IsInvokePatternAvailable
+                || candidate.IsLegacyIAccessiblePatternAvailable
+                || candidate.NativeWindowHandle
+        } catch {
+            return false
+        }
     }
 
     /**
@@ -127,16 +154,46 @@ class PACSMonitor {
      */
     static FindStudyList(root) {
         try {
-            return root.ElementFromPath(this.studyListPath)
+            candidate := root.ElementFromPath(this.studyListPath)
+            if this.IsExpectedStudyList(root, candidate)
+                return candidate
         }
 
         for condition in [{Type: "Table"}, {Type: "DataGrid"}, {Type: "List"}] {
             try {
-                return root.FindElement(condition)
+                candidate := root.FindElement(condition)
+                if this.IsExpectedStudyList(root, candidate)
+                    return candidate
             }
         }
 
         return 0
+    }
+
+    static IsExpectedStudyList(root, candidate) {
+        if !this.IsSameProcess(root, candidate)
+            return false
+
+        try {
+            type := candidate.Type
+            return type = UIA.Type.Table
+                || type = UIA.Type.DataGrid
+                || type = UIA.Type.List
+        } catch {
+            return false
+        }
+    }
+
+    static IsSameProcess(root, candidate) {
+        if !root || !candidate
+            return false
+
+        try {
+            rootProcess := root.ProcessId
+            return rootProcess > 0 && candidate.ProcessId = rootProcess
+        } catch {
+            return false
+        }
     }
 
     /**

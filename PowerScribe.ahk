@@ -3,6 +3,88 @@
 #Include AppControl.ahk
 #Include UIAValue.ahk
 
+; Attending-picker target validation. This keeps focus-sensitive clinical input
+; behind a semantic UIA identity check and an observable write postcondition.
+class NativeAttendingControlDriver {
+    FindExpectedControl(windowTitle) {
+        try {
+            root := UIA.ElementFromHandle(windowTitle)
+            control := UIA.GetFocusedElement()
+            return NativeAttendingControlDriver.IsExpectedControl(root, control)
+                ? control
+                : 0
+        } catch {
+            return 0
+        }
+    }
+
+    static IsExpectedControl(root, control) {
+        if !root || !control
+            return false
+
+        try {
+            rootProcess := root.ProcessId
+            if (rootProcess <= 0 || control.ProcessId != rootProcess)
+                return false
+            if (control.Type != UIA.Type.Edit && control.Type != UIA.Type.ComboBox)
+                return false
+            if !control.IsEnabled
+                return false
+
+            identity := control.Name " " control.AutomationId
+            if !InStr(StrLower(identity), "attend")
+                return false
+
+            ; Direct mutation is permitted only through ValuePattern. Avoid falling
+            ; back to SendText, which could land in the report if focus moved.
+            return control.IsValuePatternAvailable
+        } catch {
+            return false
+        }
+    }
+
+    WriteAndVerify(windowTitle, control, expected) {
+        try root := UIA.ElementFromHandle(windowTitle)
+        catch
+            return false
+        if !NativeAttendingControlDriver.IsExpectedControl(root, control)
+            return false
+
+        try {
+            if !UIAValue.Write(control, expected)
+                return false
+        } catch {
+            return false
+        }
+
+        return this.HasExpectedValue(control, expected)
+    }
+
+    HasExpectedValue(control, expected) {
+        try result := UIAValue.TryRead(control)
+        catch
+            return false
+        if !result.supported
+            return false
+
+        actual := StrLower(Trim(result.value))
+        expected := StrLower(Trim(expected))
+        return expected != "" && (actual = expected || InStr(actual, expected))
+    }
+
+    CanConfirm(windowTitle, control, expected) {
+        try {
+            root := UIA.ElementFromHandle(windowTitle)
+            focused := UIA.GetFocusedElement()
+            return UIA.CompareElementsEx(control, focused)
+                && NativeAttendingControlDriver.IsExpectedControl(root, focused)
+                && this.HasExpectedValue(focused, expected)
+        } catch {
+            return false
+        }
+    }
+}
+
 /**
  * The PowerScribe report itself: locating it, reading it, and routing it to an
  * attending. Split out of PACSCommands, which had become the command registry plus
@@ -10,6 +92,7 @@
  */
 class PowerScribe {
     static windowTitle := "PowerScribe 360 | Reporting ahk_exe Nuance.PowerScribe360.exe"
+    static attendingControlDriver := NativeAttendingControlDriver()
 
     ; Positional path to the report text. Brittle - kept only as a last resort behind
     ; a property-based lookup.
@@ -45,11 +128,20 @@ class PowerScribe {
             if !AppControl.SendKeysToActiveWindow(this.windowTitle, "{Alt down}ta{Alt up}")
                 return false
             driver.Pause(100)
-            ; Attending names are data, not AutoHotkey Send syntax. SendText keeps
-            ; characters such as +, ^ and braces literal.
-            if !AppControl.SendTextToActiveWindow(this.windowTitle, attending)
+
+            ; The shortcut is only a locator action. Prove the focused element is
+            ; PowerScribe's writable attending field before placing clinical data.
+            control := this.attendingControlDriver.FindExpectedControl(this.windowTitle)
+            if !control
                 return false
+            if !driver.IsActive(this.windowTitle)
+                return false
+            if !this.attendingControlDriver.WriteAndVerify(this.windowTitle, control, attending)
+                return false
+
             driver.Pause(100)
+            if !this.attendingControlDriver.CanConfirm(this.windowTitle, control, attending)
+                return false
             return AppControl.SendKeysToActiveWindow(
                 this.windowTitle,
                 "{tab}{space}{tab}{Enter}"
@@ -72,11 +164,15 @@ class ReportModality {
         {name: "Neuro",      pattern: "i)EXAMINATION:[\s]*((CT.*((facial)|(spine)|(head)|(escape)|(neck)))|(MRI.*((brain)|(spine)|(orbits)))|(MRA))"},
         {name: "Nucs",       pattern: "i)EXAMINATION:[\s]*NM"},
         {name: "Peds",       pattern: "i)EXAMINATION:[\s]*((US.*((right lower quadrant)|(neurosonography))))"},
-        {name: "Ultrasound", pattern: "i)EXAMINATION:[\s]*US"}
+        {name: "Ultrasound", pattern: "i)EXAMINATION:[\s]*US"},
+        ; Specific Body/Chest/Neuro rules above win first. Remaining radiographs
+        ; and explicitly musculoskeletal CT/MR anatomy route to MSK.
+        {name: "MSK", pattern: "i)EXAMINATION:[\s]*((XR\b)|((CT|MR|MRI)\b.*(extremity|shoulder|humerus|elbow|forearm|wrist|hand|finger|thumb|hip|femur|knee|tibia|fibula|ankle|foot|toe|joint|bone|musculoskeletal|pelvis)))"}
     ]
 
-    ; Used when nothing else matches
-    static fallback := "MSK"
+    ; Unknown study names require manual review; they must not silently assign an
+    ; unrelated attending.
+    static fallback := "Unknown"
 
     ; Every modality that can be assigned an attending, in display order
     static names := ["Body", "Chest", "Neuro", "Nucs", "Peds", "Ultrasound", "MSK"]
@@ -102,6 +198,8 @@ sendPs(x) {
 class AttendingRouting {
     static Route(reportText, attendingLookup, attendingWriter) {
         modality := ReportModality.Classify(reportText)
+        if (modality = ReportModality.fallback)
+            throw Error("The examination did not match a supported modality; assign the attending manually")
         attending := attendingLookup.Call(modality)
 
         if (attending != "" && !attendingWriter.Call(attending))

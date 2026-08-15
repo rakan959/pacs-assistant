@@ -19,6 +19,7 @@ class WetReadTest {
         "ClipboardRestoreFailureIsReported",
         "UnreadableNoteDoesNotAttemptPaste",
         "UnreadableNativeFieldFailsClosed",
+        "StickyNoteTargetRequiresExpectedTypeProcessAndCapability",
         "NativeControlWithoutHandleIsUnsupported",
         "NativeSendRefusesLostFocus",
         "RoutingFailureReportsTheActualCause"
@@ -214,6 +215,19 @@ class WetReadTest {
         )
     }
 
+    StickyNoteTargetRequiresExpectedTypeProcessAndCapability() {
+        root := FakeStickyTargetElement(UIA.Type.Window, 42)
+        valid := FakeStickyTargetElement(UIA.Type.Document, 42, true)
+        wrongType := FakeStickyTargetElement(UIA.Type.Button, 42, true)
+        wrongProcess := FakeStickyTargetElement(UIA.Type.Edit, 99, true)
+        noCapability := FakeStickyTargetElement(UIA.Type.Edit, 42, false)
+
+        Assert.True(NativeWetReadDriver.IsExpectedNoteField(root, valid))
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongType))
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongProcess))
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, noCapability))
+    }
+
     NativeControlWithoutHandleIsUnsupported() {
         driver := NativeWetReadDriver()
 
@@ -362,6 +376,17 @@ class FakeWetReadField {
     }
 
     Click(*) {
+    }
+}
+
+class FakeStickyTargetElement {
+    __New(type, processId, readable := false) {
+        this.Type := type
+        this.ProcessId := processId
+        this.IsEnabled := true
+        this.IsValuePatternAvailable := readable
+        this.IsLegacyIAccessiblePatternAvailable := false
+        this.NativeWindowHandle := 0
     }
 }
 
