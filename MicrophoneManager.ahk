@@ -519,7 +519,39 @@ class MicrophoneManager {
             return false
         }
 
-        try liveResolved.item.SelectionItemPattern.Select()
+        ; The final ComboBox read can itself rerender the dropdown. Reacquire the
+        ; exact uniquely named item from that final root and prove it is the same
+        ; semantic element immediately before SelectionItem.Select().
+        finalItemResult := this.ResolveMicrophoneItemResult(
+            finalCombo.root,
+            finalCombo.combo,
+            liveResolved.name
+        )
+        if (finalItemResult.status == "error")
+            this.RecordOperationalError(finalItemResult.error)
+        if !(finalItemResult.status == "found") {
+            this.CollapseVerifiedCombo(session, combo)
+            return false
+        }
+        finalResolved := finalItemResult.selection
+        try itemIsExpected := finalResolved
+            && finalResolved.name == liveResolved.name
+            && this.SameElement(finalResolved.item, liveResolved.item)
+            && this.InspectMicrophoneItem(
+                finalCombo.root,
+                finalCombo.combo,
+                finalResolved.item
+            )
+        catch as err {
+            this.RecordOperationalError(err)
+            itemIsExpected := false
+        }
+        if !itemIsExpected {
+            this.CollapseVerifiedCombo(session, combo)
+            return false
+        }
+
+        try finalResolved.item.SelectionItemPattern.Select()
         catch as err {
             this.RecordOperationalError(err)
             this.CollapseVerifiedCombo(session, combo)
@@ -528,7 +560,7 @@ class MicrophoneManager {
 
         succeeded := this.WaitForSelection(
             session,
-            liveResolved.name,
+            finalResolved.name,
             1000
         )
         this.CollapseVerifiedCombo(session, combo)

@@ -507,7 +507,7 @@ class WetReadPasteEngine {
         return {
             success: false,
             unsupported: false,
-            restored: true,
+            restored: false,
             reason: "",
             error: ""
         }
@@ -543,6 +543,9 @@ class WetReadPasteEngine {
 
         if (!wrote && !writeError) {
             result.unsupported := true
+            ; The driver's unsupported result guarantees that no write occurred,
+            ; and the exact original value was proven at the precondition boundary.
+            result.restored := true
             result.reason := "unsupported"
             return result
         }
@@ -802,10 +805,14 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
 	} else if !result.success {
 		if (result.reason = "value-changed") {
 			MsgBox("The Sticky Notes value changed while PACS Assistant was verifying the wet read. No retry or rollback was attempted, so a newer edit was not overwritten. Keep the window open and verify the note manually.", "Sticky Note Changed", "Icon!")
+		} else if (result.reason = "precondition-changed") {
+			MsgBox("Sticky Notes changed before PACS Assistant wrote anything. No paste or rollback was attempted, so the newer note was not overwritten. Keep the window open and verify it manually.", "Sticky Note Changed", "Icon!")
+		} else if (result.reason = "read" || result.reason = "precondition-read") {
+			MsgBox("PACS Assistant could not verify the current Sticky Notes value, so no paste or rollback was attempted. Keep the window open and verify it manually.", "Sticky Note Not Verified", "Icon!")
 		} else if !result.restored {
 			MsgBox("The wet read failed and PACS Assistant could not restore the previous sticky note. Keep the window open and verify the note manually.", "Sticky Note Restore Failed", "Icon!")
 		} else {
-			MsgBox("The wet read was not pasted. The previous sticky note was restored; verify it before closing the window.", "Paste Failed", "Icon!")
+			MsgBox("The wet read was not pasted. The sticky note still matches its original value; verify it before closing the window.", "Paste Failed", "Icon!")
 		}
 	}
 

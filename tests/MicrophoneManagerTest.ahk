@@ -15,6 +15,7 @@ class MicrophoneManagerTest {
         "ExactMicrophoneNameWinsOverPartialMatches",
         "MicrophoneItemMustBelongToTheExactCombo",
         "UnreadableMicrophoneItemAlongsideValidDoesNotSelect",
+        "ItemInvalidatedByFinalComboCheckIsNotSelected",
         "SelectionUsesOneExactItemWithoutDirectTextWrite",
         "SelectedItemCannotReplaceTheComboValuePostcondition",
         "AmbiguousPartialSelectionDoesNotMutate",
@@ -221,6 +222,35 @@ class MicrophoneManagerTest {
         Assert.False(succeeded)
         Assert.Equal(0, fixture.items[1].selectCalls)
         Assert.True(InStr(MicrophoneManager.lastError, "unreadable microphone item") > 0)
+    }
+
+    ItemInvalidatedByFinalComboCheckIsNotSelected() {
+        fixture := MicrophoneFixture([])
+        item := InvalidatableMicrophoneItem(
+            fixture.session.processId,
+            fixture.session.hwnd,
+            "PowerMic III",
+            fixture.combo
+        )
+        fixture.items := [item]
+        fixture.combo.items := fixture.items
+        fixture.root.items := fixture.items
+        fixture.driver := FinalComboInvalidatingSessionDriver(
+            fixture.session,
+            fixture.root,
+            item
+        )
+        MicrophoneManager.sessionDriver := fixture.driver
+
+        succeeded := MicrophoneManager.SelectMicrophone(
+            fixture.session,
+            fixture.combo,
+            "PowerMic"
+        )
+
+        Assert.False(succeeded)
+        Assert.Equal(0, item.selectCalls)
+        Assert.Equal(0, item.staleSelectCalls)
     }
 
     SelectionUsesOneExactItemWithoutDirectTextWrite() {
@@ -456,6 +486,21 @@ class FakeMicrophoneSessionDriver {
     }
 }
 
+class FinalComboInvalidatingSessionDriver extends FakeMicrophoneSessionDriver {
+    __New(session, root, item) {
+        super.__New(session, root)
+        this.item := item
+        this.rootCalls := 0
+    }
+
+    Root(session) {
+        this.rootCalls++
+        if (this.rootCalls = 5)
+            this.item.valid := false
+        return super.Root(session)
+    }
+}
+
 class SequencedMicrophoneSessionDriver extends FakeMicrophoneSessionDriver {
     __New(session, root, statuses) {
         super.__New(session, root)
@@ -632,6 +677,38 @@ class FakeMicrophoneItem {
     }
 }
 
+class InvalidatableMicrophoneItem {
+    __New(processId, windowId, name, combo) {
+        this.ProcessId := processId
+        this.WinId := windowId
+        this.Name := name
+        this.AutomationId := ""
+        this.IsEnabled := true
+        this.IsSelectionItemPatternAvailable := true
+        this.selected := false
+        this.selectCalls := 0
+        this.staleSelectCalls := 0
+        this.updatesComboOnSelect := true
+        this.combo := combo
+        this.valid := true
+        this.SelectionItemPattern := InvalidatableMicrophoneSelectionPattern(this)
+    }
+
+    Type {
+        get {
+            if !this.valid
+                throw Error("microphone item became stale")
+            return UIA.Type.ListItem
+        }
+    }
+
+    GetPropertyValue(propertyId) {
+        if (propertyId = UIA.Property.SelectionItemIsSelected)
+            return this.selected
+        return ""
+    }
+}
+
 class UnreadableMicrophoneItem {
     __New(processId, windowId, combo) {
         this.ProcessId := processId
@@ -659,5 +736,13 @@ class FakeMicrophoneSelectionPattern {
         this.item.selected := true
         if this.item.updatesComboOnSelect
             this.item.combo._value := this.item.Name
+    }
+}
+
+class InvalidatableMicrophoneSelectionPattern extends FakeMicrophoneSelectionPattern {
+    Select() {
+        if !this.item.valid
+            this.item.staleSelectCalls++
+        super.Select()
     }
 }

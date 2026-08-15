@@ -82,7 +82,7 @@ class NativeAppLifecycleDriver {
     }
 
     CloseWindow(session) {
-        if !AppControl.ExactSessionIsLive(session)
+        if !AppControl.ExactSessionIsUniqueAndLive(session)
             return false
         hwnd := session.hwnd
         try WinClose(session.target, , 2)

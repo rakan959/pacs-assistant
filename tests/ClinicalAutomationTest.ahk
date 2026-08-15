@@ -25,6 +25,7 @@ class ClinicalAutomationTest {
         "NativeLookupErrorsAreNotAbsence",
         "WindowCloseUncertaintyCancelsStop",
         "WindowCloseCarriesAndRevalidatesCapturedSession",
+        "WindowCloseRecheckRejectsNewDuplicate",
         "AmbiguousSharedHostWindowsAreNotClosed",
         "RestartRejectsBareProcessTermination",
         "RestartSpecsNeverHardStopPowerScribe",
@@ -387,6 +388,23 @@ class ClinicalAutomationTest {
         Assert.True(result.found)
         Assert.False(result.stopped)
         Assert.True(driver.titleReads >= 2)
+    }
+
+    WindowCloseRecheckRejectsNewDuplicate() {
+        driver := DuplicateAppearingWindowDriver()
+        AppControl.windowDriver := driver
+        session := {
+            hwnd: driver.primaryHwnd,
+            target: "ahk_id " driver.primaryHwnd,
+            processId: 4242,
+            title: AppControl.explorerPortalTitle,
+            exe: AppControl.explorerPortalExecutable
+        }
+
+        result := NativeAppLifecycleDriver().CloseWindow(session)
+
+        Assert.False(result)
+        Assert.Equal(1, driver.listCalls)
     }
 
     AmbiguousSharedHostWindowsAreNotClosed() {
@@ -1356,6 +1374,22 @@ class SharedHostWindowLifecycleDriver {
         this.stopProcessCalls++
         return true
     }
+}
+
+class DuplicateAppearingWindowDriver {
+    __New() {
+        this.primaryHwnd := 987654321
+        this.listCalls := 0
+    }
+
+    ListWindowsByExecutable(*) {
+        this.listCalls++
+        return [this.primaryHwnd, this.primaryHwnd + 1]
+    }
+
+    GetTitle(*) => AppControl.explorerPortalTitle
+    GetProcessName(*) => AppControl.explorerPortalExecutable
+    GetProcessId(*) => 4242
 }
 
 class RetitledWindowDriver {

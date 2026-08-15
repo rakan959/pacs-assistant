@@ -11,6 +11,7 @@ class WetReadTest {
         "UIAFailureDoesNotRetryWhenCapabilityChanges",
         "FailedControlVerificationDoesNotOverwriteChangedValue",
         "UnsupportedControlDoesNotAttemptRollback",
+        "PreconditionChangeIsNotReportedAsRestored",
         "ConcurrentEditAfterWritePreventsRetryAndRollback",
         "UnreadableNoteDoesNotAttemptPaste",
         "UnreadableNativeFieldFailsClosed",
@@ -143,6 +144,21 @@ class WetReadTest {
         Assert.True(result.restored)
         Assert.Equal("existing note", driver.fieldValue)
         Assert.Equal(1, driver.controlCalls)
+    }
+
+    PreconditionChangeIsNotReportedAsRestored() {
+        driver := PreconditionChangingWetReadDriver(
+            "existing note",
+            "user's newer note"
+        )
+
+        result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
+
+        Assert.False(result.success)
+        Assert.False(result.restored)
+        Assert.Equal("precondition-changed", result.reason)
+        Assert.Equal(0, driver.uiaCalls)
+        Assert.Equal(0, driver.controlCalls)
     }
 
     ConcurrentEditAfterWritePreventsRetryAndRollback() {
@@ -654,6 +670,19 @@ class FakeWetReadDriver {
             return false
         }
         return this.fieldValue = expected
+    }
+}
+
+class PreconditionChangingWetReadDriver extends FakeWetReadDriver {
+    __New(firstValue, secondValue) {
+        super.__New(firstValue, "")
+        this.firstValue := firstValue
+        this.secondValue := secondValue
+    }
+
+    Read(*) {
+        this.readCalls++
+        return this.readCalls = 1 ? this.firstValue : this.secondValue
     }
 }
 
