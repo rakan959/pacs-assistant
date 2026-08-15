@@ -49,6 +49,8 @@ class ClinicalAutomationTest {
         "RestartAbortsForUnverifiedPowerScribeProcess",
         "GracefulCloseTimesOutAcross32BitTickWrap",
         "GracefulCloseRequiresCapturedProcessIdentity",
+        "GracefulCloseRejectsSameProcessWrongTitleBeforeRequest",
+        "GracefulCloseRejectsDuplicateExactWindowBeforeRequest",
         "RestartTargetsUseExactClinicalIdentities",
         "PacsLauncherRejectsNonShortcutMatch",
         "PacsLauncherAcceptsInstalledShortcut",
@@ -642,7 +644,7 @@ class ClinicalAutomationTest {
     GracefulCloseTimesOutAcross32BitTickWrap() {
         driver := FakeGracefulCloseDriver(0xFFFFFFFF - 50, 77)
 
-        Assert.False(closeWithSavePrompt("ahk_id 601", 300, driver, 77))
+        Assert.False(closeWithSavePrompt(this.PowerScribeSession(), 300, driver))
         Assert.Equal(1, driver.closeRequests)
         Assert.True(driver.pauseCalls >= 2)
     }
@@ -650,8 +652,32 @@ class ClinicalAutomationTest {
     GracefulCloseRequiresCapturedProcessIdentity() {
         driver := FakeGracefulCloseDriver(1000, 88)
 
-        Assert.False(closeWithSavePrompt("ahk_id 601", 300, driver, 77))
+        Assert.False(closeWithSavePrompt(this.PowerScribeSession(), 300, driver))
         Assert.Equal(0, driver.closeRequests)
+    }
+
+    GracefulCloseRejectsSameProcessWrongTitleBeforeRequest() {
+        driver := FakeGracefulCloseDriver(1000, 77, false)
+
+        Assert.False(closeWithSavePrompt(this.PowerScribeSession(), 300, driver))
+        Assert.Equal(0, driver.closeRequests)
+    }
+
+    GracefulCloseRejectsDuplicateExactWindowBeforeRequest() {
+        driver := FakeGracefulCloseDriver(1000, 77, false)
+
+        Assert.False(closeWithSavePrompt(this.PowerScribeSession(), 300, driver))
+        Assert.Equal(0, driver.closeRequests)
+    }
+
+    PowerScribeSession() {
+        return {
+            hwnd: 601,
+            target: "ahk_id 601",
+            processId: 77,
+            title: AppControl.powerScribeReportingTitle,
+            exe: AppControl.powerScribeExecutable
+        }
     }
 
     RestartTargetsUseExactClinicalIdentities() {
@@ -857,9 +883,10 @@ class FakePacsRestartDriver {
 }
 
 class FakeGracefulCloseDriver {
-    __New(now, processId) {
+    __New(now, processId, sessionValid := true) {
         this.now := now
         this.processId := processId
+        this.sessionValid := sessionValid
         this.closeRequests := 0
         this.pauseCalls := 0
     }
@@ -870,6 +897,10 @@ class FakeGracefulCloseDriver {
 
     GetProcessId(*) {
         return this.processId
+    }
+
+    IsExpectedSession(*) {
+        return this.sessionValid
     }
 
     RequestClose(*) {

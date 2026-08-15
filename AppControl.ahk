@@ -421,6 +421,10 @@ class NativeGracefulCloseDriver {
         return WinGetPID("ahk_id " hwnd)
     }
 
+    IsExpectedSession(session) {
+        return AppControl.ExactSessionIsUniqueAndLive(session)
+    }
+
     RequestClose(hwnd) {
         WinClose("ahk_id " hwnd)
     }
@@ -443,27 +447,44 @@ class NativeGracefulCloseDriver {
  * save dialog is intentionally left for the user: without a captured stable dialog
  * identity, automatically clicking a generic Yes/Save control could action an
  * unrelated same-process dialog.
- * @param winTitle Window to close
+ * @param session Captured exact reporting-window session
  * @param timeoutMs How long to wait for the user/save flow before giving up
  * @returns true if the owning process exited, false if it is still running
  */
-closeWithSavePrompt(winTitle, timeoutMs := 8000, driver := 0, expectedPid := 0) {
+closeWithSavePrompt(session, timeoutMs := 8000, driver := 0) {
     driver := driver ? driver : NativeGracefulCloseDriver()
-    try hwnd := driver.FindWindow(winTitle)
+    if (!IsObject(session)
+        || !HasProp(session, "hwnd")
+        || !HasProp(session, "target")
+        || !HasProp(session, "processId")
+        || !HasProp(session, "title")
+        || !HasProp(session, "exe"))
+        return false
+
+    try hwnd := driver.FindWindow(session.target)
     catch
         return false
     if !hwnd {
-        if !expectedPid
-            return true
-        try return !driver.ProcessExists(expectedPid)
+        try return !driver.ProcessExists(session.processId)
         return false
     }
+    if (hwnd != session.hwnd)
+        return false
     try {
         pid := driver.GetProcessId(hwnd)
     } catch {
         return false
     }
-    if (expectedPid && pid != expectedPid)
+    if (pid != session.processId)
+        return false
+
+    ; HWNDs can be recycled, titles can change, and another exact reporting window
+    ; can appear after capture. Re-enumerate the exact title/executable contract at
+    ; the last safe point before WinClose and require the original unique HWND/PID.
+    try expectedSession := driver.IsExpectedSession(session)
+    catch
+        return false
+    if !expectedSession
         return false
 
     try {
@@ -493,7 +514,7 @@ class NativePacsRestartDriver {
     }
 
     ClosePowerScribe(session) {
-        return closeWithSavePrompt(session.target, 8000, 0, session.processId)
+        return closeWithSavePrompt(session, 8000)
     }
 
     StopTargets() {
