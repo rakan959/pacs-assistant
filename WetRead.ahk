@@ -220,6 +220,12 @@ class NativeWetReadFocusDriver {
     }
 }
 
+class NativeWetReadControlDriver {
+    SetText(hwnd, value) {
+        ControlSetText(value, hwnd)
+    }
+}
+
 /**
  * Native side effects for the wet-read paste transaction. Keeping them behind this
  * small interface makes rollback behavior deterministic under test.
@@ -228,11 +234,13 @@ class NativeWetReadDriver {
     __New(
         targetTitle := "Sticky Notes",
         windowDriver := NativeWindowDriver(),
-        focusDriver := NativeWetReadFocusDriver()
+        focusDriver := NativeWetReadFocusDriver(),
+        controlDriver := NativeWetReadControlDriver()
     ) {
         this.targetTitle := targetTitle
         this.windowDriver := windowDriver
         this.focusDriver := focusDriver
+        this.controlDriver := controlDriver
     }
 
     static IsExpectedStickyRoot(pacsRoot, stickyRoot) {
@@ -248,7 +256,7 @@ class NativeWetReadDriver {
         }
     }
 
-    static ForRoot(root, windowDriver := 0, focusDriver := 0) {
+    static ForRoot(root, windowDriver := 0, focusDriver := 0, controlDriver := 0) {
         hwnd := 0
         try hwnd := root.WinId
         if (hwnd <= 0)
@@ -256,7 +264,8 @@ class NativeWetReadDriver {
         return NativeWetReadDriver(
             "ahk_id " hwnd,
             windowDriver ? windowDriver : NativeWindowDriver(),
-            focusDriver ? focusDriver : NativeWetReadFocusDriver()
+            focusDriver ? focusDriver : NativeWetReadFocusDriver(),
+            controlDriver ? controlDriver : NativeWetReadControlDriver()
         )
     }
 
@@ -411,11 +420,10 @@ class NativeWetReadDriver {
         ; than entering rollback and claiming an untouched note could not be restored.
         if !hwnd
             return false
-        ; Focus is only a best-effort aid for custom controls. The HWND-targeted write
-        ; does not depend on it, so a focus refusal must not be misclassified as a
-        ; possibly destructive ControlSetText failure.
-        try ControlFocus(hwnd)
-        ControlSetText(value, hwnd)
+        ; The HWND-targeted write does not require focus. A best-effort ControlFocus
+        ; here created a second mutation boundary where the provider could rerender
+        ; after validation and before SetText, so do exactly one validated action.
+        this.controlDriver.SetText(hwnd, value)
         return true
     }
 

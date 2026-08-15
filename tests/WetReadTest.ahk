@@ -33,6 +33,7 @@ class WetReadTest {
         "NativeFocusRefusesStaleStickyTargetBeforeAnyUIAction",
         "NativeFocusDoesNotClickAFieldInvalidatedBySetFocus",
         "NativeControlWithoutHandleIsUnsupported",
+        "NativeControlWriteHasNoFocusSideEffect",
         "NativeSendRefusesLostFocus",
         "NativeSendRefusesWrongStickyControlFocus",
         "NativeForwardVerificationRejectsCaseOnlyDifference",
@@ -420,6 +421,22 @@ class WetReadTest {
         Assert.False(driver.WriteControl({NativeWindowHandle: 0}, "new wet read"))
     }
 
+    NativeControlWriteHasNoFocusSideEffect() {
+        controlDriver := FakeWetReadControlDriver()
+        driver := NativeWetReadDriver(
+            "ahk_id 200",
+            FakeWetReadWindowDriver(true),
+            FakeWetReadFocusDriver(true),
+            controlDriver
+        )
+
+        Assert.True(driver.WriteControl({NativeWindowHandle: 555}, "new wet read"))
+        Assert.Equal(1, controlDriver.writes.Length)
+        Assert.Equal(555, controlDriver.writes[1].hwnd)
+        Assert.Equal("new wet read", controlDriver.writes[1].value)
+        Assert.Equal(0, controlDriver.focusCalls)
+    }
+
     NativeSendRefusesLostFocus() {
         windowDriver := FakeWetReadWindowDriver(false)
         driver := NativeWetReadDriver("Sticky Notes", windowDriver)
@@ -784,6 +801,17 @@ class FakeWetReadWindowDriver {
 
     SendKeys(keys) {
         this.sent.Push(keys)
+    }
+}
+
+class FakeWetReadControlDriver {
+    __New() {
+        this.writes := []
+        this.focusCalls := 0
+    }
+
+    SetText(hwnd, value) {
+        this.writes.Push({hwnd: hwnd, value: value})
     }
 }
 
