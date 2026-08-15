@@ -127,6 +127,23 @@ class Settings {
         return false
     }
 
+    static TryParseRefreshInterval(value, &interval) {
+        interval := 0
+        if value is Integer {
+            interval := value
+            return true
+        }
+        ; Integer() intentionally truncates decimal strings and accepts exponent or
+        ; signed forms. Persisted/user-entered seconds must be literal whole decimal
+        ; digits so malformed text cannot silently become a different timer period.
+        if (Type(value) != "String" || !RegExMatch(value, "^\d+$"))
+            return false
+        try interval := Integer(value)
+        catch
+            return false
+        return true
+    }
+
     ; Get a setting value, returns the default if not found
     static Get(settingName) {
         fallback := this.defaultSettings.Has(settingName)
@@ -136,7 +153,8 @@ class Settings {
             value := IniRead(this.settingsFile, "Settings", settingName)
             ; Handle numeric values
             if (settingName = "RefreshInterval") {
-                interval := Integer(value)
+                if !this.TryParseRefreshInterval(value, &interval)
+                    return fallback
                 return (interval >= this.minRefreshIntervalSeconds
                     && interval <= this.maxRefreshIntervalSeconds)
                     ? interval
@@ -458,10 +476,9 @@ class Settings {
         }
 
         ; Validate refresh interval
-        try interval := Integer(controls.refreshInterval.Value)
-        catch {
+        if !this.TryParseRefreshInterval(controls.refreshInterval.Value, &interval) {
             MsgBox("Refresh interval must be a whole number of seconds.", "Invalid Setting", "Icon!")
-            return
+            return false
         }
         if (interval < this.minRefreshIntervalSeconds) {
             MsgBox("Refresh interval must be at least " this.minRefreshIntervalSeconds " seconds.", "Invalid Setting", "Icon!")

@@ -11,6 +11,7 @@ class SettingsTest {
         "TestPresentationLeaseRejectsSettingsWindowBeforeCreation",
         "TestMalformedPersistedSettingsUseDefaults",
         "TestExcessivePersistedRefreshIntervalUsesDefault",
+        "TestSavingRejectsNonWholeRefreshInterval",
         "TestSavingRejectsExcessiveRefreshInterval",
         "TestAlertSoundsAreDistinct",
         "TestLegacyAliasesAreSelectable",
@@ -127,6 +128,14 @@ class SettingsTest {
 
         Assert.Equal(Settings.defaultSettings["RefreshInterval"], Settings.Get("RefreshInterval"))
         Assert.Equal(Settings.defaultSettings["AutoUpdate"], Settings.Get("AutoUpdate"))
+
+        for invalidInterval in ["10.5", "1e2", "+10"] {
+            IniWrite(invalidInterval, Settings.settingsFile, "Settings", "RefreshInterval")
+            Assert.Equal(
+                Settings.defaultSettings["RefreshInterval"],
+                Settings.Get("RefreshInterval")
+            )
+        }
     }
 
     TestExcessivePersistedRefreshIntervalUsesDefault() {
@@ -136,6 +145,17 @@ class SettingsTest {
             Settings.defaultSettings["RefreshInterval"],
             Settings.Get("RefreshInterval")
         )
+    }
+
+    TestSavingRejectsNonWholeRefreshInterval() {
+        controls := this.SettingsControls(false, "10.5")
+        dialog := FakeSettingsDialog()
+
+        result := Settings.SaveSettings(controls, dialog)
+
+        Assert.False(result)
+        Assert.False(dialog.destroyed)
+        Assert.Equal(60, Settings.Get("RefreshInterval"))
     }
 
     TestSavingRejectsExcessiveRefreshInterval() {
