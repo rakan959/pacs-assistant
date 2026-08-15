@@ -20,6 +20,7 @@ class WetReadTest {
         "UnreadableNoteDoesNotAttemptPaste",
         "UnreadableNativeFieldFailsClosed",
         "StickyRootMustBelongToPacsProcess",
+        "StickyDriverUsesExactValidatedWindowHandle",
         "StickyNoteTargetRequiresExpectedTypeProcessAndCapability",
         "StickyNoteTargetMustBeTheUniqueWritableField",
         "NativeDirectWriteRefusesStaleStickyTarget",
@@ -237,6 +238,12 @@ class WetReadTest {
 
         Assert.True(NativeWetReadDriver.IsExpectedStickyRoot(pacsRoot, stickyRoot))
         Assert.False(NativeWetReadDriver.IsExpectedStickyRoot(pacsRoot, unrelatedRoot))
+    }
+
+    StickyDriverUsesExactValidatedWindowHandle() {
+        driver := NativeWetReadDriver.ForRoot(FakeStickyTargetRoot(42, [], 200))
+
+        Assert.Equal("ahk_id 200", driver.targetTitle)
     }
 
     StickyNoteTargetRequiresExpectedTypeProcessAndCapability() {

@@ -58,6 +58,18 @@ class NativeWetReadDriver {
         }
     }
 
+    static ForRoot(root, windowDriver := 0, focusDriver := 0) {
+        hwnd := 0
+        try hwnd := root.WinId
+        if (hwnd <= 0)
+            throw Error("Sticky Notes window handle could not be verified")
+        return NativeWetReadDriver(
+            "ahk_id " hwnd,
+            windowDriver ? windowDriver : NativeWindowDriver(),
+            focusDriver ? focusDriver : NativeWetReadFocusDriver()
+        )
+    }
+
     /**
      * Positional UIA paths are permitted only as locators. Verify that the result
      * is an enabled, writable text control owned by the Sticky Notes process before
@@ -475,6 +487,11 @@ wetRead() {
 		MsgBox("Sticky Notes did not belong to the active Vue PACS process. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
 		return
 	}
+	try wetReadDriver := NativeWetReadDriver.ForRoot(sticky)
+	catch {
+		MsgBox("Sticky Notes window identity could not be pinned. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
+		return
+	}
 	try sticky.SetFocus()
 
 	; Get note input field
@@ -503,7 +520,7 @@ wetRead() {
 		noteField,
 		clipText,
 		pasteMode,
-		NativeWetReadDriver(stickyTitle)
+		wetReadDriver
 	)
 
 	if result.unsupported {
