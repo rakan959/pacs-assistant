@@ -39,7 +39,7 @@ class KeybindGUI {
         }
     }
 
-    CreateMainGUI() {
+    CreateMainGUI(applyBinds := true) {
         this.gui := Gui(, "PACS Assistant - " ProfileManager.currentProfile)
         this.gui.Add("Text",, "Current Profile: " ProfileManager.currentProfile)
         
@@ -85,7 +85,8 @@ class KeybindGUI {
         this.gui.OnEvent("Close", (*) => ExitApp())
         this.gui.Show()
         
-        this.ApplyBinds()
+        if applyBinds
+            this.ApplyBinds()
     }
 
     OpenProfileSelector() {
@@ -483,8 +484,12 @@ class KeybindGUI {
     }
 
     ApplyBinds(showErrors := true) {
-        HotkeyManager.DisableAllHotkeys()
         currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
+        return this.ApplyProfileBinds(currentProfile, showErrors)
+    }
+
+    ApplyProfileBinds(currentProfile, showErrors := true) {
+        HotkeyManager.DisableAllHotkeys()
         if (!currentProfile.HasProp("scopes"))
             currentProfile.scopes := Map()
         failed := []
@@ -522,6 +527,42 @@ class KeybindGUI {
             MsgBox(RTrim(errMsg, "`n"), "Keybind Errors", "Icon!")
         }
         return failed.Length = 0
+    }
+
+    RestoreRuntimeProfile(profile, &errorText) {
+        errorText := ""
+        try {
+            if this.ApplyProfileBinds(profile, false)
+                return true
+            errorText := "one or more previous keybinds could not be re-registered"
+        } catch as err {
+            errorText := err.Message
+        }
+        return false
+    }
+
+    ApplyProfileCandidate(candidate, originalProfile, operationName) {
+        applyError := ""
+        try {
+            if this.ApplyProfileBinds(candidate, false)
+                return true
+            applyError := HotkeyManager.lastError != ""
+                ? HotkeyManager.lastError
+                : "one or more candidate keybinds could not be registered"
+        } catch as err {
+            applyError := err.Message
+        }
+
+        restoreError := ""
+        restored := this.RestoreRuntimeProfile(originalProfile, &restoreError)
+        message := "The " operationName " was not applied because its runtime keybind state could not be verified."
+        if (applyError != "")
+            message .= "`n`n" applyError
+        if !restored
+            message .= "`n`nThe previous runtime bindings also could not be fully restored: " restoreError
+                . ". Restart PACS Assistant before relying on its shortcuts."
+        MsgBox(message, "Keybind Change Cancelled", "Icon!")
+        return false
     }
 
     PrettifyHotkey(hotkeyStr) {
@@ -700,7 +741,8 @@ class KeybindGUI {
         
         if (MsgBox("Are you sure you want to delete the custom function '" funcName "'?", "Confirm Delete", "YesNo Icon!") = "Yes") {
             profileName := selectorGui.profileName
-            candidate := ProfileManager.CloneProfile(ProfileManager.profiles[profileName])
+            originalProfile := ProfileManager.profiles[profileName]
+            candidate := ProfileManager.CloneProfile(originalProfile)
             
             ; Remove from a candidate and publish it only after the atomic file save.
             candidate.customFuncs.Delete(funcName)
@@ -713,17 +755,30 @@ class KeybindGUI {
                 candidate.scopes.Delete(funcName)
             }
 
+            ; Prove that every old native variant can be retired and every remaining
+            ; bind can be registered before changing the file, live profile, or UI.
+            if !this.ApplyProfileCandidate(candidate, originalProfile, "custom-function deletion")
+                return false
+
             try ProfileManager.SaveProfile(profileName, candidate)
             catch as err {
-                MsgBox("The custom function could not be deleted. The previous profile was left unchanged.`n`n" err.Message, "Delete Failed", "Icon!")
-                return
+                restoreError := ""
+                restored := this.RestoreRuntimeProfile(originalProfile, &restoreError)
+                message := "The custom function could not be deleted. The previous profile was left unchanged.`n`n" err.Message
+                if !restored
+                    message .= "`n`nThe previous runtime bindings could not be fully restored: " restoreError
+                        . ". Restart PACS Assistant before relying on its shortcuts."
+                MsgBox(message, "Delete Failed", "Icon!")
+                return false
             }
             ProfileManager.profiles[profileName] := candidate
 
             ; Just destroy both GUIs and recreate them
             selectorGui.Destroy()
             this.gui.Destroy()
-            this.CreateMainGUI()
+            ; The candidate was already applied transactionally above. Rebuilding the
+            ; window must not tear it down and create a second failure boundary.
+            this.CreateMainGUI(false)
             
             ; Show the add function dialog with the main ListView
             for ctrl in this.gui {
@@ -732,7 +787,9 @@ class KeybindGUI {
                     break
                 }
             }
+            return true
         }
+        return false
     }
 
     ShowCustomKeybindDialog(listView, profileName := "") {
@@ -854,16 +911,34 @@ class KeybindGUI {
         
         funcName := listView.GetText(listView.GetNext(0), 1)
         if (MsgBox("Remove '" funcName "' from the profile?", "Confirm Remove", "YesNo Icon!") = "Yes") {
-            currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
-            currentProfile.binds.Delete(funcName)
-            if (currentProfile.scopes.Has(funcName)) {
-                currentProfile.scopes.Delete(funcName)
+            profileName := ProfileManager.currentProfile
+            originalProfile := ProfileManager.profiles[profileName]
+            candidate := ProfileManager.CloneProfile(originalProfile)
+            candidate.binds.Delete(funcName)
+            if candidate.scopes.Has(funcName)
+                candidate.scopes.Delete(funcName)
+
+            if !this.ApplyProfileCandidate(candidate, originalProfile, "function removal")
+                return false
+
+            row := listView.GetNext(0)
+            try listView.Delete(row)
+            catch as err {
+                restoreError := ""
+                this.RestoreRuntimeProfile(originalProfile, &restoreError)
+                MsgBox(
+                    "The function row could not be removed, so the previous profile was retained.`n`n" err.Message,
+                    "Function Removal Failed",
+                    "Icon!"
+                )
+                return false
             }
-            ; No longer delete the custom function itself, only its binding
-            listView.Delete(listView.GetNext(0))
-            this.ResizeColumns(listView)
-            this.ApplyBinds()
+            ; No longer delete the custom function itself, only its binding.
+            ProfileManager.profiles[profileName] := candidate
+            try this.ResizeColumns(listView)
+            return true
         }
+        return false
     }
 
     ChangeSelectedKeybind(listView) {

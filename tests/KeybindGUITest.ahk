@@ -22,7 +22,9 @@ class KeybindGUITest {
         "TestStaleModalityDialogCannotWriteAnotherProfile",
         "TestOlderModalityDialogCannotOverwriteNewerSave",
         "TestStaleRenameDialogCannotRenameAnotherProfile",
-        "TestFailedCustomDeletePreservesLiveProfile"
+        "TestFailedCustomDeletePreservesLiveProfile",
+        "TestRemoveFunctionKeepsProfileAndRowWhenNativeOffFails",
+        "TestCustomDeleteRollsBackWhenLaterRegistrationFails"
     ]
 
     Setup() {
@@ -460,6 +462,7 @@ class KeybindGUITest {
             stillBound := ProfileManager.profiles["Test"].binds.Has("Custom: Keep")
             destroyed := dialog.destroyed
         } finally {
+            try HotkeyManager.DisableAllHotkeys()
             this.RestoreBlockedProfileSave(state)
         }
 
@@ -467,6 +470,123 @@ class KeybindGUITest {
         Assert.True(stillConfigured)
         Assert.True(stillBound)
         Assert.False(destroyed)
+    }
+
+    TestRemoveFunctionKeepsProfileAndRowWhenNativeOffFails() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalDriver := HotkeyManager.hotkeyDriver
+        originalFunctions := HotkeyManager.hotkeyFunctions
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F23"
+        profile.scopes["Sign Report"] := "Any"
+        listView := RemovableListView("Sign Report", "Ctrl + F23", "Any window")
+        driver := TransactionalHotkeyDriver()
+        driver.failDisable["^F23"] := true
+        threw := false
+
+        try {
+            HotkeyManager.activeHotkeys.Clear()
+            HotkeyManager.additionalActiveHotkeys.Clear()
+            HotkeyManager.hotkeyDriver := driver
+            HotkeyManager.hotkeyFunctions := Map("Sign Report", (*) => 0)
+            HotkeyManager.activeHotkeys["Sign Report"] := {hotkey: "^F23", scope: "Any"}
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+
+            try result := this.gui.RemoveFunction(listView)
+            catch {
+                threw := true
+                result := false
+            }
+            keptBind := profile.binds.Has("Sign Report") ? profile.binds["Sign Report"] : ""
+            keptScope := profile.scopes.Has("Sign Report") ? profile.scopes["Sign Report"] : ""
+            keptRow := listView.GetCount()
+            tracked := HotkeyManager.activeHotkeys.Has("Sign Report")
+        } finally {
+            driver.failDisable.Clear()
+            try HotkeyManager.DisableAllHotkeys()
+            HotkeyManager.activeHotkeys.Clear()
+            HotkeyManager.additionalActiveHotkeys.Clear()
+            HotkeyManager.hotkeyDriver := originalDriver
+            HotkeyManager.hotkeyFunctions := originalFunctions
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.False(threw)
+        Assert.False(result)
+        Assert.Equal("^F23", keptBind)
+        Assert.Equal("Any", keptScope)
+        Assert.Equal(1, keptRow)
+        Assert.True(tracked)
+    }
+
+    TestCustomDeleteRollsBackWhenLaterRegistrationFails() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        originalDriver := HotkeyManager.hotkeyDriver
+        originalFunctions := HotkeyManager.hotkeyFunctions
+        tempRoot := A_Temp "\pacs_custom_runtime_rollback_" A_TickCount
+        profile := ProfileManager.NewProfile()
+        profile.binds["Custom: Keep"] := "^F23"
+        profile.scopes["Custom: Keep"] := "Any"
+        profile.customFuncs["Custom: Keep"] := {keys: "HELLO", window: ""}
+        profile.binds["Draft Report"] := "^F24"
+        profile.scopes["Draft Report"] := "Any"
+        dialog := FakeProfileDialog("Test")
+        driver := TransactionalHotkeyDriver()
+        driver.failEnableCounts["^F24"] := 1
+        threw := false
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            ProfileManager.SaveProfile("Test", profile)
+            HotkeyManager.activeHotkeys.Clear()
+            HotkeyManager.additionalActiveHotkeys.Clear()
+            HotkeyManager.hotkeyDriver := driver
+            HotkeyManager.hotkeyFunctions := PACSCommands.commands
+            HotkeyManager.activeHotkeys["Custom: Keep"] := {hotkey: "^F23", scope: "Any"}
+            HotkeyManager.activeHotkeys["Draft Report"] := {hotkey: "^F24", scope: "Any"}
+
+            try result := this.gui.DeleteCustomFunction("Custom: Keep", dialog)
+            catch {
+                threw := true
+                result := false
+            }
+            liveProfile := ProfileManager.profiles["Test"]
+            storedProfile := ProfileManager.LoadProfile(tempRoot "\Test.ini")
+            liveKept := liveProfile.customFuncs.Has("Custom: Keep")
+                && liveProfile.binds.Has("Custom: Keep")
+            storedKept := storedProfile.customFuncs.Has("Custom: Keep")
+                && storedProfile.binds.Has("Custom: Keep")
+            runtimeKept := HotkeyManager.activeHotkeys.Has("Custom: Keep")
+            dialogKept := !dialog.destroyed
+        } finally {
+            driver.failEnableCounts.Clear()
+            driver.failDisable.Clear()
+            try HotkeyManager.DisableAllHotkeys()
+            HotkeyManager.activeHotkeys.Clear()
+            HotkeyManager.additionalActiveHotkeys.Clear()
+            HotkeyManager.hotkeyDriver := originalDriver
+            HotkeyManager.hotkeyFunctions := originalFunctions
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profilesPath := originalProfilesPath
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.False(threw)
+        Assert.False(result)
+        Assert.True(liveKept)
+        Assert.True(storedKept)
+        Assert.True(runtimeKept)
+        Assert.True(dialogKept)
     }
 
     PrepareBlockedProfileSave() {
@@ -522,6 +642,36 @@ class FunctionalListView {
     }
 
     ModifyCol(*) {
+    }
+}
+
+class RemovableListView extends FunctionalListView {
+    GetNext(*) {
+        return this.rows.Length ? 1 : 0
+    }
+
+    Delete(row) {
+        this.rows.RemoveAt(row)
+    }
+}
+
+class TransactionalHotkeyDriver {
+    __New() {
+        this.failDisable := Map()
+        this.failEnableCounts := Map()
+    }
+
+    Enable(hotkeyStr, callback) {
+        if (this.failEnableCounts.Has(hotkeyStr)
+            && this.failEnableCounts[hotkeyStr] > 0) {
+            this.failEnableCounts[hotkeyStr]--
+            throw Error("simulated native On failure")
+        }
+    }
+
+    Disable(hotkeyStr) {
+        if this.failDisable.Has(hotkeyStr)
+            throw Error("simulated native Off failure")
     }
 }
 
