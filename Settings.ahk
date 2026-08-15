@@ -450,8 +450,9 @@ class Settings {
             details := ""
             for message in listenerErrors
                 details .= (details = "" ? "" : "`n") "- " message
+            serviceLabel := listenerErrors.Length = 1 ? "running service" : "running services"
             warning := "The settings were saved, but " listenerErrors.Length
-                . " running service(s) could not apply them. Restart PACS Assistant to apply every change."
+                . " " serviceLabel " could not apply them. Restart PACS Assistant to apply every change."
                 . (details = "" ? "" : "`n`n" details)
             if IsSet(liveRefreshFailureNotifier)
                 liveRefreshFailureNotifier.Call(warning, listenerErrors)

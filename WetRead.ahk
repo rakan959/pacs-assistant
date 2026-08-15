@@ -76,7 +76,10 @@ class NativeWetReadDriver {
         ; than entering rollback and claiming an untouched note could not be restored.
         if !hwnd
             return false
-        ControlFocus(hwnd)
+        ; Focus is only a best-effort aid for custom controls. The HWND-targeted write
+        ; does not depend on it, so a focus refusal must not be misclassified as a
+        ; possibly destructive ControlSetText failure.
+        try ControlFocus(hwnd)
         ControlSetText(value, hwnd)
         return true
     }
