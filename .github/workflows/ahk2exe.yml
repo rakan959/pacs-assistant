@@ -1,6 +1,8 @@
 name: Build executable with Ahk2Exe
 
-on: push
+on:
+  push:
+  pull_request:
 
 permissions:
   contents: read
@@ -15,6 +17,7 @@ env:
 jobs:
   build:
     runs-on: windows-2025
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -183,9 +186,15 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
+      - name: Checkout release contract
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
       - name: Download build artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -197,6 +206,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
+          EXPECTED_COMMIT: ${{ github.sha }}
         run: |
           $ErrorActionPreference = 'Stop'
           $assets = @(
@@ -212,7 +222,34 @@ jobs:
             }
           }
 
+          $expectedPrerelease = $env:RELEASE_TAG -match '^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-'
+
+          function Invoke-GitHubJson {
+            param([Parameter(Mandatory)][string] $Endpoint)
+
+            $output = @(& gh api `
+              --method GET `
+              --header 'Accept: application/vnd.github+json' `
+              --header 'X-GitHub-Api-Version: 2022-11-28' `
+              $Endpoint 2>&1)
+            if ($LASTEXITCODE -ne 0) {
+              throw "GitHub API request failed for '$Endpoint': $($output -join ' ')"
+            }
+            return ($output -join "`n") | ConvertFrom-Json
+          }
+
           $encodedTag = [Uri]::EscapeDataString($env:RELEASE_TAG)
+          $tagReference = Invoke-GitHubJson "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$encodedTag"
+          $tagObject = $tagReference.object
+          for ($depth = 0; $tagObject.type -eq 'tag' -and $depth -lt 8; $depth++) {
+            $annotatedTag = Invoke-GitHubJson "repos/$env:GITHUB_REPOSITORY/git/tags/$($tagObject.sha)"
+            $tagObject = $annotatedTag.object
+          }
+          if ($tagObject.type -ne 'commit') {
+            throw "Release tag '$env:RELEASE_TAG' did not resolve to a commit."
+          }
+          $actualTagCommit = [string] $tagObject.sha
+
           $releaseEndpoint = "repos/$env:GITHUB_REPOSITORY/releases/tags/$encodedTag"
           $releaseOutput = @(& gh api `
             --method GET `
@@ -224,24 +261,15 @@ jobs:
 
           if ($releaseExitCode -eq 0) {
             $release = ($releaseOutput -join "`n") | ConvertFrom-Json
-            foreach ($asset in $assets) {
-              $localFile = Get-Item -LiteralPath $asset
-              $assetName = $localFile.Name
-              $remoteMatches = @($release.assets | Where-Object { $_.name -ceq $assetName })
-              if ($remoteMatches.Count -ne 1) {
-                throw "Existing release '$env:RELEASE_TAG' must contain exactly one '$assetName' asset."
-              }
+            & scripts/ValidateExistingRelease.ps1 `
+              -Release $release `
+              -ReleaseTag $env:RELEASE_TAG `
+              -ExpectedPrerelease $expectedPrerelease `
+              -ExpectedCommitSha $env:EXPECTED_COMMIT `
+              -ActualTagCommitSha $actualTagCommit `
+              -Assets $assets
 
-              $remoteAsset = $remoteMatches[0]
-              $localDigest = 'sha256:' + (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
-              $remoteDigest = [string] $remoteAsset.digest
-              if ($remoteAsset.size -ne $localFile.Length -or
-                  $remoteDigest.ToLowerInvariant() -ne $localDigest) {
-                throw "Existing release '$env:RELEASE_TAG' has a different '$assetName' asset; refusing to replace published bytes."
-              }
-            }
-
-            Write-Host "Release '$env:RELEASE_TAG' already contains identical assets; publication is a no-op."
+            Write-Host "Release '$env:RELEASE_TAG' already matches the complete release contract; publication is a no-op."
             $publish = $false
           } elseif (($releaseOutput -join "`n") -notmatch '(?i)HTTP 404|Not Found') {
             throw "Could not determine whether release '$env:RELEASE_TAG' exists: $($releaseOutput -join ' ')"
@@ -253,10 +281,12 @@ jobs:
             ) + $assets + @(
               '--repo',
               $env:GITHUB_REPOSITORY,
+              '--title',
+              $env:RELEASE_TAG,
               '--generate-notes',
               '--verify-tag'
             )
-            if ($env:RELEASE_TAG -match '^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-') {
+            if ($expectedPrerelease) {
               $arguments += '--prerelease'
             }
           }

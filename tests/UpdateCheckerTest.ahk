@@ -12,18 +12,26 @@ class UpdateCheckerTest {
         "TestAutoCheckTimerRespectsSettings",
         "TestSettingsChangeRestartsTimer",
         "TestAutomaticCheckUsesAsyncTransport",
+        "TestSynchronousAsyncFailureIsNotReportedAsStarted",
         "TestAutomaticCheckNeverOpensAnActivatingDialog",
         "TestManualCheckIsAsyncAndReportsNoUpdate",
+        "TestSettingsChangeDoesNotSilentlyCancelManualCheck",
+        "TestCachedPrereleaseIsInvalidatedWhenBetaSkippingEnabled",
+        "TestSkippedCachedVersionCannotReopen",
         "TestManualCompletionDefersDialogDuringClinicalCommand",
         "TestAsyncRequestDisconnectBreaksCallbackOwnership",
+        "TestMetadataResponsesAreByteBoundedBeforeParsing",
         "TestSettingsChangeCancelsInFlightAutomaticCheck",
         "TestClinicalCommandBlocksUpdateExit",
+        "TestReadOnlyInstallDirectoryBlocksUpdateBeforeShutdown",
+        "TestUpdaterPathFailureReleasesShutdownTransaction",
         "TestVersionComesFromAppVersion",
         "TestJsonParserHandlesEscapesAndUnicode",
         "TestJsonParserRejectsUppercaseTokensAndEscapes",
         "TestReleaseParserKeepsAssetMetadataTogether",
         "TestReleaseParserAcceptsArrayResponse",
         "TestReleaseParserRejectsOversizedAsset",
+        "TestReleaseParserRejectsOversizedNotes",
         "TestReleaseStatusDistinguishesExpectedAbsenceFromFailure",
         "TestDownloadUrlMustBelongToThisRepository",
         "TestSha256KnownVector",
@@ -206,7 +214,7 @@ class UpdateCheckerTest {
     }
 
     TestReleaseParserKeepsAssetMetadataTogether() {
-        json := '{"tag_name":"v2.2.0","body":"Line 1\nLine 2","assets":['
+        json := '{"tag_name":"v2.2.0","prerelease":false,"body":"Line 1\nLine 2","assets":['
             . '{"name":"notes.txt","size":12,"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/notes.txt"},'
             . '{"browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/pacs-assistant.exe","digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":1550000,"name":"pacs-assistant.exe"}'
             . ']}'
@@ -221,7 +229,7 @@ class UpdateCheckerTest {
     }
 
     TestReleaseParserAcceptsArrayResponse() {
-        json := '[{"tag_name":"v2.2.0-beta.1","body":"Beta","assets":['
+        json := '[{"tag_name":"v2.2.0-beta.1","prerelease":true,"body":"Beta","assets":['
             . '{"name":"pacs-assistant.exe","size":42,"digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0-beta.1/pacs-assistant.exe"}'
             . ']}]'
 
@@ -232,7 +240,7 @@ class UpdateCheckerTest {
 
     TestReleaseParserRejectsOversizedAsset() {
         size := UpdateChecker.maxUpdateSizeBytes + 1
-        json := '{"tag_name":"v9.0.0","body":"Large","assets":['
+        json := '{"tag_name":"v9.0.0","prerelease":false,"body":"Large","assets":['
             . '{"name":"pacs-assistant.exe","size":' size
             . ',"digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"'
             . ',"browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v9.0.0/pacs-assistant.exe"}'
@@ -241,6 +249,22 @@ class UpdateCheckerTest {
         Assert.Throws(
             (*) => UpdateChecker.ParseReleaseResponse(json),
             "invalid size"
+        )
+    }
+
+    TestReleaseParserRejectsOversizedNotes() {
+        notes := ""
+        loop UpdateChecker.maxReleaseNotesCharacters + 1
+            notes .= "x"
+        json := StrReplace(
+            UpdateReleaseJson("v9.0.0"),
+            '"body":"Release notes"',
+            '"body":"' notes '"'
+        )
+
+        Assert.Throws(
+            () => UpdateChecker.ParseReleaseResponse(json),
+            "display limit"
         )
     }
 
@@ -417,6 +441,19 @@ class UpdateCheckerTest {
         Assert.Equal(0, UpdateChecker.activeRequest)
     }
 
+    TestSynchronousAsyncFailureIsNotReportedAsStarted() {
+        UpdateChecker.transport := SynchronousFailingAsyncTransport()
+
+        Assert.False(UpdateChecker.BeginAutoCheck(true))
+        Assert.Equal(0, UpdateChecker.activeRequest)
+
+        Assert.False(UpdateChecker.BeginManualCheck())
+        Assert.Equal(0, UpdateChecker.activeRequest)
+        Assert.Equal(1, this.manualNotifications.Length)
+        Assert.True(InStr(this.manualNotifications[1].text, "synchronous failure") > 0)
+        Assert.Equal(0, this.updateNotifications.Length)
+    }
+
     TestAutomaticCheckNeverOpensAnActivatingDialog() {
         transport := FakeAsyncUpdateTransport()
         UpdateChecker.transport := transport
@@ -449,6 +486,49 @@ class UpdateCheckerTest {
         Assert.True(InStr(this.manualNotifications[1].text, "up to date") > 0)
     }
 
+    TestSettingsChangeDoesNotSilentlyCancelManualCheck() {
+        transport := FakeAsyncUpdateTransport()
+        UpdateChecker.transport := transport
+        Settings.Set("AutoUpdate", true)
+        Assert.True(UpdateChecker.BeginManualCheck())
+        slot := UpdateChecker.activeRequest
+
+        UpdateChecker.OnSettingsChanged()
+
+        Assert.True(UpdateChecker.activeRequest = slot)
+        Assert.False(transport.handle.cancelled)
+        transport.Resolve({status: 404, body: ""})
+        Assert.True(InStr(this.manualNotifications[1].text, "up to date") > 0)
+    }
+
+    TestCachedPrereleaseIsInvalidatedWhenBetaSkippingEnabled() {
+        Settings.Set("SkipBetaVersions", false)
+        UpdateChecker.pendingUpdateInfo := {
+            hasUpdate: true,
+            latestVersion: "v9.0.0-beta.1",
+            isPrerelease: true
+        }
+
+        Settings.Set("SkipBetaVersions", true)
+        UpdateChecker.OnSettingsChanged()
+
+        Assert.Equal(0, UpdateChecker.pendingUpdateInfo)
+    }
+
+    TestSkippedCachedVersionCannotReopen() {
+        UpdateChecker.pendingUpdateInfo := {
+            hasUpdate: true,
+            latestVersion: "v9.0.0",
+            isPrerelease: false
+        }
+
+        Settings.Set("SkippedUpdateVersion", "v9.0.0")
+        UpdateChecker.OnSettingsChanged()
+
+        Assert.Equal(0, UpdateChecker.pendingUpdateInfo)
+        Assert.Equal("v9.0.0", UpdateChecker.skippedVersion)
+    }
+
     TestManualCompletionDefersDialogDuringClinicalCommand() {
         transport := FakeAsyncUpdateTransport()
         UpdateChecker.transport := transport
@@ -467,7 +547,8 @@ class UpdateCheckerTest {
         operation := WinHttpTextRequest(
             FakeWinHttpRequest(),
             (*) => 0,
-            (*) => 0
+            (*) => 0,
+            UpdateChecker.maxMetadataSizeBytes
         )
 
         operation.Disconnect()
@@ -475,6 +556,22 @@ class UpdateCheckerTest {
         Assert.Equal(0, operation.request)
         Assert.Equal(0, operation.onComplete)
         Assert.Equal(0, operation.onError)
+    }
+
+    TestMetadataResponsesAreByteBoundedBeforeParsing() {
+        oversizedHeader := FakeBoundedTextResponse("small", "11")
+        Assert.Throws(
+            () => WinHttpTransport.ReadBoundedTextResponse(oversizedHeader, 10),
+            "exceeded its byte limit"
+        )
+        Assert.Equal(0, oversizedHeader.bodyReads)
+
+        chunked := FakeBoundedTextResponse("ééé", "")
+        Assert.Throws(
+            () => WinHttpTransport.ReadBoundedTextResponse(chunked, 5),
+            "exceeded its byte limit"
+        )
+        Assert.Equal(1, chunked.bodyReads)
     }
 
     TestSettingsChangeCancelsInFlightAutomaticCheck() {
@@ -497,12 +594,41 @@ class UpdateCheckerTest {
         coordinator := FakeShutdownCoordinator(false)
         UpdateChecker.shutdownCoordinator := coordinator
 
-        result := UpdateChecker.PerformUpdate({}, {})
+        result := UpdateChecker.PerformUpdate(ValidUpdateInfo(), {})
 
         Assert.False(result)
         Assert.Equal(0, transport.downloadCalls)
         Assert.Equal(1, coordinator.beginCalls)
         Assert.Equal(0, coordinator.completeCalls)
+    }
+
+    TestReadOnlyInstallDirectoryBlocksUpdateBeforeShutdown() {
+        transport := CountingDownloadTransport()
+        ReadOnlyInstallUpdateChecker.transport := transport
+        coordinator := FakeShutdownCoordinator(true)
+        ReadOnlyInstallUpdateChecker.shutdownCoordinator := coordinator
+        ReadOnlyInstallUpdateChecker.clinicalActivityProbe := (*) => false
+
+        result := ReadOnlyInstallUpdateChecker.PerformUpdate(ValidUpdateInfo(), {})
+
+        Assert.False(result)
+        Assert.Equal(0, coordinator.beginCalls)
+        Assert.Equal(0, coordinator.cancelCalls)
+        Assert.Equal(0, coordinator.completeCalls)
+        Assert.Equal(0, transport.downloadCalls)
+    }
+
+    TestUpdaterPathFailureReleasesShutdownTransaction() {
+        coordinator := FakeShutdownCoordinator(true)
+        ThrowingUpdaterPathChecker.shutdownCoordinator := coordinator
+        ThrowingUpdaterPathChecker.clinicalActivityProbe := (*) => false
+
+        result := ThrowingUpdaterPathChecker.PerformUpdate(ValidUpdateInfo(), {})
+
+        Assert.False(result)
+        Assert.Equal(1, coordinator.beginCalls)
+        Assert.Equal(0, coordinator.completeCalls)
+        Assert.Equal(1, coordinator.cancelCalls)
     }
     
     Teardown() {
@@ -561,7 +687,7 @@ class FakeAsyncUpdateTransport {
         throw Error("synchronous transport must not be used")
     }
 
-    GetTextAsync(url, onComplete, onError) {
+    GetTextAsync(url, onComplete, onError, maximumSize := 0) {
         this.asyncCalls++
         this.onComplete := onComplete
         this.onError := onError
@@ -583,8 +709,44 @@ class FakeAsyncUpdateHandle {
     }
 }
 
+class SynchronousFailingAsyncTransport {
+    GetTextAsync(url, onComplete, onError, maximumSize := 0) {
+        onError.Call(Error("synchronous failure"))
+        return 0
+    }
+}
+
+class ThrowingUpdaterPathChecker extends UpdateChecker {
+    static CreateUpdaterPath() {
+        throw Error("simulated updater path failure")
+    }
+}
+
+class ReadOnlyInstallUpdateChecker extends UpdateChecker {
+    static InstallDirectoryIsWritable() => false
+}
+
 class FakeWinHttpRequest {
     Abort() {
+    }
+}
+
+class FakeBoundedTextResponse {
+    __New(body, contentLength) {
+        this.body := body
+        this.contentLength := contentLength
+        this.bodyReads := 0
+    }
+
+    GetResponseHeader(name) {
+        return this.contentLength
+    }
+
+    ResponseText {
+        get {
+            this.bodyReads++
+            return this.body
+        }
     }
 }
 
@@ -602,11 +764,25 @@ FailUpdatePreferenceReplace(*) {
     throw Error("simulated update preference replace failure")
 }
 
-UpdateReleaseJson(version) {
-    return '{"tag_name":"' version '","body":"Release notes","assets":['
+UpdateReleaseJson(version, prerelease := false) {
+    return '{"tag_name":"' version '","prerelease":' (prerelease ? 'true' : 'false')
+        . ',"body":"Release notes","assets":['
         . '{"name":"pacs-assistant.exe","size":1550000,'
         . '"digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",'
         . '"browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/'
         . version '/pacs-assistant.exe"}'
         . ']}'
+}
+
+ValidUpdateInfo() {
+    return {
+        hasUpdate: true,
+        currentVersion: UpdateChecker.currentVersion,
+        latestVersion: "v9.0.0",
+        isPrerelease: false,
+        downloadUrl: "https://github.com/rakan959/pacs-assistant/releases/download/v9.0.0/pacs-assistant.exe",
+        downloadSize: 1550000,
+        downloadSha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        releaseNotes: "Release notes"
+    }
 }

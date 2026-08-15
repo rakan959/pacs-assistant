@@ -24,15 +24,9 @@ class WinHttpTransport {
         return request
     }
 
-    GetText(url) {
-        request := this.CreateRequest(url)
-        request.Send()
-        return {status: request.Status, body: request.ResponseText}
-    }
-
-    GetTextAsync(url, onComplete, onError) {
+    GetTextAsync(url, onComplete, onError, maximumSize) {
         request := this.CreateRequest(url, true)
-        operation := WinHttpTextRequest(request, onComplete, onError)
+        operation := WinHttpTextRequest(request, onComplete, onError, maximumSize)
         return operation.Start()
     }
 
@@ -41,38 +35,184 @@ class WinHttpTransport {
             || expectedSize <= 0
             || expectedSize > maximumSize)
             throw Error("Update download size is outside the allowed range")
-        request := this.CreateRequest(url)
-        request.Send()
-        if (request.Status != 200)
-            throw Error("Update download returned HTTP " request.Status)
-        try contentLength := Integer(request.GetResponseHeader("Content-Length"))
-        catch
-            throw Error("Update download did not provide a valid Content-Length")
-        if (contentLength != expectedSize || contentLength > maximumSize)
-            throw Error("Update download Content-Length does not match trusted metadata")
+        if !RegExMatch(url, "i)^https://github\.com(/.*)$", &match)
+            throw Error("Update download URL is not a supported HTTPS GitHub URL")
 
-        stream := ComObject("ADODB.Stream")
-        stream.Type := 1  ; binary
-        stream.Open()
+        session := 0
+        connection := 0
+        request := 0
+        output := 0
+        completed := false
         try {
-            stream.Write(request.ResponseBody)
-            if (stream.Size != expectedSize || stream.Size > maximumSize)
+            session := DllCall(
+                "winhttp\WinHttpOpen",
+                "WStr", "PACS-Assistant-Update-Checker",
+                "UInt", 1,
+                "Ptr", 0,
+                "Ptr", 0,
+                "UInt", 0,
+                "Ptr"
+            )
+            if !session
+                throw OSError(A_LastError, "WinHttpOpen")
+            connection := DllCall(
+                "winhttp\WinHttpConnect",
+                "Ptr", session,
+                "WStr", "github.com",
+                "UShort", 443,
+                "UInt", 0,
+                "Ptr"
+            )
+            if !connection
+                throw OSError(A_LastError, "WinHttpConnect")
+            request := DllCall(
+                "winhttp\WinHttpOpenRequest",
+                "Ptr", connection,
+                "WStr", "GET",
+                "WStr", match[1],
+                "Ptr", 0,
+                "Ptr", 0,
+                "Ptr", 0,
+                "UInt", 0x00800000,
+                "Ptr"
+            )
+            if !request
+                throw OSError(A_LastError, "WinHttpOpenRequest")
+            if !DllCall(
+                "winhttp\WinHttpSetTimeouts",
+                "Ptr", request,
+                "Int", WinHttpTransport.resolveTimeoutMs,
+                "Int", WinHttpTransport.connectTimeoutMs,
+                "Int", WinHttpTransport.sendTimeoutMs,
+                "Int", WinHttpTransport.receiveTimeoutMs
+            )
+                throw OSError(A_LastError, "WinHttpSetTimeouts")
+            if !DllCall(
+                "winhttp\WinHttpSendRequest",
+                "Ptr", request,
+                "WStr", "Accept: application/octet-stream`r`n",
+                "UInt", -1,
+                "Ptr", 0,
+                "UInt", 0,
+                "UInt", 0,
+                "UPtr", 0
+            )
+                throw OSError(A_LastError, "WinHttpSendRequest")
+            if !DllCall("winhttp\WinHttpReceiveResponse", "Ptr", request, "Ptr", 0)
+                throw OSError(A_LastError, "WinHttpReceiveResponse")
+
+            status := 0
+            statusSize := 4
+            if !DllCall(
+                "winhttp\WinHttpQueryHeaders",
+                "Ptr", request,
+                "UInt", 19 | 0x20000000,
+                "Ptr", 0,
+                "UInt*", &status,
+                "UInt*", &statusSize,
+                "Ptr", 0
+            )
+                throw OSError(A_LastError, "WinHttpQueryHeaders(status)")
+            if (status != 200)
+                throw Error("Update download returned HTTP " status)
+
+            contentLength := 0
+            contentLengthSize := 4
+            if !DllCall(
+                "winhttp\WinHttpQueryHeaders",
+                "Ptr", request,
+                "UInt", 5 | 0x20000000,
+                "Ptr", 0,
+                "UInt*", &contentLength,
+                "UInt*", &contentLengthSize,
+                "Ptr", 0
+            )
+                throw Error("Update download did not provide a valid Content-Length")
+            if (contentLength != expectedSize || contentLength > maximumSize)
+                throw Error("Update download Content-Length does not match trusted metadata")
+
+            output := FileOpen(destination, "w")
+            if !output
+                throw Error("Update destination could not be opened")
+            total := 0
+            downloadBuffer := Buffer(64 * 1024)
+            loop {
+                available := 0
+                if !DllCall(
+                    "winhttp\WinHttpQueryDataAvailable",
+                    "Ptr", request,
+                    "UInt*", &available
+                )
+                    throw OSError(A_LastError, "WinHttpQueryDataAvailable")
+                if !available
+                    break
+                readSize := Min(available, downloadBuffer.Size)
+                bytesRead := 0
+                if !DllCall(
+                    "winhttp\WinHttpReadData",
+                    "Ptr", request,
+                    "Ptr", downloadBuffer.Ptr,
+                    "UInt", readSize,
+                    "UInt*", &bytesRead
+                )
+                    throw OSError(A_LastError, "WinHttpReadData")
+                if !bytesRead
+                    throw Error("Update download ended before its declared byte count")
+                total += bytesRead
+                if (total > expectedSize || total > maximumSize)
+                    throw Error("Update download exceeded its trusted byte limit")
+                if (output.RawWrite(downloadBuffer, bytesRead) != bytesRead)
+                    throw Error("Update download could not be written completely")
+            }
+            output.Close()
+            output := 0
+            if (total != expectedSize)
                 throw Error("Update download byte count does not match trusted metadata")
-            stream.SaveToFile(destination, 2)  ; overwrite
+            completed := true
         } finally {
-            stream.Close()
+            if IsObject(output)
+                try output.Close()
+            for handle in [request, connection, session] {
+                if handle
+                    DllCall("winhttp\WinHttpCloseHandle", "Ptr", handle)
+            }
+            if !completed
+                try FileDelete(destination)
         }
+    }
+
+    static ReadBoundedTextResponse(request, maximumSize) {
+        if (!(maximumSize is Integer) || maximumSize <= 0)
+            throw ValueError("A positive metadata response limit is required")
+        try {
+            contentLengthText := request.GetResponseHeader("Content-Length")
+            if (contentLengthText != "") {
+                contentLength := Integer(contentLengthText)
+                if (contentLength < 0 || contentLength > maximumSize)
+                    throw Error("Update metadata response exceeded its byte limit")
+            }
+        } catch as err {
+            if InStr(err.Message, "exceeded its byte limit")
+                throw
+            ; Chunked responses legitimately omit Content-Length. The decoded body
+            ; still receives the same bound immediately after completion.
+        }
+        body := request.ResponseText
+        if (StrPut(body, "UTF-8") - 1 > maximumSize)
+            throw Error("Update metadata response exceeded its byte limit")
+        return body
     }
 }
 
 class WinHttpTextRequest {
-    __New(request, onComplete, onError) {
+    __New(request, onComplete, onError, maximumSize) {
         this.request := request
         this.onComplete := onComplete
         this.onError := onError
         this.done := false
         this.pollTimer := 0
         this.startedAt := 0
+        this.maximumSize := maximumSize
     }
 
     Start() {
@@ -102,7 +242,13 @@ class WinHttpTextRequest {
                     this.Fail(Error("WinHTTP asynchronous request timed out"))
                 return
             }
-            response := {status: this.request.Status, body: this.request.ResponseText}
+            response := {
+                status: this.request.Status,
+                body: WinHttpTransport.ReadBoundedTextResponse(
+                    this.request,
+                    this.maximumSize
+                )
+            }
         } catch as err {
             this.Fail(err)
             return
@@ -170,6 +316,9 @@ class UpdateChecker {
     ; Tests may leave this unset and exercise the legacy clinical probe directly.
     static shutdownCoordinator := 0
     static maxUpdateSizeBytes := 100 * 1024 * 1024
+    static maxMetadataSizeBytes := 1024 * 1024
+    static maxReleaseNotesCharacters := 20000
+    static installProbeSequence := 0
 
     static updateTimer := 0
     static activeRequest := 0
@@ -191,8 +340,8 @@ class UpdateChecker {
             this.BeginAutoCheck()
     }
     
-    static StartAutoCheck() {
-        this.StopAutoCheck()
+    static StartAutoCheck(cancelManualCheck := true) {
+        this.StopAutoCheck(cancelManualCheck)
         
         ; Set up new timer if auto-update is enabled
         if Settings.Get("AutoUpdate") {
@@ -201,18 +350,20 @@ class UpdateChecker {
         }
     }
     
-    static StopAutoCheck() {
+    static StopAutoCheck(cancelManualCheck := true) {
         if this.updateTimer {
             SetTimer(this.updateTimer, 0)
             this.updateTimer := 0
         }
-        this.CancelActiveCheck()
+        this.CancelActiveCheck(cancelManualCheck)
     }
 
-    static CancelActiveCheck() {
+    static CancelActiveCheck(cancelManualCheck := true) {
         if !this.activeRequest
             return
         slot := this.activeRequest
+        if (HasProp(slot, "manual") && slot.manual && !cancelManualCheck)
+            return
         this.activeRequest := 0
         slot.completed := true
         handle := slot.handle
@@ -236,7 +387,8 @@ class UpdateChecker {
             slot.handle := this.transport.GetTextAsync(
                 url,
                 ObjBindMethod(this, "CompleteAutoCheck", slot, stableOnly),
-                ObjBindMethod(this, "FailAutoCheck", slot)
+                ObjBindMethod(this, "FailAutoCheck", slot),
+                this.maxMetadataSizeBytes
             )
         } catch as err {
             slot.completed := true
@@ -247,8 +399,9 @@ class UpdateChecker {
             return false
         }
 
-        if (!slot.handle && !slot.completed) {
-            this.activeRequest := 0
+        if !slot.handle {
+            if (this.activeRequest = slot)
+                this.activeRequest := 0
             return false
         }
         return true
@@ -283,8 +436,18 @@ class UpdateChecker {
     }
     
     static OnSettingsChanged() {
-        ; Restart auto-check with new settings
-        this.StartAutoCheck()
+        ; Reconfigure only the automatic schedule. A manual check is a user-visible
+        ; operation and must complete (or explicitly report failure), never vanish
+        ; because an unrelated setting was saved while its request was in flight.
+        this.LoadSkippedVersion()
+        if (IsObject(this.pendingUpdateInfo)
+            && !this.UpdateInfoIsEligible(this.pendingUpdateInfo)) {
+            if this.UpdateDialogIsLive()
+                this.CloseUpdateDialog(this.updateDialog)
+            this.pendingUpdateInfo := 0
+            this.notifiedVersion := ""
+        }
+        this.StartAutoCheck(false)
     }
 
     static RecordAvailableUpdate(updateInfo) {
@@ -506,6 +669,10 @@ class UpdateChecker {
 
         if !(release is Map) || !release.Has("tag_name") || Type(release["tag_name"]) != "String"
             throw Error("Release metadata is missing tag_name")
+        if (!release.Has("prerelease")
+            || !(release["prerelease"] is Integer)
+            || (release["prerelease"] != 0 && release["prerelease"] != 1))
+            throw Error("Release metadata is missing a valid prerelease flag")
         if !release.Has("assets") || !(release["assets"] is Array)
             throw Error("Release metadata is missing assets")
 
@@ -537,9 +704,12 @@ class UpdateChecker {
         notes := "No release notes available."
         if (release.Has("body") && Type(release["body"]) = "String" && release["body"] != "")
             notes := release["body"]
+        if (StrLen(notes) > this.maxReleaseNotesCharacters)
+            throw Error("Release notes exceed the display limit")
 
         return {
             version: release["tag_name"],
+            isPrerelease: release["prerelease"] ? true : false,
             notes: notes,
             downloadUrl: downloadUrl,
             assetSize: size,
@@ -572,49 +742,43 @@ class UpdateChecker {
 
         release := this.ParseReleaseResponse(response.body)
         latestVersion := release.version
-        if (latestVersion = this.skippedVersion)
-            return { hasUpdate: false }
-        if (this.lastRemindTime
-            && (DllCall("GetTickCount64", "UInt64") - this.lastRemindTime) < 14400000)
-            return { hasUpdate: false }
-        if (this.CompareVersions(this.currentVersion, latestVersion) >= 0)
-            return { hasUpdate: false }
-
-        return {
+        updateInfo := {
             hasUpdate: true,
             currentVersion: this.currentVersion,
             latestVersion: latestVersion,
+            isPrerelease: release.isPrerelease,
             downloadUrl: release.downloadUrl,
             downloadSize: release.assetSize,
             downloadSha256: release.assetSha256,
             releaseNotes: release.notes
         }
-    }
-
-    static CheckForUpdates() {
-        ; Never offer to update an uncompiled run: PerformUpdate replaces
-        ; A_ScriptFullPath, which for a script is main.ahk, so it would drop an EXE on
-        ; top of the source. Untagged builds have no meaningful version to compare.
-        if !this.updateCheckEligibleProbe.Call()
+        if (stableOnly && updateInfo.isPrerelease)
+            return { hasUpdate: false }
+        if !this.UpdateInfoIsEligible(updateInfo)
             return { hasUpdate: false }
 
-        ; Ask GitHub for the right release rather than filtering on the tag name.
-        ; /releases/latest excludes prereleases natively; the newest release includes
-        ; them. The old code parsed "beta" out of the tag, which disagreed with the
-        ; prerelease flag GitHub actually stores, and - because every published release
-        ; was named like a beta while SkipBetaVersions defaults on - meant no user with
-        ; default settings was ever offered an update.
-        stableOnly := Settings.Get("SkipBetaVersions")
-        url := stableOnly ? this.latestStableUrl : this.newestReleaseUrl
+        return updateInfo
+    }
 
-        try {
-            response := this.transport.GetText(url)
-            return this.ProcessReleaseResponse(response, stableOnly)
-        } catch as err {
-            ; Log quietly to avoid interrupting the user
-            OutputDebug("Update check failed: " err.Message)
-        }
-        return { hasUpdate: false }
+    static UpdateInfoIsEligible(updateInfo, respectReminder := true) {
+        if (!IsObject(updateInfo)
+            || !HasProp(updateInfo, "hasUpdate")
+            || !updateInfo.hasUpdate
+            || !HasProp(updateInfo, "latestVersion")
+            || Type(updateInfo.latestVersion) != "String")
+            return false
+        isPrerelease := HasProp(updateInfo, "isPrerelease")
+            ? !!updateInfo.isPrerelease
+            : this.ParseVersion(updateInfo.latestVersion).isPrerelease
+        if (Settings.Get("SkipBetaVersions") && isPrerelease)
+            return false
+        if (updateInfo.latestVersion == this.skippedVersion)
+            return false
+        if (respectReminder
+            && this.lastRemindTime
+            && (DllCall("GetTickCount64", "UInt64") - this.lastRemindTime) < 14400000)
+            return false
+        return this.CompareVersions(this.currentVersion, updateInfo.latestVersion) < 0
     }
 
     static BeginManualCheck() {
@@ -651,7 +815,8 @@ class UpdateChecker {
             slot.handle := this.transport.GetTextAsync(
                 url,
                 ObjBindMethod(this, "CompleteManualCheck", slot, stableOnly),
-                ObjBindMethod(this, "FailManualCheck", slot)
+                ObjBindMethod(this, "FailManualCheck", slot),
+                this.maxMetadataSizeBytes
             )
         } catch as err {
             slot.completed := true
@@ -665,13 +830,16 @@ class UpdateChecker {
             )
             return false
         }
-        if (!slot.handle && !slot.completed) {
-            this.activeRequest := 0
-            this.manualResultNotifier.Call(
-                "The update check could not start.",
-                "Update Check Failed",
-                "Icon!"
-            )
+        if !slot.handle {
+            if (this.activeRequest = slot)
+                this.activeRequest := 0
+            if !slot.completed {
+                this.manualResultNotifier.Call(
+                    "The update check could not start.",
+                    "Update Check Failed",
+                    "Icon!"
+                )
+            }
             return false
         }
         try this.updateAvailableNotifier.Call(
@@ -744,14 +912,18 @@ class UpdateChecker {
      * already authorised.
      */
     static ShowUpdateDialog(updateInfo?) {
+        fromCache := !IsSet(updateInfo)
         if !IsSet(updateInfo) {
             if (IsObject(this.pendingUpdateInfo) && this.pendingUpdateInfo.hasUpdate)
                 updateInfo := this.pendingUpdateInfo
             else
                 return this.BeginManualCheck()
         }
-        if (!updateInfo.hasUpdate)
-            return false
+        if !this.UpdateInfoIsEligible(updateInfo) {
+            if (IsObject(this.pendingUpdateInfo) && this.pendingUpdateInfo = updateInfo)
+                this.pendingUpdateInfo := 0
+            return fromCache ? this.BeginManualCheck() : false
+        }
         this.pendingUpdateInfo := updateInfo
         if this.clinicalActivityProbe.Call() {
             this.manualResultNotifier.Call(
@@ -847,7 +1019,7 @@ class UpdateChecker {
     static HashFileSha256(path) {
         algorithm := 0
         hash := 0
-        file := 0
+        inputFile := 0
 
         try {
             this.CheckNtStatus(
@@ -876,11 +1048,11 @@ class UpdateChecker {
                 "BCryptCreateHash"
             )
 
-            file := FileOpen(path, "r")
-            if !file
+            inputFile := FileOpen(path, "r")
+            if !inputFile
                 throw OSError(A_LastError, , "Could not open update for hashing")
             readBuffer := Buffer(1024 * 1024)
-            while (bytesRead := file.RawRead(readBuffer)) {
+            while (bytesRead := inputFile.RawRead(readBuffer)) {
                 this.CheckNtStatus(
                     DllCall("bcrypt\BCryptHashData",
                         "Ptr", hash,
@@ -908,8 +1080,8 @@ class UpdateChecker {
                 hex .= Format("{:02x}", NumGet(digest, A_Index - 1, "UChar"))
             return hex
         } finally {
-            if IsObject(file)
-                file.Close()
+            if IsObject(inputFile)
+                inputFile.Close()
             if hash
                 DllCall("bcrypt\BCryptDestroyHash", "Ptr", hash)
             if algorithm
@@ -944,31 +1116,31 @@ class UpdateChecker {
             size := FileGetSize(path)
             if (size < 64)
                 return false
-            file := FileOpen(path, "r")
-            if !file
+            executableFile := FileOpen(path, "r")
+            if !executableFile
                 return false
 
             signature := Buffer(2)
-            if (file.RawRead(signature) != 2 || NumGet(signature, 0, "UShort") != 0x5A4D)
+            if (executableFile.RawRead(signature) != 2 || NumGet(signature, 0, "UShort") != 0x5A4D)
                 return false
 
-            file.Pos := 0x3C
+            executableFile.Pos := 0x3C
             offsetBuffer := Buffer(4)
-            if (file.RawRead(offsetBuffer) != 4)
+            if (executableFile.RawRead(offsetBuffer) != 4)
                 return false
             peOffset := NumGet(offsetBuffer, 0, "UInt")
             if (peOffset < 64 || peOffset + 4 > size)
                 return false
 
-            file.Pos := peOffset
+            executableFile.Pos := peOffset
             peSignature := Buffer(4)
-            return file.RawRead(peSignature) = 4
+            return executableFile.RawRead(peSignature) = 4
                 && NumGet(peSignature, 0, "UInt") = 0x00004550
         } catch {
             return false
         } finally {
-            if IsSet(file) && IsObject(file)
-                file.Close()
+            if IsSet(executableFile) && IsObject(executableFile)
+                executableFile.Close()
         }
     }
 
@@ -1015,6 +1187,44 @@ class UpdateChecker {
 
         identifier := StrReplace(StrReplace(StrGet(textBuffer, "UTF-16"), "{"), "}")
         return A_Temp "\pacs-assistant-updater-" identifier ".ps1"
+    }
+
+    static InstallDirectoryIsWritable() {
+        probePath := ""
+        movedPath := ""
+        probeFile := 0
+        try {
+            loop {
+                this.installProbeSequence++
+                suffix := DllCall("GetCurrentProcessId") "-"
+                    . DllCall("GetTickCount64", "UInt64") "-"
+                    . this.installProbeSequence
+                probePath := A_ScriptDir "\.pacs-assistant-update-probe-" suffix ".tmp"
+                movedPath := probePath ".moved"
+            } until !FileExist(probePath) && !FileExist(movedPath)
+
+            ; In-place update needs directory create, write, rename, and delete
+            ; permission. Probe that complete contract before acquiring shutdown or
+            ; downloading an executable that cannot be installed.
+            probeFile := FileOpen(probePath, "w")
+            if !probeFile
+                return false
+            probeFile.Write("PACS Assistant update write probe")
+            probeFile.Close()
+            probeFile := 0
+            FileMove(probePath, movedPath, false)
+            FileDelete(movedPath)
+            return true
+        } catch {
+            return false
+        } finally {
+            if IsObject(probeFile)
+                try probeFile.Close()
+            if (probePath != "" && FileExist(probePath))
+                try FileDelete(probePath)
+            if (movedPath != "" && FileExist(movedPath))
+                try FileDelete(movedPath)
+        }
     }
 
     static BuildUpdaterScript() {
@@ -1125,6 +1335,23 @@ class UpdateChecker {
     }
 
     static PerformUpdate(updateInfo, updateGui) {
+        if !this.UpdateInfoIsEligible(updateInfo, false) {
+            MsgBox(
+                "This update is no longer eligible under the current preferences. Check for updates again.",
+                "Update No Longer Eligible",
+                "Icon!"
+            )
+            return false
+        }
+        if !this.InstallDirectoryIsWritable() {
+            MsgBox(
+                "PACS Assistant can run from this location, but Windows does not allow it to replace files there. "
+                    . "Move the application to a folder you can write to, or install the update manually.",
+                "Update Requires a Writable App Folder",
+                "Icon!"
+            )
+            return false
+        }
         shutdownStarted := false
         if IsObject(this.shutdownCoordinator) {
             if !this.shutdownCoordinator.BeginShutdown("install the update")
@@ -1138,12 +1365,18 @@ class UpdateChecker {
             )
             return false
         }
-        currentExe := A_ScriptFullPath
-        backupExe := A_ScriptDir "\pacs-assistant.backup.exe"
-        newExe := A_ScriptDir "\pacs-assistant.new.exe"
-        updaterPath := this.CreateUpdaterPath()
-
+        currentExe := ""
+        backupExe := ""
+        newExe := ""
+        updaterPath := ""
         try {
+            ; Every operation after acquiring the shutdown lease belongs inside this
+            ; recovery boundary. Even allocating a GUID-backed temporary path can
+            ; fail, and must release the lease rather than blocking the app forever.
+            currentExe := A_ScriptFullPath
+            backupExe := A_ScriptDir "\pacs-assistant.backup.exe"
+            newExe := A_ScriptDir "\pacs-assistant.new.exe"
+            updaterPath := this.CreateUpdaterPath()
             this.CancelUpdateArtifactCleanup()
             if !A_IsCompiled
                 throw Error("Automatic update is only available in the compiled application")
@@ -1185,8 +1418,10 @@ class UpdateChecker {
             MsgBox("Update failed: " err.Message, "Error", "Icon!")
             ; The running executable is not touched until the updater starts after
             ; ExitApp, so a preflight failure only needs to remove staged artifacts.
-            try FileDelete(newExe)
-            try FileDelete(updaterPath)
+            if (newExe != "")
+                try FileDelete(newExe)
+            if (updaterPath != "")
+                try FileDelete(updaterPath)
             this.ScheduleUpdateArtifactCleanup()
             return false
         }

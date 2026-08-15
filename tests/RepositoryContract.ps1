@@ -47,6 +47,12 @@ $readme = Get-Content -Raw (Join-Path $repoRoot 'README.md')
 $issueTemplate = Get-Content -Raw (Join-Path $repoRoot '.github/ISSUE_TEMPLATE/bug_report.md')
 $featureTemplate = Get-Content -Raw (Join-Path $repoRoot '.github/ISSUE_TEMPLATE/feature_request.md')
 $versionGeneratorPath = Join-Path $repoRoot 'scripts/GenerateVersion.ps1'
+$releaseValidatorPath = Join-Path $repoRoot 'scripts/ValidateExistingRelease.ps1'
+$releaseValidator = if (Test-Path -LiteralPath $releaseValidatorPath -PathType Leaf) {
+    Get-Content -Raw -LiteralPath $releaseValidatorPath
+} else {
+    ''
+}
 $main = Get-Content -Raw (Join-Path $repoRoot 'main.ahk')
 $profileManager = Get-Content -Raw (Join-Path $repoRoot 'ProfileManager.ahk')
 $powerScribe = Get-Content -Raw (Join-Path $repoRoot 'PowerScribe.ahk')
@@ -69,6 +75,10 @@ Assert-Matches $workflow '(?m)^\s*AUTOHOTKEY_SHA256:\s*43522aa3122a57784ac5db30a
 Assert-Matches $workflow '(?m)^\s*AUTOHOTKEY_SOURCE_SHA256:\s*765ada5ae0a543f470bcd30371a7b95438e59351b0a20508c516df76a4f73ca4\s*$' 'CI must verify the exact AutoHotkey v2.0.26 source archive digest.'
 Assert-Matches $workflow '(?m)^\s*AHK2EXE_VERSION:\s*1\.1\.37\.02a2\s*$' 'CI must pin Ahk2Exe v1.1.37.02a2.'
 Assert-Matches $workflow '(?m)^\s*AHK2EXE_SHA256:\s*c29b8c3a5124850d79fc9e66e2ca79677c377d7f31631ad3022ba159c5d9e3be\s*$' 'CI must verify the official Ahk2Exe v1.1.37.02a2 ZIP digest.'
+Assert-Matches $workflow '(?m)^\s*pull_request:\s*$' 'Pull requests must run the non-release build and validation job.'
+if ([regex]::Matches($workflow, '(?m)^\s*timeout-minutes:\s*\d+\s*$').Count -ne 2) {
+    $failures.Add('Both CI jobs must define bounded timeout-minutes values.')
+}
 Assert-Matches $workflow '(?m)^\s*contents:\s*read\s*$' 'The default workflow token permission must be contents: read.'
 Assert-Matches $workflow '(?ms)^\s{2}release:\s.*?^\s{4}permissions:\s*\r?\n\s{6}contents:\s*write\s*$' 'Only the release job may request contents: write.'
 if ([regex]::Matches($workflow, '(?m)^\s*contents:\s*write\s*$').Count -ne 1) {
@@ -86,9 +96,11 @@ Assert-Matches $workflow "Join-Path \`$PWD 'release/AutoHotkey-v2\.0\.26-source\
 Assert-NotMatches $workflow '\$env:RELEASE_TAG\.Contains\(''-''\)' 'Release publication must not classify build-metadata hyphens as prerelease markers.'
 Assert-Matches $workflow "\`$env:RELEASE_TAG\s+-match\s+'\^v\(\?:0\|\[1-9\]\\d\*\).*-'" 'Release publication must detect a prerelease marker only between the core version and build metadata.'
 Assert-NotMatches $workflow '(?m)^\s*''--clobber''\s*$' 'Published release assets must never be replaced in place.'
-Assert-Matches $workflow 'Get-FileHash\s+-LiteralPath\s+\$asset\s+-Algorithm\s+SHA256' 'Existing releases must compare each local asset SHA-256.'
-Assert-Matches $workflow '\$remoteAsset\.digest' 'Existing releases must compare the API-provided asset digest.'
-Assert-Matches $workflow '\$remoteAsset\.size\s+-ne\s+\$localFile\.Length' 'Existing releases must compare asset sizes before becoming a no-op.'
+Assert-Matches $releaseValidator 'Get-FileHash\s+-LiteralPath\s+\$localFile\.FullName\s+-Algorithm\s+SHA256' 'Existing releases must compare each local asset SHA-256.'
+Assert-Matches $releaseValidator '\$remoteAsset\.digest' 'Existing releases must compare the API-provided asset digest.'
+Assert-Matches $releaseValidator '\$remoteAsset\.size\s+-ne\s+\$localFile\.Length' 'Existing releases must compare asset sizes before becoming a no-op.'
+Assert-Matches $workflow '& scripts/ValidateExistingRelease\.ps1' 'Existing releases must pass the complete release object through the tested validator.'
+Assert-Matches $workflow 'ActualTagCommitSha' 'Existing release validation must bind the release tag to the workflow commit.'
 
 $actionReferencePattern = '(?m)^\s*uses:\s*(?<reference>\S+?)(?:\s+#.*)?\s*$'
 $usesLineCount = [regex]::Matches($workflow, '(?m)^\s*uses:\s*').Count
@@ -148,6 +160,7 @@ Assert-Matches $readme 'AutoHotkey-v2\.0\.26-source\.zip' 'README must identify 
 Assert-Matches $readme 'GPL-3\.0' 'README must identify the project license.'
 Assert-Matches $readme 'Start-Process\s+-FilePath\s+\$ahk.*-Wait\s+-PassThru' 'Local AutoHotkey test commands must wait for the GUI-subsystem process.'
 Assert-Matches $readme '\$process\.ExitCode\s+-ne\s+0' 'Local AutoHotkey test commands must propagate the process exit code.'
+Assert-Matches $readme '& scripts/GenerateVersion\.ps1' 'The documented local release build must generate version metadata before compiling.'
 
 Assert-NotMatches $issueTemplate '(?i)\bsmartphone\b|\bbrowser\b|\biOS\b' 'The bug template must not ask irrelevant browser or smartphone questions.'
 Assert-Matches $issueTemplate 'PowerScribe' 'The bug template must request PowerScribe context.'
@@ -164,6 +177,89 @@ foreach ($generatedArtifact in @(
     & git -C $repoRoot check-ignore --quiet -- $generatedArtifact
     if ($LASTEXITCODE -ne 0) {
         $failures.Add("Generated root artifact is not ignored: $generatedArtifact")
+    }
+}
+
+foreach ($privateSettingsArtifact in @(
+    'settings.ini.tmp-123-456',
+    'tests/settings.ini.tmp-123-456'
+)) {
+    & git -C $repoRoot check-ignore --quiet -- $privateSettingsArtifact
+    if ($LASTEXITCODE -ne 0) {
+        $failures.Add("Private settings transaction artifact is not ignored: $privateSettingsArtifact")
+    }
+}
+
+if (-not (Test-Path -LiteralPath $releaseValidatorPath -PathType Leaf)) {
+    $failures.Add('scripts/ValidateExistingRelease.ps1 must validate immutable release no-op state.')
+} else {
+    function Invoke-ReleaseValidationFixture {
+        param([string] $Case = 'valid')
+
+        $caseRoot = Join-Path ([IO.Path]::GetTempPath()) ("pacs-release-contract-" + [guid]::NewGuid().ToString('N'))
+        [void](New-Item -ItemType Directory -Path $caseRoot)
+        try {
+            $assetPaths = @()
+            $remoteAssets = @()
+            foreach ($name in @('pacs-assistant.exe', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'AutoHotkey-v2.0.26.txt', 'AutoHotkey-v2.0.26-source.zip')) {
+                $path = Join-Path $caseRoot $name
+                [IO.File]::WriteAllText($path, "fixture:$name")
+                $assetPaths += $path
+                $remoteAssets += [pscustomobject]@{
+                    name = $name
+                    size = (Get-Item -LiteralPath $path).Length
+                    digest = 'sha256:' + (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+                }
+            }
+
+            $release = [pscustomobject]@{
+                draft = $false
+                prerelease = $false
+                tag_name = 'v2.3.4'
+                name = 'v2.3.4'
+                assets = $remoteAssets
+            }
+            $expectedCommit = '0123456789abcdef0123456789abcdef01234567'
+            $actualCommit = $expectedCommit
+            switch ($Case) {
+                'draft' { $release.draft = $true }
+                'wrong-prerelease' { $release.prerelease = $true }
+                'wrong-tag' { $release.tag_name = 'v9.9.9' }
+                'wrong-name' { $release.name = 'Unexpected title' }
+                'wrong-commit' { $actualCommit = 'ffffffffffffffffffffffffffffffffffffffff' }
+                'extra-asset' {
+                    $release.assets += [pscustomobject]@{
+                        name = 'unexpected.bin'
+                        size = 1
+                        digest = 'sha256:' + ('0' * 64)
+                    }
+                }
+            }
+
+            try {
+                & $releaseValidatorPath `
+                    -Release $release `
+                    -ReleaseTag 'v2.3.4' `
+                    -ExpectedPrerelease $false `
+                    -ExpectedCommitSha $expectedCommit `
+                    -ActualTagCommitSha $actualCommit `
+                    -Assets $assetPaths
+                return $true
+            } catch {
+                return $false
+            }
+        } finally {
+            Remove-Item -LiteralPath $caseRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    if (-not (Invoke-ReleaseValidationFixture)) {
+        $failures.Add('The matching release fixture must be accepted as an immutable no-op.')
+    }
+    foreach ($invalidCase in @('draft', 'wrong-prerelease', 'wrong-tag', 'wrong-name', 'wrong-commit', 'extra-asset')) {
+        if (Invoke-ReleaseValidationFixture -Case $invalidCase) {
+            $failures.Add("Invalid existing-release fixture was accepted: $invalidCase")
+        }
     }
 }
 
@@ -240,7 +336,8 @@ if (-not (Test-Path -LiteralPath $noticesPath -PathType Leaf)) {
     $notices = Get-Content -Raw $noticesPath
     Assert-Matches $notices 'UIA-v2' 'Third-party notices must name UIA-v2.'
     Assert-Matches $notices 'AutoHotkey v2\.0\.26' 'Third-party notices must name the embedded AutoHotkey runtime.'
-    Assert-Matches $notices 'licenses/AutoHotkey-v2\.0\.26\.txt' 'Third-party notices must link the AutoHotkey runtime license.'
+    Assert-Matches $notices '\[AutoHotkey-v2\.0\.26\.txt\]\(AutoHotkey-v2\.0\.26\.txt\)' 'Third-party notices must link the flat published AutoHotkey license asset.'
+    Assert-NotMatches $notices '\]\(licenses/AutoHotkey-v2\.0\.26\.txt\)' 'Third-party notices must not link a directory that release assets do not preserve.'
     Assert-Matches $notices 'AutoHotkey-v2\.0\.26-source\.zip' 'Third-party notices must identify the runtime corresponding-source release asset.'
     Assert-Matches $notices 'MIT License' 'Third-party notices must include the UIA-v2 MIT license.'
     Assert-Matches $notices 'Copyright \(c\) 2023 Descolada' 'Third-party notices must preserve the UIA-v2 copyright notice.'

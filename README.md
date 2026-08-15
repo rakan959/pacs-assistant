@@ -25,7 +25,9 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - Per-modality attending assignment, used when routing a wet read
 
 ### Monitoring & notifications
-- Auto-refresh PACS (interval configurable)
+- New-study worklist scanning on a configurable interval. Automated refresh clicking
+  currently fails closed: no live-captured, stable Explorer Portal refresh-button
+  AutomationId has been approved in the repository.
 - New study detection with tray notifications and optional sounds
 - Alert sounds are backed by distinct files, so the options are audibly different
 - Warns if the refresh button can't be found instead of failing silently
@@ -44,6 +46,9 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
   and profiles under `%APPDATA%\PACS Assistant`, so read-only install locations are
   supported. On first launch, legacy files beside the EXE are copied there without
   deleting or overwriting either copy. Source runs remain portable beside the script.
+- In-place **Update Now** requires the folder containing the EXE to be writable. The
+  app proves create/write/rename/delete access before shutdown or download and directs
+  users in read-only locations to move the EXE or install the release manually.
 
 2) **Initial setup**
 - Launch, create a profile, assign keybinds, and set notification/update preferences.
@@ -55,9 +60,10 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - Use the wet read hotkey; if prompted, pick a verified direct-write method (UIA Value or ControlSetText). PACS Assistant does not synthesize Ctrl+V because the system clipboard can change between validation and paste delivery.
   The workflow first pins a newly created Sticky Notes window for the active PACS
   study; a pre-existing/reused or ownerless window is rejected.
-- The source clipboard is read once and never rewritten. Note mutation and rollback
-  use verified direct writes, so no clinical note is staged into clipboard history or
-  cloud synchronization.
+- The source clipboard is read once and never rewritten. The app performs one verified
+  direct write after confirming the original note is unchanged. If another actor changes
+  the note, it does not retry or roll back over that newer value. No clinical note is
+  staged into clipboard history or cloud synchronization.
 - Enable "Convert clipboard line endings" in Settings to normalize LF→CRLF before pasting.
 
 4) **Keybind scope**
@@ -75,7 +81,8 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - Assignments are per profile, so a call shift assigned by modality can be its own profile.
 
 ## Settings
-- Auto refresh PACS + interval
+- PACS monitoring interval and refresh-attempt toggle (semantic refresh clicking remains
+  disabled until the exact live control identity is approved)
 - Convert clipboard line endings (LF→CRLF) for wet reads
 - PowerScribe: set microphone on login, and the name to match. An exact name is
   preferred; a partial name such as `PowerMic` is accepted only when exactly one
@@ -157,6 +164,16 @@ To reproduce the uncompressed release build with the verified archives:
 ```powershell
 $compiler = 'C:\path\to\Ahk2Exe.exe'
 $ahkBase = 'C:\path\to\AutoHotkey64.exe'
+$releaseTag = 'v2.1.0'
+$releaseCommit = (git rev-list -n 1 $releaseTag).Trim()
+if ((git rev-parse HEAD).Trim() -ne $releaseCommit) {
+  throw "Check out $releaseTag before reproducing its release build."
+}
+& scripts/GenerateVersion.ps1 `
+  -RefType tag `
+  -RefName $releaseTag `
+  -CommitSha $releaseCommit `
+  -OutputPath (Join-Path $PWD 'Version.ahk')
 $process = Start-Process -FilePath $compiler -ArgumentList @(
   '/in', 'main.ahk',
   '/out', 'pacs-assistant.exe',
