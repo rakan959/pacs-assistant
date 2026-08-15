@@ -11,6 +11,7 @@ class ClinicalAutomationTest {
         "BuiltInClinicalCommandUsesConfirmedTarget",
         "TargetedCustomCommandUsesConfirmedTarget",
         "AttendingTargetRequiresSemanticControlIdentity",
+        "NativeAttendingWriteRefusesLostControlFocus",
         "AttendingNameUsesLiteralText",
         "AttendingStopsBeforeTextWhenControlMissing",
         "AttendingStopsBeforeConfirmationWhenValueUnverified",
@@ -116,6 +117,14 @@ class ClinicalAutomationTest {
         Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, wrongType))
         Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, wrongMeaning))
         Assert.False(NativeAttendingControlDriver.IsExpectedControl(root, wrongProcess))
+    }
+
+    NativeAttendingWriteRefusesLostControlFocus() {
+        control := {writeCalls: 0}
+        driver := NativeAttendingControlDriver((*) => false)
+
+        Assert.False(driver.WriteAndVerify(PowerScribe.windowTitle, control, "Smith"))
+        Assert.Equal(0, control.writeCalls)
     }
 
     AttendingNameUsesLiteralText() {

@@ -6,6 +6,10 @@
 ; Attending-picker target validation. This keeps focus-sensitive clinical input
 ; behind a semantic UIA identity check and an observable write postcondition.
 class NativeAttendingControlDriver {
+    __New(focusVerifier := 0) {
+        this.focusVerifier := focusVerifier
+    }
+
     FindExpectedControl(windowTitle) {
         try {
             root := UIA.ElementFromHandle(windowTitle)
@@ -44,6 +48,9 @@ class NativeAttendingControlDriver {
     }
 
     WriteAndVerify(windowTitle, control, expected) {
+        if !this.ControlHasExpectedFocus(windowTitle, control)
+            return false
+
         try root := UIA.ElementFromHandle(windowTitle)
         catch
             return false
@@ -72,16 +79,23 @@ class NativeAttendingControlDriver {
         return expected != "" && (actual = expected || InStr(actual, expected))
     }
 
-    CanConfirm(windowTitle, control, expected) {
+    ControlHasExpectedFocus(windowTitle, control) {
+        if this.focusVerifier
+            return this.focusVerifier.Call(windowTitle, control) ? true : false
+
         try {
             root := UIA.ElementFromHandle(windowTitle)
             focused := UIA.GetFocusedElement()
             return UIA.CompareElementsEx(control, focused)
                 && NativeAttendingControlDriver.IsExpectedControl(root, focused)
-                && this.HasExpectedValue(focused, expected)
         } catch {
             return false
         }
+    }
+
+    CanConfirm(windowTitle, control, expected) {
+        return this.ControlHasExpectedFocus(windowTitle, control)
+            && this.HasExpectedValue(control, expected)
     }
 }
 
