@@ -147,6 +147,10 @@ class HotkeyManagerTest {
             HotkeyManager.HotkeyIdentity("a & b"),
             HotkeyManager.HotkeyIdentity("$a & b")
         )
+        Assert.Equal(
+            HotkeyManager.HotkeyIdentity("Esc & F24"),
+            HotkeyManager.HotkeyIdentity("Escape & f24")
+        )
     }
 
     ; AutoHotkey identifies a hotkey variant by the exact function object handed to

@@ -80,9 +80,18 @@ class HotkeyContract {
             }
             break
         }
-        hotkeyStr := (wildcardPrefix ? "*" : "") Trim(SubStr(hotkeyStr, prefixPosition))
-        if InStr(hotkeyStr, "&")
-            return StrLower(RegExReplace(hotkeyStr, "\s+", " "))
+        hotkeyBody := Trim(SubStr(hotkeyStr, prefixPosition))
+        if InStr(hotkeyBody, "&") {
+            parts := StrSplit(hotkeyBody, "&")
+            if (parts.Length != 2)
+                return (wildcardPrefix ? "*" : "")
+                    . StrLower(RegExReplace(hotkeyBody, "\s+", " "))
+            return (wildcardPrefix ? "*" : "")
+                . this.NormalizeCombinationKey(parts[1])
+                . " & "
+                . this.NormalizeCombinationKey(parts[2])
+        }
+        hotkeyStr := (wildcardPrefix ? "*" : "") hotkeyBody
 
         modifiers := Map()
         wildcard := false
@@ -139,5 +148,15 @@ class HotkeyContract {
         if keyUp
             identity .= " up"
         return identity
+    }
+
+    static NormalizeCombinationKey(key) {
+        key := Trim(key)
+        try {
+            normalizedKey := GetKeyName(key)
+            if (normalizedKey != "")
+                key := normalizedKey
+        }
+        return StrLower(key)
     }
 }

@@ -17,6 +17,8 @@
 #Include ../HotkeyManager.ahk
 
 global Fired := 0
+global AliasFirstFired := 0
+global AliasSecondFired := 0
 global TestsRun := 0
 global TestsFailed := 0
 
@@ -38,6 +40,32 @@ AssertEqual(actual, expected, label) {
 Bump(*) {
     global Fired
     Fired++
+}
+
+BumpAliasFirst(*) {
+    global AliasFirstFired
+    AliasFirstFired++
+}
+
+BumpAliasSecond(*) {
+    global AliasSecondFired
+    AliasSecondFired++
+}
+
+PressAliasCombo() {
+    global AliasFirstFired, AliasSecondFired
+    firstBefore := AliasFirstFired
+    secondBefore := AliasSecondFired
+    SendEvent("{Esc down}{F24}{Esc up}")
+    Loop 40 {
+        Sleep(25)
+        if (AliasFirstFired != firstBefore || AliasSecondFired != secondBefore)
+            break
+    }
+    return {
+        first: AliasFirstFired - firstBefore,
+        second: AliasSecondFired - secondBefore
+    }
 }
 
 ; Sends Ctrl+F13 and reports how many times the bound action ran
@@ -108,6 +136,23 @@ Main() {
         "an invalid reassignment is rejected"
     )
     AssertEqual(Press(), 1, "a rejected reassignment leaves the old bind active")
+
+    ; Key aliases inside a custom combination are the same native variant. The
+    ; second logical owner must be rejected instead of silently replacing the first.
+    HotkeyManager.DisableAllHotkeys()
+    AssertEqual(
+        HotkeyManager.Register("AliasOne", "Esc & F24", BumpAliasFirst),
+        true,
+        "a custom combination with an aliased key registers"
+    )
+    AssertEqual(
+        HotkeyManager.Register("AliasTwo", "Escape & F24", BumpAliasSecond),
+        false,
+        "an equivalent custom-combination alias is rejected"
+    )
+    aliasResult := PressAliasCombo()
+    AssertEqual(aliasResult.first, 1, "the original aliased custom combination remains live")
+    AssertEqual(aliasResult.second, 0, "the rejected alias callback never replaces it")
 
     HotkeyManager.DisableAllHotkeys()
 
