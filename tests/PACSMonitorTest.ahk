@@ -13,6 +13,7 @@ class PACSMonitorTest {
         "TestMonitoringUsesTestMode",
         "TestRefreshFallbackRequiresSemanticButtonIdentity",
         "TestStudyListFallbackRequiresExpectedTypeAndProcess",
+        "TestStudyListDoesNotUseGenericFirstMatch",
         "TestOnSettingsChangedRespectsAutoRefresh",
         "TestRefreshFailureNotificationUsesTextThenTitle",
         "TestScanFailuresNotifyOnceAndReset",
@@ -133,6 +134,14 @@ class PACSMonitorTest {
         ))
     }
 
+    TestStudyListDoesNotUseGenericFirstMatch() {
+        genericList := FakePACSTargetElement(UIA.Type.DataGrid, 42)
+        root := FakePACSStudyRoot(42, 100, 0, genericList)
+
+        Assert.Equal(0, PACSMonitor.FindStudyList(root))
+        Assert.Equal(0, root.genericFindCalls)
+    }
+
     ; UIA enumeration can fail after some rows have already been read. Accessions from
     ; that partial pass must remain eligible for the next successful scan.
     TestInterruptedScanDoesNotConsumeUnalertedAccessions() {
@@ -241,6 +250,25 @@ class FakePACSTargetElement {
         this.IsInvokePatternAvailable := invoke
         this.IsLegacyIAccessiblePatternAvailable := false
         this.NativeWindowHandle := 0
+    }
+}
+
+class FakePACSStudyRoot {
+    __New(processId, windowId, pathResult, genericResult) {
+        this.ProcessId := processId
+        this.WinId := windowId
+        this.pathResult := pathResult
+        this.genericResult := genericResult
+        this.genericFindCalls := 0
+    }
+
+    ElementFromPath(*) {
+        return this.pathResult
+    }
+
+    FindElement(*) {
+        this.genericFindCalls++
+        return this.genericResult
     }
 }
 

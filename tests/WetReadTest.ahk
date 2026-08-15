@@ -20,6 +20,7 @@ class WetReadTest {
         "UnreadableNoteDoesNotAttemptPaste",
         "UnreadableNativeFieldFailsClosed",
         "StickyNoteTargetRequiresExpectedTypeProcessAndCapability",
+        "StickyNoteTargetMustBeTheUniqueWritableField",
         "NativeDirectWriteRefusesStaleStickyTarget",
         "NativeControlWithoutHandleIsUnsupported",
         "NativeSendRefusesLostFocus",
@@ -229,18 +230,31 @@ class WetReadTest {
     }
 
     StickyNoteTargetRequiresExpectedTypeProcessAndCapability() {
-        root := FakeStickyTargetElement(UIA.Type.Window, 42)
         valid := FakeStickyTargetElement(UIA.Type.Document, 42, true)
+        root := FakeStickyTargetRoot(42, [valid])
         wrongType := FakeStickyTargetElement(UIA.Type.Button, 42, true)
         wrongProcess := FakeStickyTargetElement(UIA.Type.Edit, 99, true)
         wrongWindow := FakeStickyTargetElement(UIA.Type.Edit, 42, true, 200)
         noCapability := FakeStickyTargetElement(UIA.Type.Edit, 42, false)
 
-        Assert.True(NativeWetReadDriver.IsExpectedNoteField(root, valid))
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongType))
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongProcess))
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongWindow))
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, noCapability))
+        same := (left, right) => left == right
+        Assert.True(NativeWetReadDriver.IsExpectedNoteField(root, valid, same))
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongType, same))
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongProcess, same))
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongWindow, same))
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, noCapability, same))
+    }
+
+    StickyNoteTargetMustBeTheUniqueWritableField() {
+        selected := FakeStickyTargetElement(UIA.Type.Document, 42, true)
+        other := FakeStickyTargetElement(UIA.Type.Edit, 42, true)
+        root := FakeStickyTargetRoot(42, [selected, other])
+
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(
+            root,
+            selected,
+            (left, right) => left == right
+        ))
     }
 
     NativeDirectWriteRefusesStaleStickyTarget() {
@@ -452,6 +466,24 @@ class FakeStickyTargetElement {
         this.IsValuePatternAvailable := readable
         this.IsLegacyIAccessiblePatternAvailable := false
         this.NativeWindowHandle := 0
+    }
+}
+
+class FakeStickyTargetRoot {
+    __New(processId, children, windowId := 100) {
+        this.ProcessId := processId
+        this.WinId := windowId
+        this.children := children
+    }
+
+    FindElements(condition) {
+        matches := []
+        for child in this.children {
+            if ((condition.Type = "Document" && child.Type = UIA.Type.Document)
+                || (condition.Type = "Edit" && child.Type = UIA.Type.Edit))
+                matches.Push(child)
+        }
+        return matches
     }
 }
 

@@ -50,7 +50,35 @@ class NativeWetReadDriver {
      * is an enabled, writable text control owned by the Sticky Notes process before
      * any paste transaction can mutate it.
      */
-    static IsExpectedNoteField(root, field) {
+    static IsExpectedNoteField(root, field, comparator := 0) {
+        if !this.HasExpectedNoteCapabilities(root, field)
+            return false
+
+        ; Sticky Notes exposes no stable Name/AutomationId in the recorded UIA
+        ; contract. Fail closed unless the located field is the sole writable text
+        ; control in that exact window; a shifted positional path can otherwise
+        ; select a different Edit control that passes the structural checks below.
+        eligibleCount := 0
+        selectedMatch := false
+        try {
+            for typeName in ["Document", "Edit"] {
+                for candidate in root.FindElements({Type: typeName}) {
+                    if !this.HasExpectedNoteCapabilities(root, candidate)
+                        continue
+                    eligibleCount++
+                    if (eligibleCount > 1)
+                        return false
+                    if this.ElementsMatch(field, candidate, comparator)
+                        selectedMatch := true
+                }
+            }
+        } catch {
+            return false
+        }
+        return eligibleCount = 1 && selectedMatch
+    }
+
+    static HasExpectedNoteCapabilities(root, field) {
         if !root || !field
             return false
 
@@ -71,6 +99,13 @@ class NativeWetReadDriver {
         } catch {
             return false
         }
+    }
+
+    static ElementsMatch(left, right, comparator := 0) {
+        if comparator
+            return comparator.Call(left, right) ? true : false
+        try return UIA.CompareElementsEx(left, right)
+        return false
     }
 
     Read(field) {

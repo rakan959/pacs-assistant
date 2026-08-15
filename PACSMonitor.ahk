@@ -148,23 +148,16 @@ class PACSMonitor {
     }
 
     /**
-     * Locates the study list. The positional path is tried first here because it is
-     * the one that has been working; the property lookups only cover it breaking.
-     * @returns the list element, or 0 if it cannot be found
+     * Locates the study list through its recorded portal path. The portal exposes no
+     * stable Name/AutomationId for this control, so a generic first Table/DataGrid/
+     * List fallback could silently bind to an unrelated same-window collection.
+     * @returns the list element, or 0 if the exact path cannot be verified
      */
     static FindStudyList(root) {
         try {
             candidate := root.ElementFromPath(this.studyListPath)
             if this.IsExpectedStudyList(root, candidate)
                 return candidate
-        }
-
-        for condition in [{Type: "Table"}, {Type: "DataGrid"}, {Type: "List"}] {
-            try {
-                candidate := root.FindElement(condition)
-                if this.IsExpectedStudyList(root, candidate)
-                    return candidate
-            }
         }
 
         return 0
