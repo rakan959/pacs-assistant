@@ -346,7 +346,11 @@ class KeybindGUI {
             selectorGui.Destroy()
             this.ShowProfileSelector()  ; Refresh the selector to show updated default
         } else {
-            MsgBox("Failed to set default profile.", "Error", "Icon!")
+            MsgBox(
+                this.ProfileStorageFailureText("Failed to set default profile."),
+                "Profile Update Failed",
+                "Icon!"
+            )
         }
     }
 
@@ -388,7 +392,11 @@ class KeybindGUI {
                 this.ShowProfileSelector()  ; Refresh the selector
                 return true
             } else {
-                MsgBox("Cannot delete the last remaining profile.", "Error", "Icon!")
+                MsgBox(
+                    this.ProfileStorageFailureText("Cannot delete the last remaining profile."),
+                    "Profile Delete Failed",
+                    "Icon!"
+                )
             }
         }
         return false
@@ -985,8 +993,23 @@ class KeybindGUI {
                 this.CreateMainGUI()  ; Refresh the main GUI
             }
         } else {
-            MsgBox("Failed to rename profile. The name may already be in use.", "Error", "Icon!")
+            MsgBox(
+                this.ProfileStorageFailureText(
+                    "Failed to rename profile. The name may already be in use."
+                ),
+                "Profile Rename Failed",
+                "Icon!"
+            )
         }
+    }
+
+    ProfileStorageFailureText(fallback) {
+        message := ProfileManager.lastError != ""
+            ? ProfileManager.lastError
+            : fallback
+        if ProfileManager.recoveryRequired
+            message .= "`n`nProfile storage could not be fully restored. Restart PACS Assistant before changing profiles again."
+        return message
     }
 
     RenameDialogIsCurrent(oldName, renameGui, parentGui := 0) {

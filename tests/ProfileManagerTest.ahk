@@ -11,6 +11,7 @@ class ProfileManagerTest {
         "TestProfileCaseOnlyRename",
         "TestProfileDeletionRules",
         "TestFailedDefaultDeletionPreservesProfile",
+        "TestDefaultDeleteRollbackFailureIsSurfacedAndReconciled",
         "TestCustomFunctionPersistence",
         "TestUnboundCustomFunctionPersistence",
         "TestScopePersistence",
@@ -30,6 +31,7 @@ class ProfileManagerTest {
         "TestLoadRejectsCaseCollidingPersistedKeys",
         "TestLoadRejectsReservedModalityMetadataKey",
         "TestFailedRenamePreservesOriginalProfile",
+        "TestRenameRollbackFailurePublishesTheRetainedCopy",
         "TestMalformedProfileDoesNotBlockValidProfiles",
         "TestDefaultProfileMustExist",
         "TestDuplicateBindingsAreRejected",
@@ -49,6 +51,9 @@ class ProfileManagerTest {
         this.originalConfig := ProfileManager.configPath
         this.originalProfiles := ProfileManager.profilesPath
         this.originalRevisions := ProfileManager.profileRevisions
+        this.originalStorageDriver := ProfileManager.storageDriver
+        this.originalLastError := ProfileManager.lastError
+        this.originalRecoveryRequired := ProfileManager.recoveryRequired
 
         ProfileManager.configPath := this.tempRoot "\config.ini"
         ProfileManager.profilesPath := this.profilesDir
@@ -57,6 +62,9 @@ class ProfileManagerTest {
         ProfileManager.currentProfile := ""
         ProfileManager.defaultProfile := ""
         ProfileManager.loadErrors := []
+        ProfileManager.storageDriver := NativeProfileStorageDriver()
+        ProfileManager.lastError := ""
+        ProfileManager.recoveryRequired := false
     }
 
     TestProfileSaveAndLoad() {
@@ -159,6 +167,32 @@ class ProfileManagerTest {
         Assert.True(ProfileManager.profiles.Has("One"))
         Assert.True(FileExist(ProfileManager.ProfilePath("One")) != "")
         Assert.Equal("One", ProfileManager.defaultProfile)
+    }
+
+    TestDefaultDeleteRollbackFailureIsSurfacedAndReconciled() {
+        for name in ["One", "Two"] {
+            ProfileManager.profiles[name] := ProfileManager.NewProfile()
+            ProfileManager.SaveProfile(name, ProfileManager.profiles[name])
+        }
+        Assert.True(ProfileManager.SetDefaultProfile("One"))
+        driver := FaultInjectingProfileStorageDriver()
+        driver.failDeleteFiles[ProfileManager.ProfilePath("One")] := true
+        driver.failWriteValues["One"] := true
+        ProfileManager.storageDriver := driver
+
+        Assert.False(ProfileManager.DeleteProfile("One"))
+        Assert.True(ProfileManager.profiles.Has("One"))
+        Assert.True(FileExist(ProfileManager.ProfilePath("One")) != "")
+        Assert.Equal("", IniRead(
+            ProfileManager.configPath,
+            "Settings",
+            "DefaultProfile",
+            ""
+        ))
+        Assert.Equal("", ProfileManager.defaultProfile)
+        Assert.True(ProfileManager.recoveryRequired)
+        Assert.True(InStr(ProfileManager.lastError, "simulated INI write failure") > 0)
+        Assert.False(ProfileManager.SetDefaultProfile("Two"))
     }
 
     TestCustomFunctionPersistence() {
@@ -437,6 +471,37 @@ class ProfileManagerTest {
         Assert.Equal("^d", reloaded.binds["Toggle Dictation"])
     }
 
+    TestRenameRollbackFailurePublishesTheRetainedCopy() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        profile.scopes["Sign Report"] := "Any"
+        ProfileManager.profiles["Old"] := profile
+        ProfileManager.SaveProfile("Old", profile)
+        Assert.True(ProfileManager.SetDefaultProfile("Old"))
+        driver := FaultInjectingProfileStorageDriver()
+        driver.failDeleteFiles[ProfileManager.ProfilePath("Old")] := true
+        driver.failWriteValues["Old"] := true
+        ProfileManager.storageDriver := driver
+
+        Assert.False(ProfileManager.RenameProfile("Old", "New"))
+        Assert.True(ProfileManager.profiles.Has("Old"))
+        Assert.True(ProfileManager.profiles.Has("New"))
+        Assert.True(FileExist(ProfileManager.ProfilePath("Old")) != "")
+        Assert.True(FileExist(ProfileManager.ProfilePath("New")) != "")
+        Assert.Equal("New", IniRead(
+            ProfileManager.configPath,
+            "Settings",
+            "DefaultProfile",
+            ""
+        ))
+        Assert.Equal("New", ProfileManager.defaultProfile)
+        Assert.True(ProfileManager.recoveryRequired)
+        Assert.True(InStr(ProfileManager.lastError, "simulated INI write failure") > 0)
+        ProfileManager.profiles["New"].binds["Sign Report"] := "^n"
+        Assert.Equal("^s", ProfileManager.profiles["Old"].binds["Sign Report"])
+        Assert.False(ProfileManager.RenameProfile("Old", "Another"))
+    }
+
     TestMalformedProfileDoesNotBlockValidProfiles() {
         good := ProfileManager.NewProfile()
         good.binds["Sign Report"] := "^s"
@@ -545,8 +610,30 @@ class ProfileManagerTest {
         ProfileManager.profilesPath := this.originalProfiles
         ProfileManager.profiles := Map()
         ProfileManager.profileRevisions := this.originalRevisions
+        ProfileManager.storageDriver := this.originalStorageDriver
+        ProfileManager.lastError := this.originalLastError
+        ProfileManager.recoveryRequired := this.originalRecoveryRequired
         ProfileManager.currentProfile := ""
         ProfileManager.defaultProfile := ""
         ProfileManager.loadErrors := []
+    }
+}
+
+class FaultInjectingProfileStorageDriver extends NativeProfileStorageDriver {
+    __New() {
+        this.failDeleteFiles := Map()
+        this.failWriteValues := Map()
+    }
+
+    DeleteFile(path) {
+        if this.failDeleteFiles.Has(path)
+            throw Error("simulated file deletion failure")
+        return super.DeleteFile(path)
+    }
+
+    WriteIni(value, path, section, key) {
+        if this.failWriteValues.Has(value)
+            throw Error("simulated INI write failure")
+        return super.WriteIni(value, path, section, key)
     }
 }

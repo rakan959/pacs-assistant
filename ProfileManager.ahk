@@ -2,6 +2,16 @@
 #Include Settings.ahk
 #Include HotkeyContract.ahk
 
+class NativeProfileStorageDriver {
+    DeleteFile(path) => FileDelete(path)
+    MoveFile(sourcePath, destinationPath, overwrite := false) =>
+        FileMove(sourcePath, destinationPath, overwrite)
+    DeleteIni(path, section, key) => IniDelete(path, section, key)
+    WriteIni(value, path, section, key) => IniWrite(value, path, section, key)
+    ReadIni(path, section, key, defaultValue := "") =>
+        IniRead(path, section, key, defaultValue)
+}
+
 class ProfileManager {
     static profiles := Map()
     static currentProfile := ""
@@ -11,6 +21,9 @@ class ProfileManager {
     static loadErrors := []
     static saveSequence := 0
     static profileRevisions := Map()
+    static storageDriver := NativeProfileStorageDriver()
+    static lastError := ""
+    static recoveryRequired := false
 
     static __New() {
         ; Load default profile setting from config file
@@ -147,6 +160,7 @@ class ProfileManager {
     }
 
     static SaveProfile(name, profile) {
+        this.RequireStorageHealthy()
         if !this.IsValidProfileName(name)
             throw ValueError("Invalid profile name")
         this.ValidateProfile(profile)
@@ -339,6 +353,8 @@ class ProfileManager {
     }
 
     static CreateProfile(name) {
+        if !this.BeginStorageMutation()
+            return false
         if !this.IsValidProfileName(name) || this.profiles.Has(name)
             return false
 
@@ -349,8 +365,8 @@ class ProfileManager {
             this.SaveProfile(name, profile)
             this.profiles[name] := profile
             return true
-        } catch {
-            return false
+        } catch as err {
+            return this.FailStorageMutation("Profile creation failed: " err.Message)
         }
     }
 
@@ -413,19 +429,27 @@ class ProfileManager {
     }
 
     static SetDefaultProfile(name) {
+        if !this.BeginStorageMutation()
+            return false
         if !this.IsValidProfileName(name) || !this.profiles.Has(name)
             return false
 
         try {
-            IniWrite(name, this.configPath, "Settings", "DefaultProfile")
+            this.storageDriver.WriteIni(name, this.configPath, "Settings", "DefaultProfile")
             this.defaultProfile := name
             return true
-        } catch {
-            return false
+        } catch as err {
+            refreshError := this.RefreshDefaultProfileFromStorage()
+            message := "Default-profile update failed: " err.Message
+            if (refreshError != "")
+                message .= "; the stored default could not be re-read: " refreshError
+            return this.FailStorageMutation(message, true)
         }
     }
 
     static DeleteProfile(name) {
+        if !this.BeginStorageMutation()
+            return false
         if (this.profiles.Count <= 1 || !this.profiles.Has(name) || !this.IsValidProfileName(name)) {
             return false  ; Don't allow deleting the last profile
         }
@@ -435,20 +459,30 @@ class ProfileManager {
             ; Clear the reference before deleting the only copy. If config cannot be
             ; updated, the operation must remain a no-op rather than report failure
             ; after the profile has already disappeared.
-            try IniDelete(this.configPath, "Settings", "DefaultProfile")
-            catch {
-                return false
+            try this.storageDriver.DeleteIni(this.configPath, "Settings", "DefaultProfile")
+            catch as err {
+                return this.FailStorageMutation(
+                    "Default-profile reference could not be cleared: " err.Message
+                )
             }
         }
 
-        try FileDelete(this.ProfilePath(name))
-        catch {
+        try this.storageDriver.DeleteFile(this.ProfilePath(name))
+        catch as deleteError {
             if wasDefault {
-                try IniWrite(name, this.configPath, "Settings", "DefaultProfile")
-                catch as rollbackError
-                    OutputDebug("Default profile rollback failed: " rollbackError.Message)
+                try this.storageDriver.WriteIni(name, this.configPath, "Settings", "DefaultProfile")
+                catch as rollbackError {
+                    refreshError := this.RefreshDefaultProfileFromStorage()
+                    message := "Profile deletion failed: " deleteError.Message
+                        . "; restoring the default-profile reference also failed: " rollbackError.Message
+                    if (refreshError != "")
+                        message .= "; the stored default could not be re-read: " refreshError
+                    return this.FailStorageMutation(message, true)
+                }
             }
-            return false
+            return this.FailStorageMutation(
+                "Profile file could not be deleted: " deleteError.Message
+            )
         }
 
         this.profiles.Delete(name)
@@ -460,6 +494,8 @@ class ProfileManager {
     }
 
     static RenameProfile(oldName, newName) {
+        if !this.BeginStorageMutation()
+            return false
         if (oldName == newName)
             return true
 
@@ -483,31 +519,77 @@ class ProfileManager {
             ; Persist the replacement before touching the original. SaveProfile's
             ; temporary-file move guarantees a failed save cannot truncate it.
             this.SaveProfile(newName, profile)
-        } catch {
-            return false
+        } catch as err {
+            return this.FailStorageMutation("Replacement profile could not be saved: " err.Message)
         }
 
         defaultChanged := this.defaultProfile = oldName
         if defaultChanged {
             try {
-                IniWrite(newName, this.configPath, "Settings", "DefaultProfile")
-            } catch {
-                try FileDelete(newPath)
-                if this.profileRevisions.Has(newName)
-                    this.profileRevisions.Delete(newName)
-                return false
+                this.storageDriver.WriteIni(newName, this.configPath, "Settings", "DefaultProfile")
+            } catch as configError {
+                rollbackError := ""
+                try this.storageDriver.WriteIni(oldName, this.configPath, "Settings", "DefaultProfile")
+                catch as err
+                    rollbackError := err.Message
+                if (rollbackError != "") {
+                    this.PublishRetainedProfileCopy(newName, profile)
+                    refreshError := this.RefreshDefaultProfileFromStorage()
+                    message := "Default-profile rename update failed: " configError.Message
+                        . "; restoring the original default also failed: " rollbackError
+                    if (refreshError != "")
+                        message .= "; the stored default could not be re-read: " refreshError
+                    return this.FailStorageMutation(message, true)
+                }
+
+                cleanupError := this.DeleteReplacementProfileFile(newName, newPath)
+                if (cleanupError != "") {
+                    this.PublishRetainedProfileCopy(newName, profile)
+                    return this.FailStorageMutation(
+                        "Default-profile rename update failed: " configError.Message
+                            . "; removing the retained replacement also failed: " cleanupError,
+                        true
+                    )
+                }
+                return this.FailStorageMutation(
+                    "Default-profile rename update failed: " configError.Message
+                )
             }
         }
 
         try {
-            FileDelete(oldPath)
-        } catch {
-            if defaultChanged
-                try IniWrite(oldName, this.configPath, "Settings", "DefaultProfile")
-            try FileDelete(newPath)
-            if this.profileRevisions.Has(newName)
-                this.profileRevisions.Delete(newName)
-            return false
+            this.storageDriver.DeleteFile(oldPath)
+        } catch as deleteError {
+            rollbackError := ""
+            if defaultChanged {
+                try this.storageDriver.WriteIni(oldName, this.configPath, "Settings", "DefaultProfile")
+                catch as err
+                    rollbackError := err.Message
+            }
+            if (rollbackError != "") {
+                ; The new file and its stored default remain a valid configuration.
+                ; Publish that retained copy instead of leaving disk and memory split.
+                this.PublishRetainedProfileCopy(newName, profile)
+                refreshError := this.RefreshDefaultProfileFromStorage()
+                message := "Original profile file could not be removed: " deleteError.Message
+                    . "; restoring the original default also failed: " rollbackError
+                if (refreshError != "")
+                    message .= "; the stored default could not be re-read: " refreshError
+                return this.FailStorageMutation(message, true)
+            }
+
+            cleanupError := this.DeleteReplacementProfileFile(newName, newPath)
+            if (cleanupError != "") {
+                this.PublishRetainedProfileCopy(newName, profile)
+                return this.FailStorageMutation(
+                    "Original profile file could not be removed: " deleteError.Message
+                        . "; removing the retained replacement also failed: " cleanupError,
+                    true
+                )
+            }
+            return this.FailStorageMutation(
+                "Original profile file could not be removed: " deleteError.Message
+            )
         }
 
         this.profiles[newName] := profile
@@ -527,19 +609,38 @@ class ProfileManager {
         ; does not reliably update the directory entry's casing. Move through a
         ; unique same-directory name and roll back before reporting failure.
         try this.MoveProfileThroughTemporaryPath(oldPath, newPath)
-        catch {
-            return false
+        catch as err {
+            if this.recoveryRequired
+                return false
+            return this.FailStorageMutation("Profile file could not be renamed: " err.Message)
         }
 
         defaultChanged := this.defaultProfile = oldName
         if defaultChanged {
             try {
-                IniWrite(newName, this.configPath, "Settings", "DefaultProfile")
-            } catch {
+                this.storageDriver.WriteIni(newName, this.configPath, "Settings", "DefaultProfile")
+            } catch as configError {
+                rollbackError := ""
                 try this.MoveProfileThroughTemporaryPath(newPath, oldPath)
-                catch as rollbackError
-                    OutputDebug("Case-only profile rename rollback failed: " rollbackError.Message)
-                return false
+                catch as err
+                    rollbackError := err.Message
+                if (rollbackError = "") {
+                    try this.storageDriver.WriteIni(oldName, this.configPath, "Settings", "DefaultProfile")
+                    catch as err
+                        rollbackError := err.Message
+                }
+                if (rollbackError != "") {
+                    this.ReconcileCaseOnlyProfileName(oldName, newName, oldPath, newPath)
+                    refreshError := this.RefreshDefaultProfileFromStorage()
+                    message := "Default-profile case rename failed: " configError.Message
+                        . "; restoring the original profile state also failed: " rollbackError
+                    if (refreshError != "")
+                        message .= "; the stored default could not be re-read: " refreshError
+                    return this.FailStorageMutation(message, true)
+                }
+                return this.FailStorageMutation(
+                    "Default-profile case rename failed: " configError.Message
+                )
             }
         }
 
@@ -563,14 +664,85 @@ class ProfileManager {
             temporaryPath := sourcePath ".case-rename-" DllCall("GetCurrentProcessId") "-" this.saveSequence
         } until !FileExist(temporaryPath)
 
-        FileMove(sourcePath, temporaryPath, false)
+        this.storageDriver.MoveFile(sourcePath, temporaryPath, false)
         try {
-            FileMove(temporaryPath, destinationPath, false)
+            this.storageDriver.MoveFile(temporaryPath, destinationPath, false)
         } catch as err {
-            try FileMove(temporaryPath, sourcePath, false)
-            catch as rollbackError
-                OutputDebug("Case-only profile file rollback failed: " rollbackError.Message)
+            try this.storageDriver.MoveFile(temporaryPath, sourcePath, false)
+            catch as rollbackError {
+                message := "Profile file move failed: " err.Message
+                    . "; the temporary file could not be restored from '" temporaryPath "': " rollbackError.Message
+                this.FailStorageMutation(message, true)
+            }
             throw err
+        }
+    }
+
+    static BeginStorageMutation() {
+        if this.recoveryRequired
+            return false
+        this.lastError := ""
+        return true
+    }
+
+    static RequireStorageHealthy() {
+        if this.recoveryRequired
+            throw Error(
+                "Profile storage is in a recovery-required state. Restart PACS Assistant before changing profiles."
+            )
+    }
+
+    static FailStorageMutation(message, recoveryRequired := false) {
+        this.lastError := message
+        if recoveryRequired
+            this.recoveryRequired := true
+        OutputDebug("Profile storage operation failed: " message)
+        return false
+    }
+
+    static RefreshDefaultProfileFromStorage() {
+        try configured := this.storageDriver.ReadIni(
+            this.configPath,
+            "Settings",
+            "DefaultProfile",
+            ""
+        )
+        catch as err
+            return err.Message
+        this.defaultProfile := configured != "" && this.profiles.Has(configured)
+            ? configured
+            : ""
+        return ""
+    }
+
+    static PublishRetainedProfileCopy(name, profile) {
+        ; A failed rename may intentionally retain both files. Keep their in-memory
+        ; records independent too, matching the two independent persisted snapshots.
+        this.profiles[name] := this.CloneProfile(profile)
+        if !this.profileRevisions.Has(name)
+            this.profileRevisions[name] := 1
+    }
+
+    static DeleteReplacementProfileFile(name, path) {
+        try this.storageDriver.DeleteFile(path)
+        catch as err
+            return err.Message
+        if this.profileRevisions.Has(name)
+            this.profileRevisions.Delete(name)
+        return ""
+    }
+
+    static ReconcileCaseOnlyProfileName(oldName, newName, oldPath, newPath) {
+        if (!FileExist(oldPath) && FileExist(newPath) && this.profiles.Has(oldName)) {
+            profile := this.profiles[oldName]
+            revision := this.GetProfileRevision(oldName)
+            this.profiles.Delete(oldName)
+            this.profiles[newName] := profile
+            if this.profileRevisions.Has(oldName)
+                this.profileRevisions.Delete(oldName)
+            this.profileRevisions[newName] := revision + 1
+            if (this.currentProfile == oldName)
+                this.currentProfile := newName
         }
     }
 }
