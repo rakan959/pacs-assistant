@@ -1,5 +1,5 @@
 #Requires AutoHotkey v2.0
-#Include HotkeyScope.ahk
+#Include HotkeyContract.ahk
 #Include PACSCommands.ahk
 
 class HotkeyManager {
@@ -13,7 +13,7 @@ class HotkeyManager {
 
     ; Scope names in the order they are presented, and the only values persisted to a
     ; profile. "Any" means the bind fires regardless of which window has focus.
-    static scopes := HotkeyScope.names
+    static scopes := HotkeyContract.scopes
 
     ; One persistent predicate per scope. AutoHotkey identifies a hotkey *variant* by
     ; the exact function object handed to HotIf, so these are created once and reused:
@@ -30,19 +30,20 @@ class HotkeyManager {
         this.hotkeyFunctions := PACSCommands.commands
     }
 
-    ; Coerce a stored/unknown scope onto a supported one
+    ; Validate a scope at the runtime boundary. Registration must never broaden an
+    ; unknown value to the global context.
     static NormalizeScope(scope) {
-        return HotkeyScope.Normalize(scope)
+        return HotkeyContract.RequireScope(scope)
     }
 
     ; Build a scope name from the two "only when ... is active" checkboxes
     static ScopeFromFlags(requirePACS, requirePowerScribe) {
-        return HotkeyScope.FromFlags(requirePACS, requirePowerScribe)
+        return HotkeyContract.ScopeFromFlags(requirePACS, requirePowerScribe)
     }
 
     ; Inverse of ScopeFromFlags
     static FlagsFromScope(scope) {
-        return HotkeyScope.Flags(scope)
+        return HotkeyContract.FlagsFromScope(scope)
     }
 
     ; Enter the HotIf context a scope registers under. Always paired with ExitScope().
@@ -76,6 +77,11 @@ class HotkeyManager {
             return true
         }
 
+        if !HotkeyContract.IsValidScope(scope) {
+            this.lastError := "the hotkey scope is unknown"
+            return false
+        }
+
         if !callback {
             this.lastError := "no command is defined for it"
             return false
@@ -91,7 +97,6 @@ class HotkeyManager {
         ; off the function's currently working registration.
         this.Unregister(funcName)
 
-        scope := this.NormalizeScope(scope)
         try {
             this.EnterScope(scope)
             ; "On" is load-bearing. Hotkey() updates an existing variant's action but
@@ -110,7 +115,7 @@ class HotkeyManager {
     }
 
     static HotkeyIdentity(hotkeyStr) {
-        return StrLower(Trim(hotkeyStr))
+        return HotkeyContract.BindingIdentity(hotkeyStr)
     }
 
     static FindBindingOwner(hotkeyStr, exceptFuncName := "") {

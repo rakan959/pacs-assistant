@@ -11,6 +11,9 @@ class KeybindGUI {
     static isListening := false
     static listeningControl := ""
     static activeInputHook := 0
+    ; The V option would pass the selected key through to the foreground application.
+    ; Capture is intentionally suppressing: the key is configuration data only.
+    static inputHookOptions := ""
 
     __New() {
         ; The launch-time update check belongs to UpdateChecker.Start(), called from
@@ -67,7 +70,7 @@ class KeybindGUI {
         ; Add profile management buttons
         y += 30
         this.gui.Add("Button", "xm y" y, "Save").OnEvent("Click", (*) => this.SaveCurrentProfile())
-        this.gui.Add("Button", "x+10", "Switch Profile").OnEvent("Click", (*) => (this.gui.Destroy(), this.ShowProfileSelector()))
+        this.gui.Add("Button", "x+10", "Switch Profile").OnEvent("Click", (*) => this.OpenProfileSelector())
 
         ; Add Check for Updates button
         this.gui.Add("Button", "x+10", "Check for Updates").OnEvent("Click", (*) => UpdateChecker.ShowUpdateDialog())
@@ -83,6 +86,23 @@ class KeybindGUI {
         this.gui.Show()
         
         this.ApplyBinds()
+    }
+
+    OpenProfileSelector() {
+        ; A selector has no active profile. Suspend the old profile before exposing any
+        ; operation which can rename or delete it.
+        HotkeyManager.DisableAllHotkeys()
+        if this.HasMainWindow()
+            this.gui.Destroy()
+        this.gui := ""
+        return this.ShowProfileSelector()
+    }
+
+    HasMainWindow() {
+        if !IsObject(this.gui)
+            return false
+        try return this.gui.Hwnd && WinExist("ahk_id " this.gui.Hwnd)
+        return false
     }
 
     ShowProfileSelector() {
@@ -114,12 +134,30 @@ class KeybindGUI {
         selectorGui.Add("Button", "w170", "Set as Default").OnEvent("Click", (*) => this.SetDefaultProfile(StrReplace(lb.Text, " *"), selectorGui))
         selectorGui.Add("Button", "w170", "Rename").OnEvent("Click", (*) => this.PromptRenameProfile(StrReplace(lb.Text, " *"), selectorGui))
         selectorGui.Add("Button", "w170", "Delete Profile").OnEvent("Click", (*) => this.DeleteProfile(StrReplace(lb.Text, " *"), selectorGui))
-        selectorGui.Add("Button", "w170", "New Profile").OnEvent("Click", (*) => (selectorGui.Destroy(), this.PromptNewProfile()))
+        selectorGui.Add("Button", "w170", "New Profile").OnEvent("Click", (*) => this.OpenNewProfilePrompt(selectorGui))
         
         ; Add legend text
         selectorGui.Add("Text", "y+10", "* = Default Profile")
         
+        selectorGui.OnEvent("Close", (*) => this.CloseProfileSelector(selectorGui))
         selectorGui.Show()
+        return selectorGui
+    }
+
+    CloseProfileSelector(selectorGui) {
+        try selectorGui.Destroy()
+        if this.HasMainWindow()
+            return
+        if (ProfileManager.currentProfile != "" && ProfileManager.profiles.Has(ProfileManager.currentProfile)) {
+            this.CreateMainGUI()
+            return
+        }
+        ExitApp()
+    }
+
+    OpenNewProfilePrompt(selectorGui) {
+        selectorGui.Destroy()
+        return this.PromptNewProfile()
     }
 
     PromptNewProfile() {
@@ -127,7 +165,18 @@ class KeybindGUI {
         inputGui.Add("Text",, "Enter profile name:")
         nameEdit := inputGui.Add("Edit", "w200")
         inputGui.Add("Button",, "OK").OnEvent("Click", (*) => this.CreateProfile(nameEdit.Value, inputGui))
+        inputGui.OnEvent("Close", (*) => this.CloseNewProfilePrompt(inputGui))
         inputGui.Show()
+        return inputGui
+    }
+
+    CloseNewProfilePrompt(inputGui) {
+        try inputGui.Destroy()
+        if (ProfileManager.profiles.Count > 0) {
+            this.ShowProfileSelector()
+            return
+        }
+        ExitApp()
     }
 
     CreateProfile(name, inputGui) {
@@ -215,7 +264,7 @@ class KeybindGUI {
 
     ; Creates the capture hook and records it so it can always be torn down again
     StartInputHook(funcName, control, promptGui) {
-        ih := InputHook("V B")
+        ih := InputHook(KeybindGUI.inputHookOptions)
         ih.KeyOpt("{All}", "E")
         ih.OnEnd := this.OnInputEnd.Bind(this, funcName, control, promptGui)
         KeybindGUI.activeInputHook := ih
@@ -242,12 +291,6 @@ class KeybindGUI {
         if (ih.EndReason != "EndKey")
             return
 
-        ; Get current state of modifier keys
-        hasCtrl := GetKeyState("Ctrl")
-        hasAlt := GetKeyState("Alt")
-        hasShift := GetKeyState("Shift")
-        hasWin := GetKeyState("LWin") || GetKeyState("RWin")
-        
         key := ih.EndKey
         
         ; Handle Escape to cancel
@@ -267,14 +310,7 @@ class KeybindGUI {
             return
         }
         
-        ; Build the hotkey string
-        modifiers := ""
-        modifiers .= hasCtrl ? "^" : ""
-        modifiers .= hasAlt ? "!" : ""
-        modifiers .= hasShift ? "+" : ""
-        modifiers .= hasWin ? "#" : ""
-        
-        newBind := modifiers key
+        newBind := this.CapturedHotkey(ih)
         
         currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
         hadBinding := currentProfile.binds.Has(funcName)
@@ -348,6 +384,17 @@ class KeybindGUI {
         }
         KeybindGUI.isListening := false
         KeybindGUI.listeningControl := ""
+    }
+
+    CapturedHotkey(ih) {
+        ; EndMods is the capture-time snapshot. GetKeyState races the user releasing a
+        ; modifier between the terminating key event and this callback.
+        modifiers := ""
+        modifiers .= InStr(ih.EndMods, "^") ? "^" : ""
+        modifiers .= InStr(ih.EndMods, "!") ? "!" : ""
+        modifiers .= InStr(ih.EndMods, "+") ? "+" : ""
+        modifiers .= InStr(ih.EndMods, "#") ? "#" : ""
+        return modifiers ih.EndKey
     }
 
     CancelKeybindPrompt(promptGui) {

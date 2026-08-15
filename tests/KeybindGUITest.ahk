@@ -9,6 +9,8 @@ class KeybindGUITest {
         "TestPrettifyHotkey",
         "TestCustomFunctionNameChecksUnboundFunctions",
         "TestProfileBindingOwnerUsesRuntimeIdentity",
+        "TestCaptureSuppressesInputToTheForegroundWindow",
+        "TestCapturedHotkeyUsesTerminationModifierSnapshot",
         "TestCaptureFailureRestoresBindingAndHookState",
         "TestFailedModalitySavePreservesLiveProfile",
         "TestFailedCustomDeletePreservesLiveProfile"
@@ -54,14 +56,24 @@ class KeybindGUITest {
 
     TestProfileBindingOwnerUsesRuntimeIdentity() {
         profile := ProfileManager.NewProfile()
-        profile.binds["Existing"] := "^s"
+        profile.binds["Existing"] := "^!s"
         profile.binds["Editing"] := "^e"
 
         Assert.Equal(
             "Existing",
-            this.gui.FindProfileBindingOwner(profile, "^S", "Editing")
+            this.gui.FindProfileBindingOwner(profile, "!^S", "Editing")
         )
         Assert.Equal("", this.gui.FindProfileBindingOwner(profile, "^e", "Editing"))
+    }
+
+    TestCaptureSuppressesInputToTheForegroundWindow() {
+        Assert.False(InStr(KeybindGUI.inputHookOptions, "V") > 0)
+    }
+
+    TestCapturedHotkeyUsesTerminationModifierSnapshot() {
+        hook := FakeCaptureHook("S", "<^>!")
+
+        Assert.Equal("^!S", this.gui.CapturedHotkey(hook))
     }
 
     TestCaptureFailureRestoresBindingAndHookState() {
@@ -193,8 +205,9 @@ class FailingListView {
 }
 
 class FakeCaptureHook {
-    __New(endKey) {
+    __New(endKey, endMods := "") {
         this.EndKey := endKey
+        this.EndMods := endMods
         this.EndReason := "EndKey"
         this.stopped := false
     }

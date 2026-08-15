@@ -1,6 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include Settings.ahk
-#Include HotkeyScope.ahk
+#Include HotkeyContract.ahk
 
 class ProfileManager {
     static profiles := Map()
@@ -219,7 +219,7 @@ class ProfileManager {
         bindingOwners := Map()
         for funcName, bind in profile.binds {
             this.RequireSafeIniKey(funcName, "function")
-            identity := StrLower(Trim(bind))
+            identity := HotkeyContract.BindingIdentity(bind)
             if (identity != "") {
                 if bindingOwners.Has(identity)
                     throw ValueError("Profile contains duplicate hotkey '" bind "' for '" bindingOwners[identity] "' and '" funcName "'")
@@ -243,7 +243,7 @@ class ProfileManager {
         }
         for funcName, scope in profile.scopes {
             this.RequireSafeIniKey(funcName, "function")
-            if !HotkeyScope.IsValid(scope)
+            if !HotkeyContract.IsValidScope(scope)
                 throw ValueError("Profile contains an unknown hotkey scope for '" funcName "'")
         }
         for modality, _ in profile.modalityAttendings
@@ -309,7 +309,8 @@ class ProfileManager {
             case "global": return "Any"
             case "restricted": return "PACS or PowerScribe"
             case "default": return Settings.Get("RestrictHotkeysByActiveWindow") ? "PACS or PowerScribe" : "Any"
-            default: return "Any"
+            case "": return "Any"
+            default: throw ValueError("Profile contains an unknown legacy hotkey scope")
         }
     }
 
@@ -329,7 +330,7 @@ class ProfileManager {
     }
 
     static SetScope(funcName, scope) {
-        if !HotkeyScope.IsValid(scope)
+        if !HotkeyContract.IsValidScope(scope)
             throw ValueError("Unknown hotkey scope")
         profile := this.GetCurrentProfile()
         if profile

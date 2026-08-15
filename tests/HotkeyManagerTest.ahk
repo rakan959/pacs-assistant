@@ -11,11 +11,13 @@ class HotkeyManagerTest {
         "TestRejectsMissingFunction",
         "TestDisableAllHotkeys",
         "TestRegistersWithScope",
-        "TestUnknownScopeFallsBackToAny",
+        "TestUnknownScopeIsRejectedWithoutReplacingRegistration",
         "TestScopeFlagsRoundTrip",
         "TestScopeFromFlagsMatrix",
+        "TestHotkeyIdentityMatchesAutoHotkeySemantics",
         "TestScopePredicatesAreStable",
         "TestDuplicateHotkeyIsRejectedWithoutReplacingOwner",
+        "TestEquivalentModifierOrderIsRejected",
         "TestInvalidReassignmentPreservesExistingRegistration"
     ]
 
@@ -84,9 +86,12 @@ class HotkeyManagerTest {
         Assert.Equal(1, HotkeyManager.activeHotkeys.Count)
     }
 
-    TestUnknownScopeFallsBackToAny() {
-        Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^a", "nonsense"))
-        Assert.Equal("Any", HotkeyManager.activeHotkeys["ActionOne"].scope)
+    TestUnknownScopeIsRejectedWithoutReplacingRegistration() {
+        Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^a", "PACS"))
+
+        Assert.False(HotkeyManager.RegisterHotkey("ActionOne", "^b", "nonsense"))
+        Assert.Equal("^a", HotkeyManager.activeHotkeys["ActionOne"].hotkey)
+        Assert.Equal("PACS", HotkeyManager.activeHotkeys["ActionOne"].scope)
     }
 
     TestScopeFlagsRoundTrip() {
@@ -102,8 +107,22 @@ class HotkeyManagerTest {
         Assert.Equal("PowerScribe", HotkeyManager.ScopeFromFlags(false, true))
         Assert.Equal("PACS or PowerScribe", HotkeyManager.ScopeFromFlags(true, true))
 
-        Assert.Equal("Any", HotkeyManager.NormalizeScope(""))
+        Assert.Throws(() => HotkeyManager.NormalizeScope(""), "Unknown hotkey scope")
         Assert.Equal("PACS", HotkeyManager.NormalizeScope("PACS"))
+    }
+
+    TestHotkeyIdentityMatchesAutoHotkeySemantics() {
+        Assert.Equal("^!a", HotkeyManager.HotkeyIdentity("!^A"))
+        Assert.Equal("^escape", HotkeyManager.HotkeyIdentity("^Esc"))
+        Assert.Equal("^a", HotkeyManager.HotkeyIdentity("~$^A"))
+        Assert.NotEqual(
+            HotkeyManager.HotkeyIdentity("^a"),
+            HotkeyManager.HotkeyIdentity("*^a")
+        )
+        Assert.NotEqual(
+            HotkeyManager.HotkeyIdentity("^a"),
+            HotkeyManager.HotkeyIdentity("^a Up")
+        )
     }
 
     ; AutoHotkey identifies a hotkey variant by the exact function object handed to
@@ -128,6 +147,14 @@ class HotkeyManagerTest {
         Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
         Assert.False(HotkeyManager.activeHotkeys.Has("ActionTwo"))
         Assert.True(InStr(HotkeyManager.lastError, "ActionOne") > 0)
+    }
+
+    TestEquivalentModifierOrderIsRejected() {
+        Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^!a"))
+
+        Assert.False(HotkeyManager.RegisterHotkey("ActionTwo", "!^A"))
+        Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
+        Assert.False(HotkeyManager.activeHotkeys.Has("ActionTwo"))
     }
 
     TestInvalidReassignmentPreservesExistingRegistration() {

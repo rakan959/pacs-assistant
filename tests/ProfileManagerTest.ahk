@@ -15,6 +15,7 @@ class ProfileManagerTest {
         "TestScopePersistence",
         "TestScopeDefaultsToAnyWhenAbsent",
         "TestLegacyScopeMigration",
+        "TestMalformedLegacyScopeIsRejected",
         "TestLegacyProfileWithoutScopesSection",
         "TestModalityAttendingPersistence",
         "TestDefaultPathsAreAnchored",
@@ -26,6 +27,7 @@ class ProfileManagerTest {
         "TestMalformedProfileDoesNotBlockValidProfiles",
         "TestDefaultProfileMustExist",
         "TestDuplicateBindingsAreRejected",
+        "TestEquivalentModifierBindingsAreRejected",
         "TestUnknownScopeIsRejected"
     ]
 
@@ -259,6 +261,18 @@ class ProfileManagerTest {
         )
     }
 
+    TestMalformedLegacyScopeIsRejected() {
+        path := ProfileManager.profilesPath "\MalformedLegacyScope.ini"
+        IniWrite("Sign Report|", path, "Functions", "Order")
+        IniWrite("^s", path, "Keybinds", "Sign Report")
+        IniWrite("restrictd", path, "KeybindScopes", "Sign Report")
+
+        Assert.Throws(
+            () => ProfileManager.LoadProfile(path),
+            "unknown legacy hotkey scope"
+        )
+    }
+
     TestDefaultPathsAreAnchored() {
         Assert.Equal(A_ScriptDir "\config.ini", this.originalConfig)
         Assert.Equal(A_ScriptDir "\profiles", this.originalProfiles)
@@ -339,6 +353,18 @@ class ProfileManagerTest {
             "duplicate hotkey"
         )
         Assert.False(FileExist(ProfileManager.profilesPath "\Duplicates.ini"))
+    }
+
+    TestEquivalentModifierBindingsAreRejected() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^!s"
+        profile.binds["Draft Report"] := "!^S"
+
+        Assert.Throws(
+            () => ProfileManager.SaveProfile("EquivalentDuplicates", profile),
+            "duplicate hotkey"
+        )
+        Assert.False(FileExist(ProfileManager.profilesPath "\EquivalentDuplicates.ini"))
     }
 
     TestUnknownScopeIsRejected() {

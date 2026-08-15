@@ -119,8 +119,12 @@ Main() {
     Check("settings dialog builds", () => Settings.ShowDialog())
     CloseWindow("PACS Assistant - Settings")
 
-    Check("profile selector builds", () => kb.ShowProfileSelector())
+    registeredBeforeSwitch := HotkeyManager.activeHotkeys.Count
+    Check("profile selector builds", () => kb.OpenProfileSelector())
+    Assert(HotkeyManager.activeHotkeys.Count = 0, "profile selection suspends the prior profile hotkeys")
     CloseWindow("PACS Assistant - Profile Selection")
+    Assert(HotkeyManager.activeHotkeys.Count = registeredBeforeSwitch, "closing profile selection restores the current profile")
+    lv := FindListView(kb.gui)
 
     ; Regression for issue #22: closing the keybind prompt with the X has to tear the
     ; capture hook down. Left running, it would rebind the next key pressed anywhere.
