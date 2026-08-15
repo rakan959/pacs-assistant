@@ -42,7 +42,7 @@ class KeybindGUITest {
 
     TestCustomFunctionNameChecksUnboundFunctions() {
         profile := ProfileManager.NewProfile()
-        profile.customFuncs["Custom: Existing"] := PACSCommands.CreateCustomKeybind("HELLO")
+        profile.customFuncs["Custom: Existing"] := {keys: "HELLO", window: ""}
 
         Assert.False(this.gui.CustomFunctionNameAvailable(profile, "Custom: Existing"))
         Assert.True(this.gui.CustomFunctionNameAvailable(profile, "Custom: New"))

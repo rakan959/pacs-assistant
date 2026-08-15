@@ -336,7 +336,9 @@ class KeybindGUI {
             scope := currentProfile.scopes.Has(funcName) ? currentProfile.scopes[funcName] : "Any"
             try {
                 if (currentProfile.customFuncs.Has(funcName)) {
-                    result := HotkeyManager.RegisterCustomHotkey(funcName, bind, currentProfile.customFuncs[funcName], scope)
+                    config := currentProfile.customFuncs[funcName]
+                    callback := PACSCommands.CreateCustomKeybind(config.keys, config.window)
+                    result := HotkeyManager.RegisterCustomHotkey(funcName, bind, callback, scope)
                 } else {
                     result := HotkeyManager.RegisterHotkey(funcName, bind, scope)
                 }
@@ -433,7 +435,7 @@ class KeybindGUI {
         customFunctions := []
         
         ; Add built-in functions that aren't bound
-        for funcName, _ in ProfileManager.availableFunctions {
+        for funcName, _ in PACSCommands.commands {
             if !ProfileManager.profiles[ProfileManager.currentProfile].binds.Has(funcName) {
                 builtInFunctions.Push(funcName)
             }
@@ -577,8 +579,9 @@ class KeybindGUI {
             return
         }
         
-        ; Create the custom function
-        currentProfile.customFuncs[funcName] := PACSCommands.CreateCustomKeybind(keys, window)
+        ; Persist configuration only. ApplyBinds creates the runtime callback at the
+        ; application boundary, keeping profile storage independent of commands.
+        currentProfile.customFuncs[funcName] := {keys: keys, window: window}
 
         ; Add to profile with empty binding, active in any window until scoped
         currentProfile.binds[funcName] := ""

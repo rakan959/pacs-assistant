@@ -9,13 +9,18 @@ class SettingsTest {
         "TestAlertSoundsAreDistinct",
         "TestLegacyAliasesAreSelectable",
         "TestLegacySoundNamesMigrate",
-        "TestFindSoundIndexFallback"
+        "TestFindSoundIndexFallback",
+        "TestSavingSettingsNotifiesListeners",
+        "TestChangeListenersAllRun",
+        "TestChangeListenerFailureDoesNotBlockLaterListeners"
     ]
 
     Setup() {
         this.originalFile := Settings.settingsFile
+        this.originalListeners := Settings.changeListeners
         this.tempFile := A_Temp "\settings_test_" A_TickCount ".ini"
         Settings.settingsFile := this.tempFile
+        Settings.changeListeners := []
         Settings.SaveAllSettings()
     }
     
@@ -97,9 +102,73 @@ class SettingsTest {
         Assert.Equal("Notification", Settings.alertSounds[Settings.FindSoundIndex("Asterisk")])
         Assert.Equal("Default Beep", Settings.alertSounds[Settings.FindSoundIndex("NotRealSound")])
     }
+
+    TestSavingSettingsNotifiesListeners() {
+        calls := []
+        Settings.AddChangeListener((*) => calls.Push("changed"))
+        controls := {
+            checkboxes: Map(
+                "AutoUpdate", {Value: false},
+                "SwapMicrophoneOnLogin", {Value: false}
+            ),
+            refreshInterval: {Value: 45},
+            micName: {Value: ""},
+            soundDropDown: {Text: "Ding"},
+            customSound: {Text: ""}
+        }
+        dialog := FakeSettingsDialog()
+
+        Settings.SaveSettings(controls, dialog)
+
+        Assert.True(dialog.destroyed)
+        Assert.Equal(1, calls.Length)
+        Assert.False(Settings.Get("AutoUpdate"))
+        Assert.Equal(45, Settings.Get("RefreshInterval"))
+    }
+
+    TestChangeListenersAllRun() {
+        calls := []
+        Settings.AddChangeListener((*) => calls.Push("updater"))
+        Settings.AddChangeListener((*) => calls.Push("monitor"))
+
+        errors := Settings.NotifyChanged()
+
+        Assert.Equal(2, calls.Length)
+        Assert.Equal("updater", calls[1])
+        Assert.Equal("monitor", calls[2])
+        Assert.Equal(0, errors.Length)
+    }
+
+    TestChangeListenerFailureDoesNotBlockLaterListeners() {
+        calls := []
+        Settings.AddChangeListener(ThrowSettingsListener)
+        Settings.AddChangeListener((*) => calls.Push("after failure"))
+
+        errors := Settings.NotifyChanged()
+
+        Assert.Equal(1, calls.Length)
+        Assert.Equal("after failure", calls[1])
+        Assert.Equal(1, errors.Length)
+        Assert.True(InStr(errors[1], "listener failed") > 0)
+    }
     
     Teardown() {
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalFile
+        Settings.changeListeners := this.originalListeners
+    }
+}
+
+ThrowSettingsListener(*) {
+    throw Error("listener failed")
+}
+
+class FakeSettingsDialog {
+    __New() {
+        this.destroyed := false
+    }
+
+    Destroy() {
+        this.destroyed := true
     }
 }

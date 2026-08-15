@@ -1,6 +1,5 @@
 #Requires AutoHotkey v2.0
 #Include ../ProfileManager.ahk
-#Include ../PACSCommands.ahk
 #Include TestRunner.ahk
 
 class ProfileManagerTest {
@@ -19,6 +18,7 @@ class ProfileManagerTest {
         "TestProfileNameValidation",
         "TestCreateProfileRejectsUnsafeAndDuplicateNames",
         "TestSaveRejectsUnsafeIniKeys",
+        "TestSaveRejectsMalformedCustomCommand",
         "TestFailedRenamePreservesOriginalProfile",
         "TestMalformedProfileDoesNotBlockValidProfiles",
         "TestDefaultProfileMustExist",
@@ -90,7 +90,7 @@ class ProfileManagerTest {
     TestCustomFunctionPersistence() {
         profile := ProfileManager.NewProfile()
         profile.binds["Custom: Test"] := "^t"
-        profile.customFuncs["Custom: Test"] := PACSCommands.CreateCustomKeybind("{Tab}", "TestWindow")
+        profile.customFuncs["Custom: Test"] := {keys: "{Tab}", window: "TestWindow"}
 
         ProfileManager.profiles["CustomProfile"] := profile
         ProfileManager.SaveProfile("CustomProfile", profile)
@@ -196,6 +196,17 @@ class ProfileManagerTest {
         stored := ProfileManager.profiles["ModalityProfile"]
         Assert.True(stored.modalityAttendings.Has("Chest"))
         Assert.False(stored.modalityAttendings.Has("Body"), "Unconfigured modality must not be invented on load")
+    }
+
+    TestSaveRejectsMalformedCustomCommand() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Custom: Broken"] := "^b"
+        profile.customFuncs["Custom: Broken"] := {window: "PowerScribe"}
+
+        Assert.Throws(
+            () => ProfileManager.SaveProfile("BrokenCustom", profile),
+            "custom command configuration"
+        )
     }
 
     TestDefaultPathsAreAnchored() {

@@ -10,6 +10,8 @@ class ClinicalAutomationTest {
         "BuiltInClinicalCommandUsesConfirmedTarget",
         "TargetedCustomCommandUsesConfirmedTarget",
         "AttendingNameUsesLiteralText",
+        "AttendingRoutingUsesInjectedDependencies",
+        "BlankAttendingSkipsPowerScribeWrite",
         "FailedAttendingActivationIsReported",
         "ReportSelectionUsesOnlyReportShapedText",
         "ReportSelectionRejectsUnrelatedFallbackText"
@@ -82,6 +84,32 @@ class ClinicalAutomationTest {
         Assert.Equal(attending, driver.calls[4].value)
         Assert.Equal("keys", driver.calls[6].kind)
         Assert.Equal("{tab}{space}{tab}{Enter}", driver.calls[6].value)
+    }
+
+    AttendingRoutingUsesInjectedDependencies() {
+        lookedUp := []
+        assigned := []
+        lookup := (modality) => (lookedUp.Push(modality), "Smith")
+        writer := (attending) => (assigned.Push(attending), true)
+
+        modality := AttendingRouting.Route("EXAMINATION: CT CHEST", lookup, writer)
+
+        Assert.Equal("Chest", modality)
+        Assert.Equal("Chest", lookedUp[1])
+        Assert.Equal("Smith", assigned[1])
+    }
+
+    BlankAttendingSkipsPowerScribeWrite() {
+        writes := []
+
+        modality := AttendingRouting.Route(
+            "EXAMINATION: MRI BRAIN",
+            (*) => "",
+            (attending) => writes.Push(attending)
+        )
+
+        Assert.Equal("Neuro", modality)
+        Assert.Equal(0, writes.Length)
     }
 
     FailedAttendingActivationIsReported() {

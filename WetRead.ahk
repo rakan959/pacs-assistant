@@ -1,6 +1,7 @@
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
 #Include Settings.ahk
+#Include ProfileManager.ahk
 #Include PowerScribe.ahk
 #Include UIAValue.ahk
 
@@ -236,6 +237,18 @@ class WetReadPasteEngine {
     static AppendError(result, message) {
         result.error .= (result.error = "" ? "" : "; ") message
     }
+}
+
+/**
+ * Assigns the current report to the profile's attending for its modality. A blank
+ * assignment leaves PowerScribe's default unchanged.
+ */
+checkAttending(reportText) {
+    return AttendingRouting.Route(
+        reportText,
+        ObjBindMethod(ProfileManager, "GetModalityAttending"),
+        ObjBindMethod(PowerScribe, "SetAttending")
+    )
 }
 
 wetRead() {

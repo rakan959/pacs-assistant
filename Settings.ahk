@@ -2,6 +2,7 @@
 
 class Settings {
     static settingsFile := A_ScriptDir "\settings.ini"
+    static changeListeners := []
     static defaultSettings := Map(
         "AutoUpdate", true,
         "SkipBetaVersions", true,
@@ -129,6 +130,25 @@ class Settings {
         ; Handle string values
         else
             IniWrite(value, this.settingsFile, "Settings", settingName)
+    }
+
+    static AddChangeListener(listener) {
+        if !IsObject(listener) || !HasMethod(listener, "Call")
+            throw TypeError("Settings change listener must be callable")
+        this.changeListeners.Push(listener)
+        return listener
+    }
+
+    static NotifyChanged() {
+        errors := []
+        for listener in this.changeListeners.Clone() {
+            try listener.Call()
+            catch as err {
+                errors.Push(err.Message)
+                OutputDebug("Settings change listener failed: " err.Message)
+            }
+        }
+        return errors
     }
     
     ; Save all settings to their default values
@@ -366,13 +386,6 @@ class Settings {
         this.Set("CustomSoundFile", controls.customSound.Text)
 
         settingsGui.Destroy()
-
-        ; Notify PACSMonitor of settings change
-        if IsSet(PACSMonitor)
-            PACSMonitor.OnSettingsChanged()
-
-        ; Notify MicrophoneManager of settings change
-        if IsSet(MicrophoneManager)
-            MicrophoneManager.OnSettingsChanged()
+        this.NotifyChanged()
     }
-} 
+}

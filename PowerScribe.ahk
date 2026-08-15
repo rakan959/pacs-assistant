@@ -90,6 +90,23 @@ sendPs(x) {
     return PowerScribe.SendKeys(x)
 }
 
+/**
+ * Pure attending-routing policy. Profile lookup and PowerScribe mutation are passed
+ * in by the workflow layer so classification and failure behavior remain testable
+ * without global profile state or a live clinical application.
+ */
+class AttendingRouting {
+    static Route(reportText, attendingLookup, attendingWriter) {
+        modality := ReportModality.Classify(reportText)
+        attending := attendingLookup.Call(modality)
+
+        if (attending != "" && !attendingWriter.Call(attending))
+            throw Error("Attending could not be assigned because PACS Assistant could not activate PowerScribe")
+
+        return modality
+    }
+}
+
 setAttending(x) {
     return PowerScribe.SetAttending(x)
 }
@@ -137,26 +154,4 @@ readReportText() {
     try fallbackText := UIAValue.Read(root.ElementFromPath(PowerScribe.reportPath))
 
     return PowerScribe.SelectReportText(candidates, fallbackText)
-}
-
-/**
- * Assigns the report to the attending configured for its modality.
- * A modality configured with a blank attending is left alone so the report keeps
- * PowerScribe's own default attending.
- *
- * ProfileManager is resolved through main.ahk's include graph rather than included
- * here: ProfileManager pulls in PACSCommands, which pulls in this file, and the
- * resulting order would run ProfileManager's static initialiser before
- * PACSCommands.commands exists.
- *
- * @returns the modality the report was classified as
- */
-checkAttending(haystack) {
-    modality := ReportModality.Classify(haystack)
-    attending := ProfileManager.GetModalityAttending(modality)
-
-    if (attending != "" && !PowerScribe.SetAttending(attending))
-        throw Error("Attending could not be assigned because PACS Assistant could not activate PowerScribe")
-
-    return modality
 }

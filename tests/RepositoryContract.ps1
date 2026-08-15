@@ -45,6 +45,10 @@ $workflow = Get-Content -Raw (Join-Path $repoRoot '.github/workflows/ahk2exe.yml
 $gitmodules = Get-Content -Raw (Join-Path $repoRoot '.gitmodules')
 $readme = Get-Content -Raw (Join-Path $repoRoot 'README.md')
 $issueTemplate = Get-Content -Raw (Join-Path $repoRoot '.github/ISSUE_TEMPLATE/bug_report.md')
+$main = Get-Content -Raw (Join-Path $repoRoot 'main.ahk')
+$profileManager = Get-Content -Raw (Join-Path $repoRoot 'ProfileManager.ahk')
+$powerScribe = Get-Content -Raw (Join-Path $repoRoot 'PowerScribe.ahk')
+$wetRead = Get-Content -Raw (Join-Path $repoRoot 'WetRead.ahk')
 $noticesPath = Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md'
 $autoHotkeyLicensePath = Join-Path $repoRoot 'licenses/AutoHotkey-v2.0.26.txt'
 
@@ -86,6 +90,13 @@ foreach ($match in [regex]::Matches($workflow, '(?m)^\s*uses:\s*(?<reference>\S+
 Assert-NotMatches $workflow '(?m)^\s*packages:\s*write\s*$' 'The workflow must not request unused packages: write permission.'
 Assert-NotMatches $workflow '(?i)benmusson/ahk2exe-action|softprops/action-gh-release' 'Build and release must not delegate downloaded binaries or release authority to third-party actions.'
 Assert-NotMatches $workflow 'Ahk2Exe-SetCopyright\s+MIT' 'Executable copyright metadata must not mislabel the GPL-3.0 project as MIT.'
+
+Assert-NotMatches $profileManager '(?m)^#Include\s+PACSCommands\.ahk\s*$' 'Profile persistence must not depend on the clinical command graph.'
+Assert-NotMatches $powerScribe '\bProfileManager\b' 'PowerScribe automation must not reach profile state through an implicit global.'
+Assert-Matches $wetRead '(?m)^#Include\s+ProfileManager\.ahk\s*$' 'The wet-read composition layer must declare its profile dependency.'
+foreach ($subscriber in @('UpdateChecker', 'PACSMonitor', 'MicrophoneManager')) {
+    Assert-Matches $main ("Settings\.AddChangeListener\(ObjBindMethod\(" + $subscriber) ("main.ahk must explicitly subscribe " + $subscriber + " to settings changes.")
+}
 
 Assert-Matches $readme 'git clone --recurse-submodules' 'README must document cloning with submodules.'
 Assert-Matches $readme 'AutoHotkey v2\.0\.26' 'README must state the AutoHotkey version used by CI.'

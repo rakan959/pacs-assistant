@@ -1,12 +1,10 @@
 #Requires AutoHotkey v2.0
-#Include PACSCommands.ahk
 #Include Settings.ahk
 
 class ProfileManager {
     static profiles := Map()
     static currentProfile := ""
     static defaultProfile := ""
-    static availableFunctions := Map()  ; Now only stores built-in functions
     static configPath := A_ScriptDir "\config.ini"
     static profilesPath := A_ScriptDir "\profiles"
     static loadErrors := []
@@ -14,9 +12,6 @@ class ProfileManager {
     static missingValue := "{PACS-ASSISTANT-MISSING-INI-VALUE}"
 
     static __New() {
-        ; Initialize available functions from PACSCommands
-        this.availableFunctions := PACSCommands.commands
-
         ; Load default profile setting from config file
         try {
             this.defaultProfile := IniRead(this.configPath, "Settings", "DefaultProfile", "")
@@ -27,7 +22,7 @@ class ProfileManager {
     static NewProfile() {
         return {
             binds: Map(),               ; funcName -> hotkey string
-            customFuncs: Map(),         ; funcName -> bound function
+            customFuncs: Map(),         ; funcName -> {keys, window} configuration
             scopes: Map(),              ; funcName -> HotkeyManager scope name
             modalityAttendings: Map()   ; modality -> attending, "" = leave default
         }
@@ -90,7 +85,7 @@ class ProfileManager {
                     keys := IniRead(path, "CustomFunctions", funcName "_keys", "")
                     window := IniRead(path, "CustomFunctions", funcName "_window", "")
                     if (keys != "") {
-                        profile.customFuncs[funcName] := PACSCommands.CreateCustomKeybind(keys, window)
+                        profile.customFuncs[funcName] := {keys: keys, window: window}
                     }
                 }
             }
@@ -189,8 +184,21 @@ class ProfileManager {
                 bindingOwners[identity] := funcName
             }
         }
-        for funcName, _ in profile.customFuncs
+        for funcName, config in profile.customFuncs {
             this.RequireSafeIniKey(funcName, "function")
+            if (!profile.binds.Has(funcName)
+                || !IsObject(config)
+                || !HasProp(config, "keys")
+                || Type(config.keys) != "String"
+                || config.keys = ""
+                || !HasProp(config, "window")
+                || Type(config.window) != "String")
+                throw ValueError("Profile contains invalid custom command configuration for '" funcName "'")
+        }
+        for funcName, _ in profile.binds {
+            if (InStr(funcName, "Custom: ") = 1 && !profile.customFuncs.Has(funcName))
+                throw ValueError("Profile is missing custom command configuration for '" funcName "'")
+        }
         for funcName, _ in profile.scopes
             this.RequireSafeIniKey(funcName, "function")
         for modality, _ in profile.modalityAttendings
