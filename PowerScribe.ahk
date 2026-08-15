@@ -6,6 +6,9 @@
 ; Attending-picker target validation. This keeps focus-sensitive clinical input
 ; behind a semantic UIA identity check and an observable write postcondition.
 class NativeAttendingControlDriver {
+    static confirmationAttempts := 10
+    static confirmationPollMs := 50
+
     __New(focusVerifier := 0) {
         this.focusVerifier := focusVerifier
     }
@@ -100,6 +103,35 @@ class NativeAttendingControlDriver {
         return this.ControlHasExpectedFocus(windowTitle, control)
             && this.HasExpectedValue(control, expected)
     }
+
+    WaitForConfirmation(windowTitle, control) {
+        loop NativeAttendingControlDriver.confirmationAttempts {
+            if this.ConfirmationControlClosed(windowTitle, control)
+                return true
+            Sleep(NativeAttendingControlDriver.confirmationPollMs)
+        }
+        return false
+    }
+
+    ConfirmationControlClosed(windowTitle, control) {
+        try root := UIA.ElementFromHandle(windowTitle)
+        catch
+            return false
+
+        try {
+            for typeName in ["Edit", "ComboBox"] {
+                for candidate in root.FindElements({Type: typeName}) {
+                    if UIA.CompareElementsEx(control, candidate)
+                        return false
+                }
+            }
+            ; A complete, successful traversal that no longer contains the exact
+            ; picker is the observable postcondition that its confirmation UI closed.
+            return true
+        } catch {
+            return false
+        }
+    }
 }
 
 /**
@@ -188,9 +220,14 @@ class PowerScribe {
             driver.Pause(100)
             if !this.attendingControlDriver.CanConfirm(this.windowTitle, control, attending)
                 return false
-            return AppControl.SendKeysToActiveWindow(
+            if !AppControl.SendKeysToActiveWindow(
                 this.windowTitle,
                 "{tab}{space}{tab}{Enter}"
+            )
+                return false
+            return this.attendingControlDriver.WaitForConfirmation(
+                this.windowTitle,
+                control
             )
         } catch {
             return false

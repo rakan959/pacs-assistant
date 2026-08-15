@@ -18,6 +18,7 @@ class ClinicalAutomationTest {
         "AttendingStopsBeforeTextWhenControlMissing",
         "AttendingStopsBeforeConfirmationWhenValueUnverified",
         "AttendingStopsBeforeConfirmationWhenPickerLosesFocus",
+        "AttendingReportsUnconfirmedSubmission",
         "AttendingStopsBeforeTextWhenFocusMoves",
         "AttendingRoutingUsesInjectedDependencies",
         "BlankAttendingSkipsPowerScribeWrite",
@@ -205,6 +206,16 @@ class ClinicalAutomationTest {
         Assert.False(PowerScribe.SetAttending("Smith"))
         for call in driver.calls
             Assert.False(call.kind = "keys" && call.value = "{tab}{space}{tab}{Enter}", "Attending confirmation requires the verified picker to retain focus")
+    }
+
+    AttendingReportsUnconfirmedSubmission() {
+        driver := FakeWindowDriver()
+        AppControl.windowDriver := driver
+        attendingDriver := FakeAttendingControlDriver({}, true, true, false)
+        PowerScribe.attendingControlDriver := attendingDriver
+
+        Assert.False(PowerScribe.SetAttending("Smith"))
+        Assert.Equal(1, attendingDriver.confirmationChecks)
     }
 
     AttendingStopsBeforeTextWhenFocusMoves() {
@@ -514,10 +525,12 @@ class FakeWindowDriver {
 }
 
 class FakeAttendingControlDriver {
-    __New(control := {}, valueMatches := true, canConfirm := true) {
+    __New(control := {}, valueMatches := true, canConfirm := true, confirmationCompleted := true) {
         this.control := control
         this.valueMatches := valueMatches
         this.confirmationAllowed := canConfirm
+        this.confirmationCompleted := confirmationCompleted
+        this.confirmationChecks := 0
         this.writes := []
     }
 
@@ -532,6 +545,11 @@ class FakeAttendingControlDriver {
 
     CanConfirm(*) {
         return this.confirmationAllowed
+    }
+
+    WaitForConfirmation(*) {
+        this.confirmationChecks++
+        return this.confirmationCompleted
     }
 }
 
