@@ -7,6 +7,8 @@ class SettingsTest {
         "TestDefaultSettingsLoaded",
         "TestSetAndGetValues",
         "TestMalformedPersistedSettingsUseDefaults",
+        "TestExcessivePersistedRefreshIntervalUsesDefault",
+        "TestSavingRejectsExcessiveRefreshInterval",
         "TestAlertSoundsAreDistinct",
         "TestLegacyAliasesAreSelectable",
         "TestLegacySoundNamesMigrate",
@@ -67,6 +69,35 @@ class SettingsTest {
 
         Assert.Equal(Settings.defaultSettings["RefreshInterval"], Settings.Get("RefreshInterval"))
         Assert.Equal(Settings.defaultSettings["AutoUpdate"], Settings.Get("AutoUpdate"))
+    }
+
+    TestExcessivePersistedRefreshIntervalUsesDefault() {
+        IniWrite("4294968", Settings.settingsFile, "Settings", "RefreshInterval")
+
+        Assert.Equal(
+            Settings.defaultSettings["RefreshInterval"],
+            Settings.Get("RefreshInterval")
+        )
+    }
+
+    TestSavingRejectsExcessiveRefreshInterval() {
+        controls := {
+            checkboxes: Map(
+                "AutoUpdate", {Value: false},
+                "SwapMicrophoneOnLogin", {Value: false}
+            ),
+            refreshInterval: {Value: 86401},
+            micName: {Value: ""},
+            soundDropDown: {Text: "Ding"},
+            customSound: {Text: ""}
+        }
+        dialog := FakeSettingsDialog()
+
+        result := Settings.SaveSettings(controls, dialog)
+
+        Assert.False(result)
+        Assert.False(dialog.destroyed)
+        Assert.Equal(60, Settings.Get("RefreshInterval"))
     }
     
     ; The catalogue is a repository contract. Optional Windows Media files are a

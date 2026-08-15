@@ -3,6 +3,10 @@
 class Settings {
     static settingsFile := A_ScriptDir "\settings.ini"
     static changeListeners := []
+    static minRefreshIntervalSeconds := 10
+    ; One day is a deliberate product bound as well as protection from AutoHotkey's
+    ; DWORD-backed timer period wrapping after seconds are multiplied by 1000.
+    static maxRefreshIntervalSeconds := 86400
     static defaultSettings := Map(
         "AutoUpdate", true,
         "SkipBetaVersions", true,
@@ -113,7 +117,10 @@ class Settings {
             ; Handle numeric values
             if (settingName = "RefreshInterval") {
                 interval := Integer(value)
-                return interval >= 10 ? interval : fallback
+                return (interval >= this.minRefreshIntervalSeconds
+                    && interval <= this.maxRefreshIntervalSeconds)
+                    ? interval
+                    : fallback
             }
             ; Handle boolean values
             if this.IsBooleanSetting(settingName) {
@@ -409,8 +416,12 @@ class Settings {
             MsgBox("Refresh interval must be a whole number of seconds.", "Invalid Setting", "Icon!")
             return
         }
-        if (interval < 10) {
-            MsgBox("Refresh interval must be at least 10 seconds.", "Invalid Setting", "Icon!")
+        if (interval < this.minRefreshIntervalSeconds) {
+            MsgBox("Refresh interval must be at least " this.minRefreshIntervalSeconds " seconds.", "Invalid Setting", "Icon!")
+            return
+        }
+        if (interval > this.maxRefreshIntervalSeconds) {
+            MsgBox("Refresh interval cannot exceed " this.maxRefreshIntervalSeconds " seconds (one day).", "Invalid Setting", "Icon!")
             return
         }
 
