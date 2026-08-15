@@ -12,6 +12,7 @@ class ClinicalAutomationTest {
         "TargetedCustomCommandUsesConfirmedTarget",
         "AttendingTargetRequiresSemanticControlIdentity",
         "NativeAttendingWriteRefusesLostControlFocus",
+        "AttendingVerificationRejectsSubstringNearMatch",
         "AttendingNameUsesLiteralText",
         "AttendingStopsBeforeTextWhenControlMissing",
         "AttendingStopsBeforeConfirmationWhenValueUnverified",
@@ -129,6 +130,13 @@ class ClinicalAutomationTest {
 
         Assert.False(driver.WriteAndVerify(PowerScribe.windowTitle, control, "Smith"))
         Assert.Equal(0, control.writeCalls)
+    }
+
+    AttendingVerificationRejectsSubstringNearMatch() {
+        driver := NativeAttendingControlDriver()
+
+        Assert.True(driver.HasExpectedValue(FakeAttendingValueElement(" Smith "), "smith"))
+        Assert.False(driver.HasExpectedValue(FakeAttendingValueElement("Smithson"), "Smith"))
     }
 
     AttendingNameUsesLiteralText() {
@@ -489,6 +497,21 @@ class FakeAttendingTargetElement {
         this.IsValuePatternAvailable := writable
         this.IsLegacyIAccessiblePatternAvailable := false
         this.NativeWindowHandle := 0
+    }
+}
+
+class FakeAttendingValueElement {
+    __New(value) {
+        this.value := value
+    }
+
+    GetPropertyValue(propertyId) {
+        switch propertyId {
+            case UIA.Property.ValueValue: return this.value
+            case UIA.Property.IsValuePatternAvailable: return true
+            case UIA.Property.IsLegacyIAccessiblePatternAvailable: return false
+        }
+        return ""
     }
 }
 

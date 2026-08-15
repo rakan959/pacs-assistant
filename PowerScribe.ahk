@@ -79,7 +79,7 @@ class NativeAttendingControlDriver {
 
         actual := StrLower(Trim(result.value))
         expected := StrLower(Trim(expected))
-        return expected != "" && (actual = expected || InStr(actual, expected))
+        return expected != "" && actual = expected
     }
 
     ControlHasExpectedFocus(windowTitle, control) {
