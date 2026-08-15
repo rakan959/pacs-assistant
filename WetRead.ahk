@@ -4,6 +4,240 @@
 #Include PowerScribe.ahk
 #Include UIAValue.ahk
 
+/**
+ * Native side effects for the wet-read paste transaction. Keeping them behind this
+ * small interface makes rollback behavior deterministic under test.
+ */
+class NativeWetReadDriver {
+    Read(field) {
+        return UIAValue.Read(field)
+    }
+
+    Focus(field) {
+        loop 3 {
+            try field.SetFocus()
+            try field.Click("left")
+            Sleep(50)
+        }
+    }
+
+    Clear(field) {
+        this.Focus(field)
+        Send("^a")
+        Send("{Backspace}")
+        Sleep(50)
+    }
+
+    CaptureClipboard() {
+        return ClipboardAll()
+    }
+
+    SetClipboard(value) {
+        A_Clipboard := value
+    }
+
+    WaitForClipboard(timeoutSeconds) {
+        return ClipWait(timeoutSeconds)
+    }
+
+    RestoreClipboard(value) {
+        A_Clipboard := value
+    }
+
+    PasteClipboard(field) {
+        this.Focus(field)
+        Send("^v")
+    }
+
+    WriteUIA(field, value) {
+        return UIAValue.Write(field, value)
+    }
+
+    WriteControl(field, value) {
+        hwnd := 0
+        try hwnd := field.NativeWindowHandle
+        if hwnd {
+            ControlFocus(hwnd)
+            ControlSetText(value, hwnd)
+        } else {
+            ControlSetText(value, "", "Sticky Notes")
+        }
+        return true
+    }
+
+    WaitForValue(field, expected, timeoutMs) {
+        started := A_TickCount
+        while (A_TickCount - started < timeoutMs) {
+            current := ""
+            try current := this.Read(field)
+            if (current = expected)
+                return true
+            Sleep(100)
+        }
+        return false
+    }
+}
+
+/**
+ * Replaces a sticky-note value without sacrificing the previous note or clipboard
+ * on a failed paste.
+ */
+class WetReadPasteEngine {
+    static attempts := 3
+    static verifyTimeoutMs := 2000
+
+    static Paste(field, text, mode, driver := NativeWetReadDriver()) {
+        result := this.NewResult()
+        try originalValue := driver.Read(field)
+        catch as err {
+            result.reason := "read"
+            result.error := err.Message
+            return result
+        }
+
+        switch mode {
+            case "send":
+                return this.PasteWithClipboard(field, text, originalValue, driver, result)
+            case "uia", "control":
+                return this.PasteDirect(field, text, originalValue, mode, driver, result)
+            default:
+                result.reason := "invalid-mode"
+                result.error := "Unknown wet-read paste mode: " mode
+                return result
+        }
+    }
+
+    static NewResult() {
+        return {
+            success: false,
+            unsupported: false,
+            restored: true,
+            clipboardRestored: true,
+            reason: "",
+            error: ""
+        }
+    }
+
+    static PasteWithClipboard(field, text, originalValue, driver, result) {
+        backupCaptured := false
+        fieldChanged := false
+
+        try {
+            clipboardBackup := driver.CaptureClipboard()
+            backupCaptured := true
+            driver.SetClipboard(text)
+            if !driver.WaitForClipboard(0.5) {
+                result.reason := "clipboard"
+                return result
+            }
+
+            loop this.attempts {
+                driver.Clear(field)
+                fieldChanged := true
+                driver.PasteClipboard(field)
+                if driver.WaitForValue(field, text, this.verifyTimeoutMs) {
+                    result.success := true
+                    return result
+                }
+            }
+            result.reason := "verification"
+        } catch as err {
+            result.reason := "error"
+            result.error := err.Message
+        } finally {
+            if (!result.success && fieldChanged)
+                result.restored := this.RestoreWithClipboard(field, originalValue, driver, result)
+
+            if backupCaptured {
+                try driver.RestoreClipboard(clipboardBackup)
+                catch as restoreError {
+                    result.clipboardRestored := false
+                    this.AppendError(result, "Clipboard restore failed: " restoreError.Message)
+                }
+            }
+        }
+
+        return result
+    }
+
+    static RestoreWithClipboard(field, originalValue, driver, result) {
+        try {
+            driver.SetClipboard(originalValue)
+            if (originalValue != "" && !driver.WaitForClipboard(0.5)) {
+                this.AppendError(result, "Previous note could not be staged for restoration")
+                return false
+            }
+            driver.Clear(field)
+            if (originalValue != "")
+                driver.PasteClipboard(field)
+            return driver.WaitForValue(field, originalValue, this.verifyTimeoutMs)
+        } catch as err {
+            this.AppendError(result, "Previous note restore failed: " err.Message)
+            return false
+        }
+    }
+
+    static PasteDirect(field, text, originalValue, mode, driver, result) {
+        fieldMayHaveChanged := false
+
+        loop this.attempts {
+            priorFieldChange := fieldMayHaveChanged
+            try {
+                wrote := mode = "uia"
+                    ? driver.WriteUIA(field, text)
+                    : driver.WriteControl(field, text)
+
+                if (mode = "uia" && !wrote) {
+                    ; UIAValue.Write checks pattern support before changing the field.
+                    result.unsupported := true
+                    result.reason := "unsupported"
+                    if priorFieldChange
+                        result.restored := this.RestoreDirect(field, originalValue, mode, driver, result)
+                    return result
+                }
+
+                fieldMayHaveChanged := fieldMayHaveChanged || wrote
+                if wrote && driver.WaitForValue(field, text, this.verifyTimeoutMs) {
+                    result.success := true
+                    return result
+                }
+            } catch as err {
+                fieldMayHaveChanged := true
+                result.reason := "error"
+                this.AppendError(result, err.Message)
+            }
+        }
+
+        if (result.reason = "")
+            result.reason := "verification"
+        if fieldMayHaveChanged
+            result.restored := this.RestoreDirect(field, originalValue, mode, driver, result)
+        return result
+    }
+
+    static RestoreDirect(field, originalValue, mode, driver, result) {
+        try {
+            if (mode = "uia") {
+                restored := driver.WriteUIA(field, originalValue)
+                if !restored
+                    restored := driver.WriteControl(field, originalValue)
+            } else {
+                restored := driver.WriteControl(field, originalValue)
+                if !restored
+                    restored := driver.WriteUIA(field, originalValue)
+            }
+            return restored && driver.WaitForValue(field, originalValue, this.verifyTimeoutMs)
+        } catch as err {
+            this.AppendError(result, "Previous note restore failed: " err.Message)
+            return false
+        }
+    }
+
+    static AppendError(result, message) {
+        result.error .= (result.error = "" ? "" : "; ") message
+    }
+}
+
 wetRead() {
 	; Use clipboard contents; bail out if empty to avoid blank notes
 	clipText := A_Clipboard
@@ -30,10 +264,19 @@ wetRead() {
 		}
 	}
 
-	; Activate Vue PACS and open sticky notes
-	WinActivate("Vue PACS ahk_exe mp.exe")
+	; Activate Vue PACS and open sticky notes. Fail before emitting any keys if PACS
+	; cannot be confirmed as the active target.
+	pacsTitle := "Vue PACS ahk_exe mp.exe"
+	if !AppControl.ActivateWindow(pacsTitle) {
+		MsgBox("Could not activate Vue PACS.")
+		return
+	}
 	Sleep(150)
-	mpEl := UIA.ElementFromHandle("Vue PACS ahk_exe mp.exe")
+	try mpEl := UIA.ElementFromHandle(pacsTitle)
+	catch {
+		MsgBox("Could not connect to Vue PACS accessibility controls.")
+		return
+	}
 	try {
 		mpEl.FindElement({Name:"scn_sticky_notes"}).Click()
 	} catch {
@@ -47,18 +290,12 @@ wetRead() {
 		return
 	}
 
-	sticky := UIA.ElementFromHandle("Sticky Notes")
-	try sticky.SetFocus()
-
-	; Helper to ensure the text field is focused
-	focusNoteField(field) {
-		loop 3 {
-			try field.SetFocus()
-			catch
-			try field.Click("left")
-			Sleep(50)
-		}
+	try sticky := UIA.ElementFromHandle("Sticky Notes")
+	catch {
+		MsgBox("Could not connect to the Sticky Notes window.")
+		return
 	}
+	try sticky.SetFocus()
 
 	; Get note input field
 	noteField := ""
@@ -78,71 +315,22 @@ wetRead() {
 		clipText := RegExReplace(clipText, "(\r)?\n", "`r`n")
 	}
 
-	; Clear and paste with verification using selected strategy
-	focusNoteField(noteField)
-	Send("^a")
-	Send("{Backspace}")
-	Sleep(50)
+	result := WetReadPasteEngine.Paste(noteField, clipText, pasteMode)
 
-	success := false
-	unsupportedStrategy := false
-	clipBackup := ClipboardAll()
-	A_Clipboard := clipText
-	ClipWait(0.5)
-
-	loop 3 {
-		focusNoteField(noteField)
-		switch pasteMode {
-			case "send":
-				Send("^v")
-			case "uia":
-				; Assigning to .Value on a field with no ValuePattern raises an
-				; uncatchable destructor error instead of failing cleanly (issue #32).
-				; Gate the write, and stop rather than retrying something that cannot
-				; work for six seconds.
-				if !UIAValue.Write(noteField, clipText) {
-					unsupportedStrategy := true
-					break
-				}
-			case "control":
-				try {
-					hwnd := noteField.NativeWindowHandle
-					if hwnd {
-						ControlFocus("ahk_id " hwnd)
-						ControlSetText("ahk_id " hwnd, clipText)
-					} else {
-						ControlSetText("", clipText, "Sticky Notes")
-					}
-				}
-		}
-		; Wait until text matches or timeout
-		start := A_TickCount
-		while (A_TickCount - start < 2000) {
-			current := UIAValue.Read(noteField)
-			if (current = clipText) {
-				success := true
-				break
-			}
-			Sleep(100)
-		}
-		if success
-			break
-		; Retry: clear and try again
-		focusNoteField(noteField)
-		Send("^a")
-		Send("{Backspace}")
-		Sleep(100)
-	}
-
-	; Restore original clipboard
-	try {
-		A_Clipboard := clipBackup
-	}
-
-	if unsupportedStrategy {
+	if result.unsupported {
 		MsgBox("This Sticky Notes field does not accept the UIA Value method. Run the wet read again and choose Original (Ctrl+V) or ControlSetText.", "Paste Method Unavailable", "Icon!")
-	} else if !success {
-		MsgBox("Wet read may not have pasted fully. Please verify the sticky note.")
+	} else if !result.success {
+		if !result.restored {
+			MsgBox("The wet read failed and PACS Assistant could not restore the previous sticky note. Keep the window open and verify the note manually.", "Sticky Note Restore Failed", "Icon!")
+		} else if (result.reason = "clipboard") {
+			MsgBox("The wet read was not pasted because the clipboard did not become ready. The previous sticky note was left unchanged.", "Clipboard Not Ready", "Icon!")
+		} else {
+			MsgBox("The wet read was not pasted. The previous sticky note was restored; verify it before closing the window.", "Paste Failed", "Icon!")
+		}
+	}
+
+	if !result.clipboardRestored {
+		MsgBox("The wet read operation could not restore the clipboard. Copy any needed clipboard content again.", "Clipboard Restore Failed", "Icon!")
 	}
 
 	if !attendingRouted {
