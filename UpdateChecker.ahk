@@ -1,6 +1,55 @@
 #Requires AutoHotkey v2.0
 #Include Settings.ahk
 #Include Version.ahk
+#Include JsonParser.ahk
+
+/**
+ * Bounded GitHub HTTP transport. The synchronous calls remain simple for the timer
+ * workflow, while explicit WinHTTP timeouts prevent startup from hanging forever.
+ */
+class WinHttpTransport {
+    static resolveTimeoutMs := 2000
+    static connectTimeoutMs := 3000
+    static sendTimeoutMs := 5000
+    static receiveTimeoutMs := 10000
+
+    CreateRequest(url) {
+        request := ComObject("WinHttp.WinHttpRequest.5.1")
+        request.SetTimeouts(
+            WinHttpTransport.resolveTimeoutMs,
+            WinHttpTransport.connectTimeoutMs,
+            WinHttpTransport.sendTimeoutMs,
+            WinHttpTransport.receiveTimeoutMs
+        )
+        request.Open("GET", url, false)
+        request.SetRequestHeader("User-Agent", "PACS-Assistant-Update-Checker")
+        request.SetRequestHeader("Accept", "application/vnd.github+json")
+        return request
+    }
+
+    GetText(url) {
+        request := this.CreateRequest(url)
+        request.Send()
+        return {status: request.Status, body: request.ResponseText}
+    }
+
+    Download(url, destination) {
+        request := this.CreateRequest(url)
+        request.Send()
+        if (request.Status != 200)
+            throw Error("Update download returned HTTP " request.Status)
+
+        stream := ComObject("ADODB.Stream")
+        stream.Type := 1  ; binary
+        stream.Open()
+        try {
+            stream.Write(request.ResponseBody)
+            stream.SaveToFile(destination, 2)  ; overwrite
+        } finally {
+            stream.Close()
+        }
+    }
+}
 
 class UpdateChecker {
     ; Read through a property rather than copied into a static, so there is no second
@@ -13,12 +62,15 @@ class UpdateChecker {
     ; excludes prereleases natively; asking for the newest release includes them.
     static latestStableUrl := "https://api.github.com/repos/rakan959/pacs-assistant/releases/latest"
     static newestReleaseUrl := "https://api.github.com/repos/rakan959/pacs-assistant/releases?per_page=1"
+    static transport := WinHttpTransport()
 
     static updateTimer := 0
+    static cleanupTimer := 0
     static skippedVersion := ""  ; Track which version the user chose to skip
     static lastRemindTime := 0   ; Track when the user last clicked "Remind Me Later"
     
     static Start() {
+        this.ScheduleUpdateArtifactCleanup()
         if !Settings.Get("AutoUpdate")
             return
 
@@ -179,17 +231,71 @@ class UpdateChecker {
         return 0
     }
     
-    /**
-     * Turns a JSON string literal back into text.
-     * Only the escapes GitHub actually emits in release notes are handled.
-     */
+    ; Compatibility helper retained for callers that hold the contents of one JSON
+    ; string literal rather than a complete document.
     static DecodeJsonString(text) {
-        text := StrReplace(text, "\r\n", "`n")
-        text := StrReplace(text, "\n", "`n")
-        text := StrReplace(text, "\t", "`t")
-        text := StrReplace(text, "\/", "/")
-        text := StrReplace(text, '\"', '"')
-        return StrReplace(text, "\\", "\")
+        return JsonParser.Parse(Chr(34) text Chr(34))
+    }
+
+    static ParseReleaseResponse(responseText) {
+        document := JsonParser.Parse(responseText)
+        if (document is Array) {
+            if (document.Length = 0)
+                throw Error("GitHub returned an empty release list")
+            release := document[1]
+        } else {
+            release := document
+        }
+
+        if !(release is Map) || !release.Has("tag_name") || Type(release["tag_name"]) != "String"
+            throw Error("Release metadata is missing tag_name")
+        if !release.Has("assets") || !(release["assets"] is Array)
+            throw Error("Release metadata is missing assets")
+
+        selectedAsset := 0
+        for asset in release["assets"] {
+            if (asset is Map && asset.Has("name") && asset["name"] = "pacs-assistant.exe") {
+                selectedAsset := asset
+                break
+            }
+        }
+        if !selectedAsset
+            throw Error("Release does not contain pacs-assistant.exe")
+
+        for field in ["browser_download_url", "digest", "size"] {
+            if !selectedAsset.Has(field)
+                throw Error("Release asset is missing " field)
+        }
+
+        downloadUrl := selectedAsset["browser_download_url"]
+        digest := selectedAsset["digest"]
+        size := selectedAsset["size"]
+        if !this.IsTrustedDownloadUrl(downloadUrl)
+            throw Error("Release asset has an untrusted download URL")
+        if (Type(digest) != "String" || !RegExMatch(digest, "i)^sha256:([0-9a-f]{64})$", &digestMatch))
+            throw Error("Release asset is missing a valid SHA-256 digest")
+        if !(size is Integer) || size <= 0
+            throw Error("Release asset has an invalid size")
+
+        notes := "No release notes available."
+        if (release.Has("body") && Type(release["body"]) = "String" && release["body"] != "")
+            notes := release["body"]
+
+        return {
+            version: release["tag_name"],
+            notes: notes,
+            downloadUrl: downloadUrl,
+            assetSize: size,
+            assetSha256: StrLower(digestMatch[1])
+        }
+    }
+
+    static IsTrustedDownloadUrl(url) {
+        return Type(url) = "String"
+            && RegExMatch(
+                url,
+                "i)^https://github\.com/rakan959/pacs-assistant/releases/download/[^/?#]+/pacs-assistant\.exe$"
+            ) > 0
     }
 
     static CheckForUpdates() {
@@ -208,32 +314,12 @@ class UpdateChecker {
         url := Settings.Get("SkipBetaVersions") ? this.latestStableUrl : this.newestReleaseUrl
 
         try {
-            ; Set up the HTTP request with headers for GitHub API
-            whr := ComObject("WinHttp.WinHttpRequest.5.1")
-            whr.Open("GET", url, true)
-            whr.SetRequestHeader("User-Agent", "PACS-Assistant-Update-Checker")
-            whr.SetRequestHeader("Accept", "application/vnd.github+json")
-            whr.Send()
-            whr.WaitForResponse()
+            response := this.transport.GetText(url)
 
             ; 404 is expected from /releases/latest when every release is a prerelease
-            if (whr.Status = 200) {
-                ; Parse the JSON response. per_page=1 keeps the array to a single
-                ; release, so the first match of each field belongs to that release.
-                responseText := whr.ResponseText
-
-                ; Extract the required fields using RegEx since we know the format
-                tagMatch := RegExMatch(responseText, '"tag_name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', &tag)
-                bodyMatch := RegExMatch(responseText, '"body"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', &body)
-                ; Match the asset by name so a future extra asset cannot be picked up
-                assetsMatch := RegExMatch(responseText, '"browser_download_url"\s*:\s*"([^"]+/pacs-assistant\.exe)"', &asset)
-
-                if (!tagMatch)
-                    return { hasUpdate: false }
-
-                latestVersion := tag[1]
-                releaseNotes := bodyMatch ? this.DecodeJsonString(body[1]) : "No release notes available."
-                downloadUrl := assetsMatch ? asset[1] : ""
+            if (response.status = 200) {
+                release := this.ParseReleaseResponse(response.body)
+                latestVersion := release.version
 
                 ; Check if user chose to skip this version
                 if (latestVersion = this.skippedVersion)
@@ -247,15 +333,14 @@ class UpdateChecker {
                 compareResult := this.CompareVersions(this.currentVersion, latestVersion)
                 
                 if (compareResult < 0) {
-                    if (downloadUrl = "")
-                        return { hasUpdate: false }
-                        
                     return {
                         hasUpdate: true,
                         currentVersion: this.currentVersion,
                         latestVersion: latestVersion,
-                        downloadUrl: downloadUrl,
-                        releaseNotes: releaseNotes
+                        downloadUrl: release.downloadUrl,
+                        downloadSize: release.assetSize,
+                        downloadSha256: release.assetSha256,
+                        releaseNotes: release.notes
                     }
                 }
             }
@@ -315,7 +400,7 @@ class UpdateChecker {
         buttonGroup := updateGui.Add("GroupBox", "y+15 w400 h50")
         updateGui.Add("Button", "xp+10 yp+15 w120", "Update Now").OnEvent("Click", (*) => (
             saveChoices(),
-            this.PerformUpdate(updateInfo.downloadUrl, updateGui)
+            this.PerformUpdate(updateInfo, updateGui)
         ))
         updateGui.Add("Button", "x+10 w120", "Remind Me Later").OnEvent("Click", (*) => (
             this.lastRemindTime := A_TickCount,  ; Set the remind time
@@ -331,47 +416,271 @@ class UpdateChecker {
         updateGui.Show()
     }
     
-    static PerformUpdate(downloadUrl, updateGui) {
+    static HashFileSha256(path) {
+        algorithm := 0
+        hash := 0
+        file := 0
+
         try {
-            ; Get the current executable path
-            currentExe := A_ScriptFullPath
-            backupExe := A_ScriptDir "\pacs-assistant.backup.exe"
-            newExe := A_ScriptDir "\pacs-assistant.new.exe"
-            
-            ; Create backup of current executable
-            if FileExist(currentExe)
-                FileCopy(currentExe, backupExe, true)
-                
-            ; Download new version
-            Download(downloadUrl, newExe)
-            
-            ; Create a batch file to perform the update after this process exits.
-            ; Written next to the executable, not into whatever the working directory
-            ; happens to be, and replaced rather than appended - FileAppend onto a
-            ; leftover script from a failed update ran the stale commands first.
-            batchPath := A_ScriptDir "\update.bat"
-            batchScript := "
-            (
-            @echo off
-            timeout /t 1 /nobreak >nul
-            move /y `"" newExe "`" `"" currentExe "`"
-            start `"`" `"" currentExe "`"
-            del `"%~f0`"
-            )"
+            this.CheckNtStatus(
+                DllCall("bcrypt\BCryptOpenAlgorithmProvider",
+                    "Ptr*", &algorithm,
+                    "WStr", "SHA256",
+                    "Ptr", 0,
+                    "UInt", 0,
+                    "UInt"),
+                "BCryptOpenAlgorithmProvider"
+            )
 
-            if FileExist(batchPath)
-                FileDelete(batchPath)
-            FileAppend(batchScript, batchPath)
+            objectLength := this.GetBcryptUIntProperty(algorithm, "ObjectLength")
+            digestLength := this.GetBcryptUIntProperty(algorithm, "HashDigestLength")
+            hashObject := Buffer(objectLength)
+            this.CheckNtStatus(
+                DllCall("bcrypt\BCryptCreateHash",
+                    "Ptr", algorithm,
+                    "Ptr*", &hash,
+                    "Ptr", hashObject.Ptr,
+                    "UInt", hashObject.Size,
+                    "Ptr", 0,
+                    "UInt", 0,
+                    "UInt", 0,
+                    "UInt"),
+                "BCryptCreateHash"
+            )
 
-            ; Run the update batch file and exit this process
-            Run('"' batchPath '"', A_ScriptDir, "Hide")
+            file := FileOpen(path, "r")
+            if !file
+                throw OSError(A_LastError, , "Could not open update for hashing")
+            readBuffer := Buffer(1024 * 1024)
+            while (bytesRead := file.RawRead(readBuffer)) {
+                this.CheckNtStatus(
+                    DllCall("bcrypt\BCryptHashData",
+                        "Ptr", hash,
+                        "Ptr", readBuffer.Ptr,
+                        "UInt", bytesRead,
+                        "UInt", 0,
+                        "UInt"),
+                    "BCryptHashData"
+                )
+            }
+
+            digest := Buffer(digestLength)
+            this.CheckNtStatus(
+                DllCall("bcrypt\BCryptFinishHash",
+                    "Ptr", hash,
+                    "Ptr", digest.Ptr,
+                    "UInt", digest.Size,
+                    "UInt", 0,
+                    "UInt"),
+                "BCryptFinishHash"
+            )
+
+            hex := ""
+            loop digest.Size
+                hex .= Format("{:02x}", NumGet(digest, A_Index - 1, "UChar"))
+            return hex
+        } finally {
+            if IsObject(file)
+                file.Close()
+            if hash
+                DllCall("bcrypt\BCryptDestroyHash", "Ptr", hash)
+            if algorithm
+                DllCall("bcrypt\BCryptCloseAlgorithmProvider", "Ptr", algorithm, "UInt", 0)
+        }
+    }
+
+    static GetBcryptUIntProperty(handle, propertyName) {
+        value := Buffer(4)
+        written := 0
+        this.CheckNtStatus(
+            DllCall("bcrypt\BCryptGetProperty",
+                "Ptr", handle,
+                "WStr", propertyName,
+                "Ptr", value.Ptr,
+                "UInt", value.Size,
+                "UInt*", &written,
+                "UInt", 0,
+                "UInt"),
+            "BCryptGetProperty(" propertyName ")"
+        )
+        return NumGet(value, 0, "UInt")
+    }
+
+    static CheckNtStatus(status, operation) {
+        if (status != 0)
+            throw Error(operation " failed with NTSTATUS " Format("0x{:08X}", status & 0xFFFFFFFF))
+    }
+
+    static IsPortableExecutable(path) {
+        try {
+            size := FileGetSize(path)
+            if (size < 64)
+                return false
+            file := FileOpen(path, "r")
+            if !file
+                return false
+
+            signature := Buffer(2)
+            if (file.RawRead(signature) != 2 || NumGet(signature, 0, "UShort") != 0x5A4D)
+                return false
+
+            file.Pos := 0x3C
+            offsetBuffer := Buffer(4)
+            if (file.RawRead(offsetBuffer) != 4)
+                return false
+            peOffset := NumGet(offsetBuffer, 0, "UInt")
+            if (peOffset < 64 || peOffset + 4 > size)
+                return false
+
+            file.Pos := peOffset
+            peSignature := Buffer(4)
+            return file.RawRead(peSignature) = 4
+                && NumGet(peSignature, 0, "UInt") = 0x00004550
+        } catch {
+            return false
+        } finally {
+            if IsSet(file) && IsObject(file)
+                file.Close()
+        }
+    }
+
+    static ValidateDownloadedArtifact(path, expectedSize, expectedSha256, expectedVersion) {
+        if (!FileExist(path)
+            || expectedSize <= 0
+            || !RegExMatch(expectedSha256, "i)^[0-9a-f]{64}$")
+            || FileGetSize(path) != expectedSize
+            || StrLower(this.HashFileSha256(path)) != StrLower(expectedSha256)
+            || !this.IsPortableExecutable(path)) {
+            return false
+        }
+
+        try fileVersion := this.ParseVersion(FileGetVersion(path))
+        catch {
+            return false
+        }
+        expected := this.ParseVersion(expectedVersion)
+        return fileVersion.major = expected.major
+            && fileVersion.minor = expected.minor
+            && fileVersion.patch = expected.patch
+    }
+
+    static BuildUpdaterScript() {
+        script := "
+        (
+        $ParentPid = [int]$args[0]
+        $CurrentExe = [string]$args[1]
+        $NewExe = [string]$args[2]
+        $BackupExe = [string]$args[3]
+
+        $ErrorActionPreference = 'Stop'
+        try {
+            $deadline = [DateTime]::UtcNow.AddSeconds(30)
+            while (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {
+                if ([DateTime]::UtcNow -ge $deadline) {
+                    throw 'PACS Assistant did not exit before the update timeout.'
+                }
+                Start-Sleep -Milliseconds 200
+            }
+
+            if (Test-Path -LiteralPath $BackupExe) {
+                Remove-Item -LiteralPath $BackupExe -Force
+            }
+            Move-Item -LiteralPath $CurrentExe -Destination $BackupExe
+
+            try {
+                Move-Item -LiteralPath $NewExe -Destination $CurrentExe
+                $newProcess = Start-Process -FilePath $CurrentExe -PassThru
+                Start-Sleep -Seconds 5
+                $newProcess.Refresh()
+                if ($newProcess.HasExited) {
+                    throw 'The updated PACS Assistant exited during its startup health check.'
+                }
+            } catch {
+                if (Test-Path -LiteralPath $CurrentExe) {
+                    Remove-Item -LiteralPath $CurrentExe -Force
+                }
+                if (Test-Path -LiteralPath $BackupExe) {
+                    Move-Item -LiteralPath $BackupExe -Destination $CurrentExe
+                    Start-Process -FilePath $CurrentExe
+                }
+                throw
+            }
+        } finally {
+            Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+        }
+        )"
+        return script
+    }
+
+    static CleanupUpdateArtifacts() {
+        for name in ["pacs-assistant.backup.exe", "pacs-assistant.new.exe", "update.ps1"] {
+            path := A_ScriptDir "\" name
+            try {
+                if FileExist(path)
+                    FileDelete(path)
+            }
+        }
+        this.cleanupTimer := 0
+    }
+
+    static ScheduleUpdateArtifactCleanup() {
+        if this.cleanupTimer
+            SetTimer(this.cleanupTimer, 0)
+        this.cleanupTimer := ObjBindMethod(this, "CleanupUpdateArtifacts")
+        ; The updater watches the replacement for five seconds and may still need
+        ; the backup during that window. Reaching 30 seconds of normal app runtime is
+        ; the signal that the staged rollback files can be retired.
+        SetTimer(this.cleanupTimer, -30000)
+    }
+
+    static CancelUpdateArtifactCleanup() {
+        if this.cleanupTimer
+            SetTimer(this.cleanupTimer, 0)
+        this.cleanupTimer := 0
+    }
+
+    static PerformUpdate(updateInfo, updateGui) {
+        currentExe := A_ScriptFullPath
+        backupExe := A_ScriptDir "\pacs-assistant.backup.exe"
+        newExe := A_ScriptDir "\pacs-assistant.new.exe"
+        updaterPath := A_ScriptDir "\update.ps1"
+
+        try {
+            this.CancelUpdateArtifactCleanup()
+            if !A_IsCompiled
+                throw Error("Automatic update is only available in the compiled application")
+            if !this.IsTrustedDownloadUrl(updateInfo.downloadUrl)
+                throw Error("The release download URL is not trusted")
+            if (FileExist(newExe))
+                FileDelete(newExe)
+            if (FileExist(updaterPath))
+                FileDelete(updaterPath)
+
+            this.transport.Download(updateInfo.downloadUrl, newExe)
+            if !this.ValidateDownloadedArtifact(
+                newExe,
+                updateInfo.downloadSize,
+                updateInfo.downloadSha256,
+                updateInfo.latestVersion
+            ) {
+                throw Error("The downloaded update failed size, SHA-256, PE, or version validation")
+            }
+
+            FileAppend(this.BuildUpdaterScript(), updaterPath, "UTF-8-RAW")
+            powershell := A_WinDir "\System32\WindowsPowerShell\v1.0\powershell.exe"
+            command := '"' powershell '" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'
+                . updaterPath '" ' DllCall("GetCurrentProcessId")
+                . ' "' currentExe '" "' newExe '" "' backupExe '"'
+            Run(command, A_ScriptDir, "Hide")
             updateGui.Destroy()
             ExitApp
         } catch as err {
             MsgBox("Update failed: " err.Message, "Error", "Icon!")
-            ; Restore from backup if it exists
-            if FileExist(backupExe)
-                FileMove(backupExe, currentExe, true)
+            ; The running executable is not touched until the updater starts after
+            ; ExitApp, so a preflight failure only needs to remove staged artifacts.
+            try FileDelete(newExe)
+            try FileDelete(updaterPath)
+            this.ScheduleUpdateArtifactCleanup()
         }
     }
 }

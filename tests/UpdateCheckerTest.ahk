@@ -11,7 +11,14 @@ class UpdateCheckerTest {
         "TestVersionEquivalence",
         "TestAutoCheckTimerRespectsSettings",
         "TestSettingsChangeRestartsTimer",
-        "TestVersionComesFromAppVersion"
+        "TestVersionComesFromAppVersion",
+        "TestJsonParserHandlesEscapesAndUnicode",
+        "TestReleaseParserKeepsAssetMetadataTogether",
+        "TestReleaseParserAcceptsArrayResponse",
+        "TestDownloadUrlMustBelongToThisRepository",
+        "TestSha256KnownVector",
+        "TestArtifactValidationRejectsNonExecutable",
+        "TestUpdaterScriptRequiresHealthyRelaunch"
     ]
 
     Setup() {
@@ -122,6 +129,82 @@ class UpdateCheckerTest {
     ; place and cannot drift from the tag it was built from
     TestVersionComesFromAppVersion() {
         Assert.Equal(AppVersion.current, UpdateChecker.currentVersion)
+    }
+
+    TestJsonParserHandlesEscapesAndUnicode() {
+        parsed := JsonParser.Parse('{"text":"line 1\nquote: \"ok\"; slash: \\n; smile: \u263A; emoji: \uD83D\uDE00"}')
+        Assert.Equal("line 1`nquote: `"ok`"; slash: \n; smile: " Chr(0x263A) "; emoji: " Chr(0x1F600), parsed["text"])
+    }
+
+    TestReleaseParserKeepsAssetMetadataTogether() {
+        json := '{"tag_name":"v2.2.0","body":"Line 1\nLine 2","assets":['
+            . '{"name":"notes.txt","size":12,"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/notes.txt"},'
+            . '{"browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/pacs-assistant.exe","digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":1550000,"name":"pacs-assistant.exe"}'
+            . ']}'
+
+        release := UpdateChecker.ParseReleaseResponse(json)
+
+        Assert.Equal("v2.2.0", release.version)
+        Assert.Equal("Line 1`nLine 2", release.notes)
+        Assert.Equal(1550000, release.assetSize)
+        Assert.Equal("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", release.assetSha256)
+        Assert.True(InStr(release.downloadUrl, "/pacs-assistant.exe") > 0)
+    }
+
+    TestReleaseParserAcceptsArrayResponse() {
+        json := '[{"tag_name":"v2.2.0-beta.1","body":"Beta","assets":['
+            . '{"name":"pacs-assistant.exe","size":42,"digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0-beta.1/pacs-assistant.exe"}'
+            . ']}]'
+
+        release := UpdateChecker.ParseReleaseResponse(json)
+        Assert.Equal("v2.2.0-beta.1", release.version)
+        Assert.Equal(42, release.assetSize)
+    }
+
+    TestDownloadUrlMustBelongToThisRepository() {
+        Assert.True(UpdateChecker.IsTrustedDownloadUrl(
+            "https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/pacs-assistant.exe"
+        ))
+        Assert.False(UpdateChecker.IsTrustedDownloadUrl(
+            "http://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/pacs-assistant.exe"
+        ))
+        Assert.False(UpdateChecker.IsTrustedDownloadUrl(
+            "https://github.com/attacker/pacs-assistant/releases/download/v2.2.0/pacs-assistant.exe"
+        ))
+        Assert.False(UpdateChecker.IsTrustedDownloadUrl(
+            "https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/other.exe"
+        ))
+    }
+
+    TestSha256KnownVector() {
+        path := A_Temp "\pacs_sha256_" A_TickCount ".txt"
+        FileAppend("abc", path, "UTF-8-RAW")
+        try {
+            Assert.Equal(
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                UpdateChecker.HashFileSha256(path)
+            )
+        } finally {
+            try FileDelete(path)
+        }
+    }
+
+    TestArtifactValidationRejectsNonExecutable() {
+        path := A_Temp "\pacs_bad_update_" A_TickCount ".exe"
+        FileAppend("not an executable", path, "UTF-8-RAW")
+        try {
+            digest := UpdateChecker.HashFileSha256(path)
+            Assert.False(UpdateChecker.ValidateDownloadedArtifact(path, FileGetSize(path), digest, "v2.2.0"))
+        } finally {
+            try FileDelete(path)
+        }
+    }
+
+    TestUpdaterScriptRequiresHealthyRelaunch() {
+        script := UpdateChecker.BuildUpdaterScript()
+        Assert.True(InStr(script, "Start-Process -FilePath $CurrentExe -PassThru") > 0)
+        Assert.True(InStr(script, "Start-Sleep -Seconds 5") > 0)
+        Assert.True(InStr(script, "$newProcess.HasExited") > 0)
     }
     
     TestAutoCheckTimerRespectsSettings() {
