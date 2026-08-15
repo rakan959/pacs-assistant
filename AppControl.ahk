@@ -27,10 +27,6 @@ class NativeWindowDriver {
         Send(keys)
     }
 
-    SendText(text) {
-        SendText(text)
-    }
-
     Pause(milliseconds) {
         Sleep(milliseconds)
     }
@@ -118,17 +114,6 @@ class AppControl {
             if !this.windowDriver.IsActive(winTitle)
                 return false
             this.windowDriver.SendKeys(keys)
-            return true
-        } catch {
-            return false
-        }
-    }
-
-    static SendTextToActiveWindow(winTitle, text) {
-        try {
-            if !this.windowDriver.IsActive(winTitle)
-                return false
-            this.windowDriver.SendText(text)
             return true
         } catch {
             return false

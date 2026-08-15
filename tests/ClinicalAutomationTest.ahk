@@ -405,10 +405,6 @@ class FakeWindowDriver {
         this.calls.Push({kind: "keys", value: keys})
     }
 
-    SendText(text) {
-        this.calls.Push({kind: "text", value: text})
-    }
-
     Pause(milliseconds) {
         this.calls.Push({kind: "pause", value: milliseconds})
     }
