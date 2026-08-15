@@ -17,6 +17,7 @@ class KeybindGUITest {
         "TestRejectedScopeChangeRestoresPriorScope",
         "TestFailedModalitySavePreservesLiveProfile",
         "TestStaleModalityDialogCannotWriteAnotherProfile",
+        "TestStaleRenameDialogCannotRenameAnotherProfile",
         "TestFailedCustomDeletePreservesLiveProfile"
     ]
 
@@ -284,6 +285,44 @@ class KeybindGUITest {
 
         Assert.Equal("A Attending", capturedA)
         Assert.Equal("B Attending", capturedB)
+        Assert.True(capturedDestroyed)
+    }
+
+    TestStaleRenameDialogCannotRenameAnotherProfile() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalDefault := ProfileManager.defaultProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        tempRoot := A_Temp "\pacs_stale_rename_" A_TickCount
+        profileA := ProfileManager.NewProfile()
+        profileB := ProfileManager.NewProfile()
+        dialog := FakeProfileDialog("A")
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.defaultProfile := ""
+            ProfileManager.profiles := Map("A", profileA, "B", profileB)
+            ProfileManager.currentProfile := "B"
+            ProfileManager.SaveProfile("A", profileA)
+            try this.gui.RenameProfile("A", "Renamed", dialog)
+
+            keptA := ProfileManager.profiles.Has("A")
+            keptB := ProfileManager.profiles.Has("B")
+            createdRename := ProfileManager.profiles.Has("Renamed")
+            capturedDestroyed := dialog.destroyed
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.defaultProfile := originalDefault
+            ProfileManager.profilesPath := originalProfilesPath
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.True(keptA)
+        Assert.True(keptB)
+        Assert.False(createdRename)
         Assert.True(capturedDestroyed)
     }
 

@@ -107,16 +107,22 @@ class KeybindGUI {
     }
 
     HasMainWindow() {
-        if !IsObject(this.gui)
+        return this.GuiIsLive(this.gui)
+    }
+
+    GuiIsLive(gui) {
+        if !IsObject(gui)
             return false
-        try return this.gui.Hwnd && WinExist("ahk_id " this.gui.Hwnd)
+        try return gui.Hwnd && WinExist("ahk_id " gui.Hwnd)
         return false
     }
 
-    NewProfileDialog(title, profileName := "") {
+    NewProfileDialog(title, profileName := "", ownerGui := 0) {
         if (profileName = "")
             profileName := ProfileManager.currentProfile
-        options := this.HasMainWindow() ? "+Owner" this.gui.Hwnd : ""
+        if !ownerGui && this.HasMainWindow()
+            ownerGui := this.gui
+        options := this.GuiIsLive(ownerGui) ? "+Owner" ownerGui.Hwnd : ""
         dialog := Gui(options, title)
         dialog.profileName := profileName
         return dialog
@@ -550,7 +556,11 @@ class KeybindGUI {
             return
         }
 
-        renameGui := Gui(, "PACS Assistant - Rename Profile")
+        renameGui := this.NewProfileDialog(
+            "PACS Assistant - Rename Profile",
+            name,
+            parentGui
+        )
         renameGui.Add("Text",, "Enter new name for profile '" name "':")
         nameEdit := renameGui.Add("Edit", "w200", name)
         renameGui.Add("Button",, "OK").OnEvent("Click", (*) => this.RenameProfile(name, nameEdit.Value, renameGui, parentGui))
@@ -559,6 +569,9 @@ class KeybindGUI {
     }
 
     RenameProfile(oldName, newName, renameGui, parentGui := 0) {
+        if !this.RenameDialogIsCurrent(oldName, renameGui, parentGui)
+            return false
+
         newName := Trim(newName)
         if (newName = "") {
             MsgBox("Profile name cannot be empty.", "Error", "Icon!")
@@ -577,6 +590,27 @@ class KeybindGUI {
         } else {
             MsgBox("Failed to rename profile. The name may already be in use.", "Error", "Icon!")
         }
+    }
+
+    RenameDialogIsCurrent(oldName, renameGui, parentGui := 0) {
+        capturedName := ""
+        try capturedName := renameGui.profileName
+        valid := capturedName = oldName && ProfileManager.profiles.Has(oldName)
+        if valid {
+            valid := parentGui
+                ? this.GuiIsLive(parentGui)
+                : ProfileManager.currentProfile = oldName
+        }
+        if valid
+            return true
+
+        try renameGui.Destroy()
+        MsgBox(
+            "The profile context changed while this rename dialog was open. Reopen it before renaming.",
+            "Profile Changed",
+            "Icon!"
+        )
+        return false
     }
 
     ShowAddFunctionDialog(listView) {
