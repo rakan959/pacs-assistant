@@ -11,7 +11,9 @@ class PACSMonitorTest {
         "TestRepeatedAccessionAlertsOnce",
         "TestInterruptedScanDoesNotConsumeUnalertedAccessions",
         "TestMonitoringUsesTestMode",
-        "TestRefreshFallbackRequiresSemanticButtonIdentity",
+        "TestRefreshButtonRequiresSemanticIdentity",
+        "TestRefreshButtonMustBeUniqueWithinThePortal",
+        "TestRefreshAndScanUseOneCapturedPortalSession",
         "TestStudyListFallbackRequiresExpectedTypeAndProcess",
         "TestStudyListDoesNotUseGenericFirstMatch",
         "TestOnSettingsChangedRespectsAutoRefresh",
@@ -98,7 +100,7 @@ class PACSMonitorTest {
         Assert.Equal(0, PACSMonitor.testLastNewStudies.Length)
     }
 
-    TestRefreshFallbackRequiresSemanticButtonIdentity() {
+    TestRefreshButtonRequiresSemanticIdentity() {
         root := FakePACSTargetElement(UIA.Type.Window, 42)
         valid := FakePACSTargetElement(UIA.Type.Button, 42, "Refresh studies", "refreshButton", true)
         wrongType := FakePACSTargetElement(UIA.Type.Edit, 42, "Refresh", "refreshButton", true)
@@ -111,6 +113,54 @@ class PACSMonitorTest {
         Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongMeaning))
         Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongProcess))
         Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongWindow))
+    }
+
+    TestRefreshButtonMustBeUniqueWithinThePortal() {
+        first := FakePACSTargetElement(UIA.Type.Button, 42, "Refresh studies", "refreshPrimary", true)
+        second := FakePACSTargetElement(UIA.Type.Button, 42, "Refresh panel", "refreshSecondary", true)
+        root := FakePACSRefreshRoot(42, 100, [first, second])
+
+        Assert.Equal(0, PACSMonitor.FindRefreshButton(root))
+    }
+
+    TestRefreshAndScanUseOneCapturedPortalSession() {
+        originalTestMode := PACSMonitor.testMode
+        originalDriver := PACSMonitor.driver
+        session := {
+            hwnd: 100,
+            target: "ahk_id 100",
+            processId: 42,
+            title: "Explorer Portal",
+            exe: "msedge.exe"
+        }
+        button := FakePACSActionButton(42, 100, "Refresh", "refreshPrimary")
+        studyList := FakePACSStudyList(
+            42,
+            100,
+            {Name: "CT HEAD WITHOUT CONTRAST 12345678"}
+        )
+        driver := PinnedPortalMonitorDriver(session, button, studyList)
+
+        try {
+            PACSMonitor.testMode := false
+            PACSMonitor.driver := driver
+            PACSMonitor.knownAccessions := Map()
+            PACSMonitor.RefreshAndCheck()
+            marked := PACSMonitor.HasAccession("12345678")
+        } finally {
+            PACSMonitor.driver := originalDriver
+            PACSMonitor.testMode := originalTestMode
+        }
+
+        Assert.True(marked)
+        Assert.Equal(1, driver.resolveCalls)
+        Assert.Equal(2, driver.rootTargets.Length)
+        Assert.Equal("ahk_id 100", driver.rootTargets[1])
+        Assert.Equal("ahk_id 100", driver.rootTargets[2])
+        Assert.True(driver.liveChecks >= 2)
+        Assert.Equal(0, driver.restoreCalls)
+        Assert.Equal(1, button.clickCalls)
+        Assert.Equal(0, button.controlClickCalls)
     }
 
     TestStudyListFallbackRequiresExpectedTypeAndProcess() {
@@ -269,6 +319,92 @@ class FakePACSStudyRoot {
     FindElement(*) {
         this.genericFindCalls++
         return this.genericResult
+    }
+}
+
+class FakePACSRefreshRoot extends FakePACSTargetElement {
+    __New(processId, windowId, candidates) {
+        super.__New(UIA.Type.Window, processId, "", "", false, windowId)
+        this.candidates := candidates
+    }
+
+    FindElements(*) {
+        return this.candidates.Clone()
+    }
+}
+
+class FakePACSActionButton extends FakePACSTargetElement {
+    __New(processId, windowId, name, automationId) {
+        super.__New(UIA.Type.Button, processId, name, automationId, true, windowId)
+        this.clickCalls := 0
+        this.controlClickCalls := 0
+    }
+
+    Click(*) {
+        this.clickCalls++
+        return true
+    }
+
+    ControlClick(*) {
+        this.controlClickCalls++
+        return true
+    }
+}
+
+class FakePACSStudyList extends Array {
+    __New(processId, windowId, rows*) {
+        this.ProcessId := processId
+        this.WinId := windowId
+        this.Type := UIA.Type.DataGrid
+        for row in rows
+            this.Push(row)
+    }
+}
+
+class PinnedPortalMonitorDriver {
+    __New(session, button, studyList) {
+        this.session := session
+        this.button := button
+        this.studyList := studyList
+        this.resolveCalls := 0
+        this.liveChecks := 0
+        this.rootTargets := []
+        this.rootCalls := 0
+        this.restoreCalls := 0
+    }
+
+    ResolvePortalSession() {
+        this.resolveCalls++
+        return this.session
+    }
+
+    SessionIsLive(session) {
+        this.liveChecks++
+        return session.hwnd = this.session.hwnd
+            && session.processId = this.session.processId
+    }
+
+    IsActive(*) {
+        return false
+    }
+
+    GetActiveWindow() {
+        return 0
+    }
+
+    RestoreActiveWindow(*) {
+        this.restoreCalls++
+    }
+
+    RootForSession(session) {
+        this.rootTargets.Push(session.target)
+        this.rootCalls++
+        if (this.rootCalls = 1)
+            return FakePACSRefreshRoot(session.processId, session.hwnd, [this.button])
+        return FakePACSStudyRoot(session.processId, session.hwnd, this.studyList, 0)
+    }
+
+    WaitForRefresh() {
     }
 }
 

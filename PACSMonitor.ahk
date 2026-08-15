@@ -1,6 +1,32 @@
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
 #Include Settings.ahk
+#Include AppControl.ahk
+
+class NativePACSMonitorDriver {
+    ResolvePortalSession() {
+        return AppControl.ResolveUniqueExactWindow(
+            AppControl.ExplorerPortalWindowSpec()
+        )
+    }
+
+    SessionIsLive(session) {
+        return AppControl.ExactSessionIsUniqueAndLive(session)
+    }
+
+    IsActive(session) {
+        try return WinActive(session.target) != 0
+        return false
+    }
+
+    RootForSession(session) {
+        return UIA.ElementFromHandle(session.target)
+    }
+
+    WaitForRefresh() {
+        Sleep(1000)
+    }
+}
 
 class PACSMonitor {
     ; Accessions already alerted on, held as a set. This was an Array scanned
@@ -16,12 +42,11 @@ class PACSMonitor {
     static testRefreshCalls := 0      ; Counter for RefreshAndCheck invocations in test mode
     static testLastNewStudies := []   ; Captured new studies in test mode
 
-    static portalTitle := "Explorer Portal ahk_exe msedge.exe"
+    static driver := NativePACSMonitorDriver()
 
-    ; Positional UIA paths. These are brittle - they encode the portal's layout, so
-    ; they break whenever it shifts - and are only used as a fallback behind a
-    ; property-based lookup.
-    static refreshButtonPath := "Y/YYY/YqYYYVRvrRK"
+    ; The list has no recorded stable semantic identity, so its exact positional
+    ; path is retained behind same-window/type validation. Refresh controls do have
+    ; semantic labels and are required to be unique instead of using a path fallback.
     static studyListPath := "Y/YYY/YqYYYVRxrTR"
 
     ; Refresh failures used to be swallowed entirely: the portal kept being scraped,
@@ -97,31 +122,39 @@ class PACSMonitor {
 
     /**
      * Locates the portal's refresh button.
-     * Properties are tried before the positional path so a layout change no longer
-     * silently disables refreshing.
+     * Every semantic match is enumerated and deduplicated. Ambiguity is a failure:
+     * clicking the first of multiple refresh-labelled controls can refresh an
+     * unrelated portal panel while the worklist remains stale.
      * @returns the button element, or 0 if it cannot be found
      */
     static FindRefreshButton(root) {
+        matches := []
         conditions := [
             {Type: "Button", Name: "Refresh", mm: "SubString", cs: false},
             {Type: "Button", AutomationId: "refresh", mm: "SubString", cs: false}
         ]
         for condition in conditions {
             try {
-                candidate := root.FindElement(condition)
-                if this.IsExpectedRefreshButton(root, candidate)
-                    return candidate
+                for candidate in root.FindElements(condition) {
+                    if (this.IsExpectedRefreshButton(root, candidate)
+                        && !this.ContainsSameElement(matches, candidate))
+                        matches.Push(candidate)
+                }
             }
         }
+        return matches.Length = 1 ? matches[1] : 0
+    }
 
-        ; Positional fallback
-        try {
-            candidate := root.ElementFromPath(this.refreshButtonPath)
-            if this.IsExpectedRefreshButton(root, candidate)
-                return candidate
+    static ContainsSameElement(elements, candidate) {
+        for existing in elements {
+            if (ObjPtr(existing) = ObjPtr(candidate))
+                return true
+            try {
+                if UIA.CompareElementsEx(existing, candidate)
+                    return true
+            }
         }
-
-        return 0
+        return false
     }
 
     /**
@@ -141,7 +174,6 @@ class PACSMonitor {
                 return false
             return candidate.IsInvokePatternAvailable
                 || candidate.IsLegacyIAccessiblePatternAvailable
-                || candidate.NativeWindowHandle
         } catch {
             return false
         }
@@ -193,13 +225,25 @@ class PACSMonitor {
         }
     }
 
+    static IsExpectedPortalRoot(session, root) {
+        if !session || !root
+            return false
+        try return session.hwnd > 0
+            && session.processId > 0
+            && root.WinId = session.hwnd
+            && root.ProcessId = session.processId
+        return false
+    }
+
     /**
      * Clicks refresh in the portal.
      * @returns true if the button was found and actioned
      */
-    static ClickRefresh() {
+    static ClickRefresh(root, session) {
         try {
-            root := UIA.ElementFromHandle(this.portalTitle)
+            if (!this.driver.SessionIsLive(session)
+                || !this.IsExpectedPortalRoot(session, root))
+                return false
         } catch {
             return false
         }
@@ -208,21 +252,15 @@ class PACSMonitor {
         if !button
             return false
 
-        ; Invoke through the UIA pattern first. That works even when the portal is
-        ; minimised or the button is scrolled out of view, which a positional click
-        ; does not. Click() with no arguments returns the pattern it used, or 0 when
-        ; the element exposes none.
+        ; Click() with no arguments uses only UIA semantic patterns; it does not move
+        ; focus or the mouse. A coordinate/control fallback is deliberately omitted
+        ; so the background timer cannot steal focus from the user's current app.
         try {
-            if button.Click()
-                return true
+            if (!this.driver.SessionIsLive(session)
+                || !this.IsExpectedRefreshButton(root, button))
+                return false
+            return !!button.Click()
         }
-
-        ; Fall back to the positional click the previous implementation used
-        try {
-            button.ControlClick()
-            return true
-        }
-
         return false
     }
 
@@ -284,33 +322,40 @@ class PACSMonitor {
         }
 
         try {
-            ; Try to get the Explorer Portal window
-            if !WinExist(this.portalTitle) {
-                return  ; Portal not open, skip this check
-            }
+            ; Resolve one exact portal session once. Every later root/action/read is
+            ; pinned to its HWND/PID instead of resolving the title again.
+            session := this.driver.ResolvePortalSession()
+            if !session
+                return
 
             ; Skip refresh if Explorer Portal is the active window
-            if WinActive(this.portalTitle) {
-                return  ; Don't refresh when user is actively using the portal
+            if this.driver.IsActive(session)
+                return
+
+            root := this.driver.RootForSession(session)
+            if !this.IsExpectedPortalRoot(session, root) {
+                this.RecordScanFailure("portal root identity changed before refresh")
+                return
             }
-
-            ; Store the currently active window
-            previousWindow := WinExist("A")
-
-            refreshed := this.ClickRefresh()
-
-            ; Restore the previously active window
-            if (previousWindow && WinExist("ahk_id " previousWindow)) {
-                WinActivate("ahk_id " previousWindow)
-            }
+            refreshed := this.ClickRefresh(root, session)
 
             this.RecordRefreshResult(refreshed)
 
             ; Wait a moment for the refresh to complete
-            Sleep(1000)
+            this.driver.WaitForRefresh()
 
-            ; Get current accession numbers and study info
-            root := UIA.ElementFromHandle(this.portalTitle)
+            if !this.driver.SessionIsLive(session) {
+                this.RecordScanFailure("portal window changed during refresh")
+                return
+            }
+
+            ; Reacquire the UIA root from the same exact HWND after the portal has
+            ; refreshed; a cached root may be stale after Edge rerenders the page.
+            root := this.driver.RootForSession(session)
+            if !this.IsExpectedPortalRoot(session, root) {
+                this.RecordScanFailure("portal root identity changed before scan")
+                return
+            }
             studyList := this.FindStudyList(root)
             if !studyList {
                 this.RecordScanFailure("study list was not found")
@@ -322,11 +367,6 @@ class PACSMonitor {
 
         } catch as err {
             this.RecordScanFailure(err)
-
-            ; Still try to restore the active window if we have it
-            if (IsSet(previousWindow) && previousWindow && WinExist("ahk_id " previousWindow)) {
-                WinActivate("ahk_id " previousWindow)
-            }
         }
     }
 
