@@ -31,6 +31,7 @@ class WetReadTest {
         "StickyNoteTargetMustBeTheUniqueWritableField",
         "NativeDirectWriteRefusesStaleStickyTarget",
         "NativeFocusRefusesStaleStickyTargetBeforeAnyUIAction",
+        "NativeFocusDoesNotClickAFieldInvalidatedBySetFocus",
         "NativeControlWithoutHandleIsUnsupported",
         "NativeSendRefusesLostFocus",
         "NativeSendRefusesWrongStickyControlFocus",
@@ -392,6 +393,23 @@ class WetReadTest {
         Assert.Equal(0, focusDriver.requestCalls)
     }
 
+    NativeFocusDoesNotClickAFieldInvalidatedBySetFocus() {
+        focusDriver := InvalidatingNativeWetReadFocusDriver()
+        field := InvalidatingWetReadField(focusDriver)
+        driver := NativeWetReadDriver(
+            "ahk_id 200",
+            FakeWetReadWindowDriver(true),
+            focusDriver
+        )
+
+        Assert.Throws(
+            () => driver.Focus(field),
+            "no longer the unique expected target"
+        )
+        Assert.Equal(1, field.setFocusCalls)
+        Assert.Equal(0, field.clickCalls)
+    }
+
     NativeControlWithoutHandleIsUnsupported() {
         driver := NativeWetReadDriver(
             "Sticky Notes",
@@ -620,6 +638,37 @@ class FakeWetReadField {
     }
 
     Click(*) {
+    }
+}
+
+class InvalidatingNativeWetReadFocusDriver extends NativeWetReadFocusDriver {
+    __New() {
+        this.matches := true
+    }
+
+    IsExpectedTarget(*) {
+        return this.matches
+    }
+
+    IsExpectedFocus(*) {
+        return false
+    }
+}
+
+class InvalidatingWetReadField {
+    __New(focusDriver) {
+        this.focusDriver := focusDriver
+        this.setFocusCalls := 0
+        this.clickCalls := 0
+    }
+
+    SetFocus() {
+        this.setFocusCalls++
+        this.focusDriver.matches := false
+    }
+
+    Click(*) {
+        this.clickCalls++
     }
 }
 

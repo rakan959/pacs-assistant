@@ -196,6 +196,9 @@ class StickyNoteOpener {
 class NativeWetReadFocusDriver {
     RequestFocus(field) {
         try field.SetFocus()
+    }
+
+    RequestClick(field) {
         try field.Click("left")
     }
 
@@ -339,6 +342,17 @@ class NativeWetReadDriver {
             if !this.windowDriver.IsActive(this.targetTitle)
                 throw Error(this.targetTitle " is no longer active; focus was not changed")
             this.focusDriver.RequestFocus(field)
+            if this.focusDriver.IsExpectedFocus(this.targetTitle, field)
+                return true
+
+            ; SetFocus can itself rerender the provider or fail because the saved
+            ; element went stale. Prove the exact target/window again before the
+            ; mouse fallback; never click merely because SetFocus did not stick.
+            if !this.focusDriver.IsExpectedTarget(this.targetTitle, field)
+                throw Error(this.targetTitle " expected text field is no longer the unique expected target; focus was not changed")
+            if !this.windowDriver.IsActive(this.targetTitle)
+                throw Error(this.targetTitle " is no longer active; focus was not changed")
+            this.focusDriver.RequestClick(field)
             if this.focusDriver.IsExpectedFocus(this.targetTitle, field)
                 return true
             Sleep(50)
