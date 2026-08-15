@@ -198,9 +198,16 @@ class KeybindGUI {
 
         KeybindGUI.isListening := true
         KeybindGUI.listeningControl := control
-        try this.StartInputHook(funcName, control, promptGui)
+        try {
+            ; The key the user presses to define a bind must be captured as data only.
+            ; Leaving live clinical hotkeys registered here could execute that same key
+            ; (including Draft/Sign) while it is being selected.
+            HotkeyManager.DisableAllHotkeys()
+            this.StartInputHook(funcName, control, promptGui)
+        }
         catch as err {
             this.StopListening()
+            try this.ApplyBinds()
             throw err
         }
         return true
@@ -229,6 +236,12 @@ class KeybindGUI {
     }
 
     OnInputEnd(funcName, control, promptGui, ih?) {
+        ; Stop(), timeout, and replacement by another InputHook all raise OnEnd too.
+        ; Only a real end key is input to bind; treating a stopped hook's blank EndKey
+        ; as data silently unassigned the command while cancelling the dialog.
+        if (ih.EndReason != "EndKey")
+            return
+
         ; Get current state of modifier keys
         hasCtrl := GetKeyState("Ctrl")
         hasAlt := GetKeyState("Alt")
@@ -239,10 +252,7 @@ class KeybindGUI {
         
         ; Handle Escape to cancel
         if (key = "Escape") {
-            this.StopListening()
-            promptGui.Destroy()
-            ; Ensure binds are reapplied even on cancel
-            this.ApplyBinds()
+            this.CancelKeybindPrompt(promptGui)
             return
         }
         
@@ -251,9 +261,7 @@ class KeybindGUI {
             ; Create and start a new input hook since the old one is ended
             try this.StartInputHook(funcName, control, promptGui)
             catch as err {
-                this.StopListening()
-                try promptGui.Destroy()
-                try this.ApplyBinds()
+                this.CancelKeybindPrompt(promptGui)
                 throw err
             }
             return
@@ -279,10 +287,7 @@ class KeybindGUI {
             owner := this.FindProfileBindingOwner(currentProfile, newBind, funcName)
             if owner {
                 MsgBox("This hotkey is already assigned to '" owner "'", "Duplicate Binding", "Icon!")
-                this.StopListening()
-                promptGui.Destroy()
-                ; Ensure binds are reapplied even on duplicate binding
-                this.ApplyBinds()
+                this.CancelKeybindPrompt(promptGui)
                 return
             }
 
@@ -343,6 +348,12 @@ class KeybindGUI {
         }
         KeybindGUI.isListening := false
         KeybindGUI.listeningControl := ""
+    }
+
+    CancelKeybindPrompt(promptGui) {
+        this.StopListening()
+        try promptGui.Destroy()
+        this.ApplyBinds()
     }
 
     SaveCurrentProfile() {
@@ -705,11 +716,11 @@ class KeybindGUI {
         promptGui := Gui(, "PACS Assistant - Set Keybind")
         promptGui.Add("Text",, "Press keys for '" funcName "'...")
         promptGui.Add("Edit", "w200 ReadOnly", "Press keys...")
-        promptGui.Add("Button",, "Cancel").OnEvent("Click", (*) => (this.StopListening(), promptGui.Destroy()))
+        promptGui.Add("Button",, "Cancel").OnEvent("Click", (*) => this.CancelKeybindPrompt(promptGui))
 
         ; Closing with the X has to tear the hook down as well, otherwise it keeps
         ; capturing and rebinds the next key pressed anywhere
-        promptGui.OnEvent("Close", (*) => this.StopListening())
+        promptGui.OnEvent("Close", (*) => this.CancelKeybindPrompt(promptGui))
 
         this.BeginListening(funcName, listView, promptGui)
 

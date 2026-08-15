@@ -152,6 +152,7 @@ if ($process.ExitCode -ne 0) {
 | `MicrophoneManager.ahk` | Microphone selection on the PowerScribe login screen |
 | `KeybindGUI.ahk` | Main window and its dialogs |
 | `HotkeyManager.ahk` | Hotkey registration and window scoping |
+| `HotkeyScope.ahk` | Shared persisted/runtime hotkey-scope contract |
 | `ProfileManager.ahk` | Profile load/save |
 | `Settings.ahk` | Settings storage and the settings dialog |
 | `UpdateChecker.ahk` | Release checks and self-update |

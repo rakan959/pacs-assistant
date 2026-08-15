@@ -28,6 +28,7 @@ class SettingsTest {
     TestDefaultSettingsLoaded() {
         Assert.True(Settings.Get("AutoUpdate"))
         Assert.True(Settings.Get("SkipBetaVersions"))
+        Assert.Equal("", Settings.Get("SkippedUpdateVersion"))
         Assert.False(Settings.Get("AutoRefreshPACS"))
         Assert.Equal(60, Settings.Get("RefreshInterval"))
         Assert.False(Settings.Get("AudioAlertNewCase"))

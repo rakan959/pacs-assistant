@@ -25,7 +25,8 @@ class ProfileManagerTest {
         "TestFailedRenamePreservesOriginalProfile",
         "TestMalformedProfileDoesNotBlockValidProfiles",
         "TestDefaultProfileMustExist",
-        "TestDuplicateBindingsAreRejected"
+        "TestDuplicateBindingsAreRejected",
+        "TestUnknownScopeIsRejected"
     ]
 
     Setup() {
@@ -338,6 +339,18 @@ class ProfileManagerTest {
             "duplicate hotkey"
         )
         Assert.False(FileExist(ProfileManager.profilesPath "\Duplicates.ini"))
+    }
+
+    TestUnknownScopeIsRejected() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        profile.scopes["Sign Report"] := "PACS typo"
+
+        Assert.Throws(
+            () => ProfileManager.SaveProfile("UnknownScope", profile),
+            "hotkey scope"
+        )
+        Assert.False(FileExist(ProfileManager.profilesPath "\UnknownScope.ini"))
     }
 
     Teardown() {

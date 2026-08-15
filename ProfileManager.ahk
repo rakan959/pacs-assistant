@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include Settings.ahk
+#Include HotkeyScope.ahk
 
 class ProfileManager {
     static profiles := Map()
@@ -240,8 +241,11 @@ class ProfileManager {
             if (InStr(funcName, "Custom: ") = 1 && !profile.customFuncs.Has(funcName))
                 throw ValueError("Profile is missing custom command configuration for '" funcName "'")
         }
-        for funcName, _ in profile.scopes
+        for funcName, scope in profile.scopes {
             this.RequireSafeIniKey(funcName, "function")
+            if !HotkeyScope.IsValid(scope)
+                throw ValueError("Profile contains an unknown hotkey scope for '" funcName "'")
+        }
         for modality, _ in profile.modalityAttendings
             this.RequireSafeIniKey(modality, "modality")
     }
@@ -325,6 +329,8 @@ class ProfileManager {
     }
 
     static SetScope(funcName, scope) {
+        if !HotkeyScope.IsValid(scope)
+            throw ValueError("Unknown hotkey scope")
         profile := this.GetCurrentProfile()
         if profile
             profile.scopes[funcName] := scope

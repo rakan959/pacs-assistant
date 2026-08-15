@@ -6,6 +6,7 @@ class Settings {
     static defaultSettings := Map(
         "AutoUpdate", true,
         "SkipBetaVersions", true,
+        "SkippedUpdateVersion", "",
         "AutoRefreshPACS", false,
         "RefreshInterval", 60,
         "AudioAlertNewCase", false,

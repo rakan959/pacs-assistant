@@ -31,6 +31,7 @@ class MicrophoneManager {
     static attemptedWindow := 0
     static attempts := 0
     static maxAttempts := 3
+    static pickerPresent := false
     static failureNotified := false
     static lastError := ""
     static notifier := (text, title, options) => TrayTip(text, title, options)
@@ -57,9 +58,8 @@ class MicrophoneManager {
             this.pollTimer := 0
         }
         this.attemptedWindow := 0
-        this.attempts := 0
-        this.failureNotified := false
-        this.lastError := ""
+        this.pickerPresent := false
+        this.ResetAttemptState()
     }
 
     static OnSettingsChanged() {
@@ -72,25 +72,24 @@ class MicrophoneManager {
             if !hwnd {
                 ; PowerScribe closed - allow the next login to be handled
                 this.attemptedWindow := 0
-                this.attempts := 0
-                this.failureNotified := false
-                this.lastError := ""
+                this.pickerPresent := false
+                this.ResetAttemptState()
                 return
             }
 
             if (hwnd != this.attemptedWindow) {
                 this.attemptedWindow := hwnd
-                this.attempts := 0
-                this.failureNotified := false
-                this.lastError := ""
+                this.pickerPresent := false
+                this.ResetAttemptState()
             }
+
+            combo := this.FindMicrophoneCombo(hwnd)
+            this.RecordPickerPresence(combo ? true : false)
+            if !combo
+                return  ; Not on the login screen, or the picker has not rendered yet
 
             if (this.attempts >= this.maxAttempts)
                 return
-
-            combo := this.FindMicrophoneCombo(hwnd)
-            if !combo
-                return  ; Not on the login screen, or the picker has not rendered yet
 
             this.attempts++
             micName := Settings.Get("MicrophoneName")
@@ -112,6 +111,22 @@ class MicrophoneManager {
         catch as err {
             OutputDebug("Microphone notification failed: " err.Message)
         }
+    }
+
+    static ResetAttemptState() {
+        this.attempts := 0
+        this.failureNotified := false
+        this.lastError := ""
+    }
+
+    ; A picker presence interval is one login session. Once it disappears, a later
+    ; reappearance in the same HWND must receive a fresh bounded set of attempts.
+    static RecordPickerPresence(present) {
+        present := present ? true : false
+        if (present = this.pickerPresent)
+            return
+        this.pickerPresent := present
+        this.ResetAttemptState()
     }
 
     static RecordOperationalError(error) {

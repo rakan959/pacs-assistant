@@ -6,7 +6,8 @@ class MicrophoneManagerTest {
     static Tests := [
         "WaitForSelectionRequiresTheRequestedValue",
         "FinalSelectionFailureNotifiesOnce",
-        "OperationalErrorIsRecorded"
+        "OperationalErrorIsRecorded",
+        "PickerReappearanceStartsANewLoginSession"
     ]
 
     Setup() {
@@ -20,6 +21,7 @@ class MicrophoneManagerTest {
         MicrophoneManager.attempts := 0
         MicrophoneManager.failureNotified := false
         MicrophoneManager.lastError := ""
+        MicrophoneManager.pickerPresent := false
     }
 
     WaitForSelectionRequiresTheRequestedValue() {
@@ -46,11 +48,30 @@ class MicrophoneManagerTest {
         Assert.Equal("UIA unavailable", MicrophoneManager.lastError)
     }
 
+    PickerReappearanceStartsANewLoginSession() {
+        MicrophoneManager.pickerPresent := true
+        MicrophoneManager.attempts := MicrophoneManager.maxAttempts
+        MicrophoneManager.failureNotified := true
+        MicrophoneManager.lastError := "old failure"
+
+        MicrophoneManager.RecordPickerPresence(false)
+        Assert.False(MicrophoneManager.pickerPresent)
+        Assert.Equal(0, MicrophoneManager.attempts)
+        Assert.False(MicrophoneManager.failureNotified)
+        Assert.Equal("", MicrophoneManager.lastError)
+
+        MicrophoneManager.attempts := MicrophoneManager.maxAttempts
+        MicrophoneManager.RecordPickerPresence(true)
+        Assert.True(MicrophoneManager.pickerPresent)
+        Assert.Equal(0, MicrophoneManager.attempts)
+    }
+
     Teardown() {
         MicrophoneManager.notifier := this.originalNotifier
         MicrophoneManager.attempts := 0
         MicrophoneManager.failureNotified := false
         MicrophoneManager.lastError := ""
+        MicrophoneManager.pickerPresent := false
     }
 }
 

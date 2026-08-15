@@ -1,4 +1,5 @@
 #Requires AutoHotkey v2.0
+#Include HotkeyScope.ahk
 #Include PACSCommands.ahk
 
 class HotkeyManager {
@@ -12,12 +13,7 @@ class HotkeyManager {
 
     ; Scope names in the order they are presented, and the only values persisted to a
     ; profile. "Any" means the bind fires regardless of which window has focus.
-    static scopes := [
-        "Any",
-        "PACS",
-        "PowerScribe",
-        "PACS or PowerScribe"
-    ]
+    static scopes := HotkeyScope.names
 
     ; One persistent predicate per scope. AutoHotkey identifies a hotkey *variant* by
     ; the exact function object handed to HotIf, so these are created once and reused:
@@ -36,31 +32,17 @@ class HotkeyManager {
 
     ; Coerce a stored/unknown scope onto a supported one
     static NormalizeScope(scope) {
-        for name in this.scopes {
-            if (name = scope)
-                return name
-        }
-        return "Any"
+        return HotkeyScope.Normalize(scope)
     }
 
     ; Build a scope name from the two "only when ... is active" checkboxes
     static ScopeFromFlags(requirePACS, requirePowerScribe) {
-        if (requirePACS && requirePowerScribe)
-            return "PACS or PowerScribe"
-        if (requirePACS)
-            return "PACS"
-        if (requirePowerScribe)
-            return "PowerScribe"
-        return "Any"
+        return HotkeyScope.FromFlags(requirePACS, requirePowerScribe)
     }
 
     ; Inverse of ScopeFromFlags
     static FlagsFromScope(scope) {
-        scope := this.NormalizeScope(scope)
-        return {
-            requirePACS: (scope = "PACS" || scope = "PACS or PowerScribe"),
-            requirePowerScribe: (scope = "PowerScribe" || scope = "PACS or PowerScribe")
-        }
+        return HotkeyScope.Flags(scope)
     }
 
     ; Enter the HotIf context a scope registers under. Always paired with ExitScope().

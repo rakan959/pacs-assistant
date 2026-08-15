@@ -70,6 +70,7 @@ class UpdateChecker {
     static lastRemindTime := 0   ; Track when the user last clicked "Remind Me Later"
     
     static Start() {
+        this.LoadSkippedVersion()
         this.ScheduleUpdateArtifactCleanup()
         if !Settings.Get("AutoUpdate")
             return
@@ -114,6 +115,18 @@ class UpdateChecker {
     static OnSettingsChanged() {
         ; Restart auto-check with new settings
         this.StartAutoCheck()
+    }
+
+    static LoadSkippedVersion() {
+        this.skippedVersion := Settings.Get("SkippedUpdateVersion")
+        return this.skippedVersion
+    }
+
+    static SkipVersion(version) {
+        if (Type(version) != "String" || Trim(version) = "")
+            throw ValueError("Skipped update version must be a non-empty string")
+        Settings.Set("SkippedUpdateVersion", version)
+        this.skippedVersion := version
     }
     
     ; Leading integer of a version field, 0 if there isn't one
@@ -407,7 +420,7 @@ class UpdateChecker {
             dismiss()
         ))
         updateGui.Add("Button", "x+10 w120", "Skip This Version").OnEvent("Click", (*) => (
-            this.skippedVersion := updateInfo.latestVersion,  ; Set the skipped version
+            this.SkipVersion(updateInfo.latestVersion),
             dismiss()
         ))
 

@@ -195,6 +195,7 @@ class FailingListView {
 class FakeCaptureHook {
     __New(endKey) {
         this.EndKey := endKey
+        this.EndReason := "EndKey"
         this.stopped := false
     }
 

@@ -18,7 +18,8 @@ class UpdateCheckerTest {
         "TestDownloadUrlMustBelongToThisRepository",
         "TestSha256KnownVector",
         "TestArtifactValidationRejectsNonExecutable",
-        "TestUpdaterScriptRequiresHealthyRelaunch"
+        "TestUpdaterScriptRequiresHealthyRelaunch",
+        "TestSkippedVersionPersistsAcrossReload"
     ]
 
     Setup() {
@@ -205,6 +206,16 @@ class UpdateCheckerTest {
         Assert.True(InStr(script, "Start-Process -FilePath $CurrentExe -PassThru") > 0)
         Assert.True(InStr(script, "Start-Sleep -Seconds 5") > 0)
         Assert.True(InStr(script, "$newProcess.HasExited") > 0)
+    }
+
+    TestSkippedVersionPersistsAcrossReload() {
+        UpdateChecker.SkipVersion("v2.2.0")
+        UpdateChecker.skippedVersion := ""
+
+        UpdateChecker.LoadSkippedVersion()
+
+        Assert.Equal("v2.2.0", UpdateChecker.skippedVersion)
+        Assert.Equal("v2.2.0", Settings.Get("SkippedUpdateVersion"))
     }
     
     TestAutoCheckTimerRespectsSettings() {

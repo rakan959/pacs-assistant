@@ -125,10 +125,14 @@ Main() {
     ; Regression for issue #22: closing the keybind prompt with the X has to tear the
     ; capture hook down. Left running, it would rebind the next key pressed anywhere.
     if (lv != 0) {
+        registeredBeforeCapture := HotkeyManager.activeHotkeys.Count
+        Assert(registeredBeforeCapture > 0, "profile hotkeys are active before keybind capture")
         Check("keybind prompt builds", () => kb.PromptKeybind("Sign Report", lv))
+        Assert(HotkeyManager.activeHotkeys.Count = 0, "keybind capture disables live clinical hotkeys")
         CloseWindow("PACS Assistant - Set Keybind")
         Assert(KeybindGUI.isListening = false, "closing the keybind prompt stops listening")
         Assert(KeybindGUI.activeInputHook = 0, "closing the keybind prompt tears down the input hook")
+        Assert(HotkeyManager.activeHotkeys.Count = registeredBeforeCapture, "closing the keybind prompt restores profile hotkeys")
     }
 
     ; Leave no hotkeys registered behind
