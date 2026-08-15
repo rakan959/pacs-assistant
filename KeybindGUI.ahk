@@ -128,7 +128,7 @@ class KeybindGUI {
         }
         
         ; Add buttons
-        buttonGroup := selectorGui.Add("GroupBox", "w190 h150", "Actions")
+        selectorGui.Add("GroupBox", "w190 h150", "Actions")
         
         selectorGui.Add("Button", "xp+10 yp+20 w170", "Select").OnEvent("Click", (*) => this.SelectProfile(StrReplace(lb.Text, " *"), selectorGui))
         selectorGui.Add("Button", "w170", "Set as Default").OnEvent("Click", (*) => this.SetDefaultProfile(StrReplace(lb.Text, " *"), selectorGui))

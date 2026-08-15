@@ -351,12 +351,6 @@ class ProfileManager {
         return modality
     }
 
-    static SetModalityAttending(modality, attending) {
-        profile := this.GetCurrentProfile()
-        if profile
-            profile.modalityAttendings[modality] := attending
-    }
-
     static SetDefaultProfile(name) {
         if !this.IsValidProfileName(name) || !this.profiles.Has(name)
             return false

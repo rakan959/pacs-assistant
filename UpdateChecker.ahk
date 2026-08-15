@@ -56,8 +56,6 @@ class UpdateChecker {
     ; place a version is stated and can drift from the tag
     static currentVersion => AppVersion.current
 
-    static repoUrl := "https://github.com/rakan959/pacs-assistant"
-
     ; GitHub's own prerelease flag decides what counts as a beta. /releases/latest
     ; excludes prereleases natively; asking for the newest release includes them.
     static latestStableUrl := "https://api.github.com/repos/rakan959/pacs-assistant/releases/latest"
@@ -120,13 +118,6 @@ class UpdateChecker {
     static LoadSkippedVersion() {
         this.skippedVersion := Settings.Get("SkippedUpdateVersion")
         return this.skippedVersion
-    }
-
-    static SkipVersion(version) {
-        if (Type(version) != "String" || Trim(version) = "")
-            throw ValueError("Skipped update version must be a non-empty string")
-        Settings.Set("SkippedUpdateVersion", version)
-        this.skippedVersion := version
     }
 
     /**
@@ -297,12 +288,6 @@ class UpdateChecker {
         return 0
     }
     
-    ; Compatibility helper retained for callers that hold the contents of one JSON
-    ; string literal rather than a complete document.
-    static DecodeJsonString(text) {
-        return JsonParser.Parse(Chr(34) text Chr(34))
-    }
-
     static ParseReleaseResponse(responseText) {
         document := JsonParser.Parse(responseText)
         if (document is Array) {
@@ -467,7 +452,7 @@ class UpdateChecker {
         dismiss := (*) => (saveChoices() && updateGui.Destroy())
 
         ; Buttons
-        buttonGroup := updateGui.Add("GroupBox", "y+15 w400 h50")
+        updateGui.Add("GroupBox", "y+15 w400 h50")
         updateGui.Add("Button", "xp+10 yp+15 w120", "Update Now").OnEvent("Click", (*) => (
             saveChoices() && this.PerformUpdate(updateInfo, updateGui)
         ))

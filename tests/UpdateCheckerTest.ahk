@@ -274,7 +274,7 @@ class UpdateCheckerTest {
     }
 
     TestSkippedVersionPersistsAcrossReload() {
-        UpdateChecker.SkipVersion("v2.2.0")
+        UpdateChecker.SaveUpdatePreferences(true, true, "v2.2.0")
         UpdateChecker.skippedVersion := ""
 
         UpdateChecker.LoadSkippedVersion()
