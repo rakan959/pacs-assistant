@@ -9,6 +9,7 @@ class ProfileManagerTest {
         "TestDefaultProfileTracking",
         "TestProfileRename",
         "TestProfileCaseOnlyRename",
+        "TestCaseOnlyRenameDoubleMoveFailureRemainsReloadable",
         "TestProfileDeletionRules",
         "TestFailedDefaultDeletionPreservesProfile",
         "TestDefaultDeleteRollbackFailureIsSurfacedAndReconciled",
@@ -135,6 +136,29 @@ class ProfileManagerTest {
         Assert.True(ProfileManager.currentProfile == "night")
         Assert.True(ProfileManager.defaultProfile == "night")
         Assert.True(IniRead(ProfileManager.configPath, "Settings", "DefaultProfile") == "night")
+    }
+
+    TestCaseOnlyRenameDoubleMoveFailureRemainsReloadable() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        profile.scopes["Sign Report"] := "Any"
+        ProfileManager.profiles["Night"] := profile
+        ProfileManager.currentProfile := "Night"
+        ProfileManager.SaveProfile("Night", profile)
+        driver := FaultInjectingProfileStorageDriver()
+        driver.failMoveCalls[2] := true
+        driver.failMoveCalls[3] := true
+        ProfileManager.storageDriver := driver
+
+        Assert.False(ProfileManager.RenameProfile("Night", "night"))
+        Assert.True(FileExist(ProfileManager.ProfilePath("Night")) != "")
+        Assert.False(ProfileManager.recoveryRequired)
+
+        ; Simulate a restart: only canonical *.ini files are discovered.
+        ProfileManager.storageDriver := NativeProfileStorageDriver()
+        ProfileManager.LoadProfiles()
+        Assert.True(ProfileManager.profiles.Has("Night"))
+        Assert.Equal("^s", ProfileManager.profiles["Night"].binds["Sign Report"])
     }
 
     TestProfileDeletionRules() {
@@ -623,6 +647,8 @@ class FaultInjectingProfileStorageDriver extends NativeProfileStorageDriver {
     __New() {
         this.failDeleteFiles := Map()
         this.failWriteValues := Map()
+        this.failMoveCalls := Map()
+        this.moveCalls := 0
     }
 
     DeleteFile(path) {
@@ -635,5 +661,12 @@ class FaultInjectingProfileStorageDriver extends NativeProfileStorageDriver {
         if this.failWriteValues.Has(value)
             throw Error("simulated INI write failure")
         return super.WriteIni(value, path, section, key)
+    }
+
+    MoveFile(sourcePath, destinationPath, overwrite := false) {
+        this.moveCalls++
+        if this.failMoveCalls.Has(this.moveCalls)
+            throw Error("simulated file move failure")
+        return super.MoveFile(sourcePath, destinationPath, overwrite)
     }
 }

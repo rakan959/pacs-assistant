@@ -27,6 +27,13 @@ class KeybindGUITest {
         "TestStaleModalityDialogCannotWriteAnotherProfile",
         "TestOlderModalityDialogCannotOverwriteNewerSave",
         "TestStaleRenameDialogCannotRenameAnotherProfile",
+        "TestDestroyedRenameDialogCannotMutateProfile",
+        "TestRenameDialogCannotMutateSameNameReplacement",
+        "TestSuccessfulMainRenameDoesNotReapplyHotkeys",
+        "TestCreateProfileSurfacesStorageRecovery",
+        "TestDirtyScopeEditBlocksProfileSwitchWhenCancelled",
+        "TestClosingSavesDirtyProfileBeforeExit",
+        "TestProfileSwitchCanDiscardDirtyChanges",
         "TestFailedCustomDeletePreservesLiveProfile",
         "TestRemoveFunctionKeepsProfileAndRowWhenNativeOffFails",
         "TestCustomDeleteRollsBackWhenLaterRegistrationFails",
@@ -577,11 +584,15 @@ class KeybindGUITest {
         listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
         listView.rows.Push(["Draft Report", "Ctrl + F14", "PowerScribe"])
         dialog := FakeProfileDialog("Test")
+        notifications := CapturingNotificationDriver()
+        gui := {base: StaleScopeTrackingKeybindGUI.Prototype}
+        gui.restoreCalls := 0
+        gui.notificationDriver := notifications
 
         try {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
-            Assert.True(this.gui.CaptureFunctionDialogState(
+            Assert.True(gui.CaptureFunctionDialogState(
                 dialog,
                 "Sign Report",
                 listView,
@@ -591,7 +602,7 @@ class KeybindGUITest {
             profile.scopes.Delete("Sign Report")
             listView.rows.RemoveAt(1)
 
-            result := this.gui.ApplyScope(
+            result := gui.ApplyScope(
                 "Sign Report",
                 true,
                 false,
@@ -613,6 +624,7 @@ class KeybindGUITest {
         Assert.Equal("Draft Report", remainingName)
         Assert.Equal("PowerScribe", remainingScope)
         Assert.True(destroyed)
+        Assert.Equal(0, gui.restoreCalls)
     }
 
     TestFailedModalitySavePreservesLiveProfile() {
@@ -754,6 +766,253 @@ class KeybindGUITest {
         Assert.True(keptB)
         Assert.False(createdRename)
         Assert.True(capturedDestroyed)
+    }
+
+    TestDestroyedRenameDialogCannotMutateProfile() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        profile := ProfileManager.NewProfile()
+        dialog := FakeProfileDialog("Old")
+        gui := {base: RenameRuntimeTrackingKeybindGUI.Prototype}
+        gui.createCalls := 0
+        gui.applyCalls := 0
+
+        try {
+            ProfileManager.profiles := Map("Old", profile)
+            ProfileManager.currentProfile := "Old"
+            Assert.True(gui.CaptureRenameDialogState(dialog, "Old"))
+            dialog.Destroy()
+            result := gui.RenameProfile("Old", "New", dialog)
+            keptOld := ProfileManager.profiles.Has("Old")
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.False(result)
+        Assert.True(keptOld)
+        Assert.Equal(0, gui.createCalls)
+    }
+
+    TestRenameDialogCannotMutateSameNameReplacement() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalRevisions := ProfileManager.profileRevisions
+        originalProfile := ProfileManager.NewProfile()
+        replacement := ProfileManager.NewProfile()
+        replacement.modalityAttendings["Marker"] := "replacement"
+        dialog := FakeProfileDialog("Old")
+        gui := {base: RenameRuntimeTrackingKeybindGUI.Prototype}
+        gui.createCalls := 0
+        gui.applyCalls := 0
+
+        try {
+            ProfileManager.profileRevisions := Map("Old", 1)
+            ProfileManager.profiles := Map("Old", originalProfile)
+            ProfileManager.currentProfile := "Old"
+            Assert.True(gui.CaptureRenameDialogState(dialog, "Old"))
+            ProfileManager.profiles["Old"] := replacement
+            ProfileManager.profileRevisions["Old"] := 2
+            result := gui.RenameProfile("Old", "New", dialog)
+            keptReplacement := ProfileManager.profiles.Has("Old")
+                && ProfileManager.profiles["Old"] = replacement
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profileRevisions := originalRevisions
+        }
+
+        Assert.False(result)
+        Assert.True(keptReplacement)
+        Assert.Equal(0, gui.createCalls)
+    }
+
+    TestSuccessfulMainRenameDoesNotReapplyHotkeys() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalDefault := ProfileManager.defaultProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        originalRevisions := ProfileManager.profileRevisions
+        tempRoot := A_Temp "\pacs_rename_runtime_" A_TickCount
+        profile := ProfileManager.NewProfile()
+        dialog := FakeProfileDialog("Old")
+        gui := {base: RenameRuntimeTrackingKeybindGUI.Prototype}
+        gui.gui := FakeProfileDialog()
+        gui.createCalls := 0
+        gui.applyCalls := 0
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profileRevisions := Map()
+            ProfileManager.defaultProfile := ""
+            ProfileManager.profiles := Map("Old", profile)
+            ProfileManager.currentProfile := "Old"
+            ProfileManager.SaveProfile("Old", profile)
+            Assert.True(gui.CaptureRenameDialogState(dialog, "Old"))
+
+            result := gui.RenameProfile("Old", "New", dialog)
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.defaultProfile := originalDefault
+            ProfileManager.profilesPath := originalProfilesPath
+            ProfileManager.profileRevisions := originalRevisions
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.True(result)
+        Assert.Equal(1, gui.createCalls)
+        Assert.Equal(0, gui.applyCalls)
+    }
+
+    TestCreateProfileSurfacesStorageRecovery() {
+        originalRecovery := ProfileManager.recoveryRequired
+        originalLastError := ProfileManager.lastError
+        notifications := CapturingNotificationDriver()
+        gui := {base: KeybindGUI.Prototype, notificationDriver: notifications}
+        dialog := FakeProfileDialog()
+
+        try {
+            ProfileManager.recoveryRequired := true
+            ProfileManager.lastError := "simulated profile storage uncertainty"
+            result := gui.CreateProfile("New Profile", dialog)
+        } finally {
+            ProfileManager.recoveryRequired := originalRecovery
+            ProfileManager.lastError := originalLastError
+        }
+
+        Assert.False(result)
+        Assert.True(InStr(notifications.message, "simulated profile storage uncertainty") > 0)
+        Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
+        Assert.False(dialog.destroyed)
+    }
+
+    TestDirtyScopeEditBlocksProfileSwitchWhenCancelled() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := ""
+        profile.scopes["Sign Report"] := "Any"
+        listView := FunctionalListView("Sign Report", "Unassigned", "Any window")
+        dialog := FakeProfileDialog("Test")
+        gui := {
+            base: DirtyLeaveTestGUI.Prototype,
+            prepareCalls: 0,
+            selectorCalls: 0,
+            exitCalls: 0,
+            profileLeaveDriver: FixedProfileLeaveDriver("Cancel")
+        }
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            Assert.True(gui.CaptureFunctionDialogState(dialog, "Sign Report", listView, 1))
+            Assert.True(gui.ApplyScope("Sign Report", true, false, listView, 1, dialog))
+            switchResult := gui.OpenProfileSelector()
+            dirty := gui.IsProfileDirty("Test")
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.False(switchResult)
+        Assert.True(dirty)
+        Assert.Equal(0, gui.prepareCalls)
+        Assert.Equal(0, gui.selectorCalls)
+    }
+
+    TestClosingSavesDirtyProfileBeforeExit() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        originalRevisions := ProfileManager.profileRevisions
+        tempRoot := A_Temp "\pacs_dirty_close_" A_TickCount
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := ""
+        profile.scopes["Sign Report"] := "Any"
+        gui := {
+            base: DirtyLeaveTestGUI.Prototype,
+            prepareCalls: 0,
+            selectorCalls: 0,
+            exitCalls: 0,
+            profileLeaveDriver: FixedProfileLeaveDriver("Yes")
+        }
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profileRevisions := Map()
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            ProfileManager.SaveProfile("Test", profile)
+            profile.scopes["Sign Report"] := "PACS"
+            gui.MarkProfileDirty("Test")
+
+            result := gui.CloseMainWindow()
+            stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath("Test"))
+            persistedScope := stored.scopes["Sign Report"]
+            dirty := gui.IsProfileDirty("Test")
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profilesPath := originalProfilesPath
+            ProfileManager.profileRevisions := originalRevisions
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.True(result)
+        Assert.Equal("PACS", persistedScope)
+        Assert.False(dirty)
+        Assert.Equal(1, gui.exitCalls)
+    }
+
+    TestProfileSwitchCanDiscardDirtyChanges() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        originalRevisions := ProfileManager.profileRevisions
+        tempRoot := A_Temp "\pacs_dirty_discard_" A_TickCount
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := ""
+        profile.scopes["Sign Report"] := "Any"
+        gui := {
+            base: DirtyLeaveTestGUI.Prototype,
+            prepareCalls: 0,
+            selectorCalls: 0,
+            exitCalls: 0,
+            profileLeaveDriver: FixedProfileLeaveDriver("No")
+        }
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profileRevisions := Map()
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            ProfileManager.SaveProfile("Test", profile)
+            profile.scopes["Sign Report"] := "PACS"
+            gui.MarkProfileDirty("Test")
+
+            result := gui.OpenProfileSelector()
+            restoredScope := ProfileManager.profiles["Test"].scopes["Sign Report"]
+            dirty := gui.IsProfileDirty("Test")
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profilesPath := originalProfilesPath
+            ProfileManager.profileRevisions := originalRevisions
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.True(result)
+        Assert.Equal("Any", restoredScope)
+        Assert.False(dirty)
+        Assert.Equal(1, gui.prepareCalls)
+        Assert.Equal(1, gui.selectorCalls)
     }
 
     TestFailedCustomDeletePreservesLiveProfile() {
@@ -1341,6 +1600,62 @@ class SaveRuntimeFailingKeybindGUI extends KeybindGUI {
         this.restoreCalls++
         errorText := "simulated saved-profile restore failure"
         return false
+    }
+}
+
+class StaleScopeTrackingKeybindGUI extends KeybindGUI {
+    RestoreRuntimeProfile(*) {
+        this.restoreCalls++
+        return true
+    }
+}
+
+class RenameRuntimeTrackingKeybindGUI extends KeybindGUI {
+    GuiIsLive(gui) {
+        return !HasProp(gui, "destroyed") || !gui.destroyed
+    }
+
+    CreateMainGUI(applyBinds := true) {
+        this.createCalls++
+        if applyBinds
+            this.applyCalls++
+    }
+}
+
+class DirtyLeaveTestGUI extends KeybindGUI {
+    ApplyBinds(*) {
+        return true
+    }
+
+    ApplyProfileBinds(*) {
+        return true
+    }
+
+    PrepareForProfileSwitch() {
+        this.prepareCalls++
+    }
+
+    HasMainWindow() {
+        return false
+    }
+
+    ShowProfileSelector() {
+        this.selectorCalls++
+        return true
+    }
+
+    RequestExit() {
+        this.exitCalls++
+    }
+}
+
+class FixedProfileLeaveDriver {
+    __New(choice) {
+        this.choice := choice
+    }
+
+    Choose(*) {
+        return this.choice
     }
 }
 

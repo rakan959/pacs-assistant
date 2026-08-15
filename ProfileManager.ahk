@@ -670,9 +670,20 @@ class ProfileManager {
         } catch as err {
             try this.storageDriver.MoveFile(temporaryPath, sourcePath, false)
             catch as rollbackError {
-                message := "Profile file move failed: " err.Message
-                    . "; the temporary file could not be restored from '" temporaryPath "': " rollbackError.Message
-                this.FailStorageMutation(message, true)
+                ; The original bytes still exist at the same-directory temporary
+                ; path. Copy and parse them back under the canonical *.ini name so
+                ; a restart can always discover the profile, even when both driver
+                ; moves failed.
+                try {
+                    FileCopy(temporaryPath, sourcePath, true)
+                    this.LoadProfile(sourcePath)
+                    try FileDelete(temporaryPath)
+                } catch as recoveryError {
+                    message := "Profile file move failed: " err.Message
+                        . "; the temporary file could not be restored from '" temporaryPath "': " rollbackError.Message
+                        . "; recreating the canonical profile also failed: " recoveryError.Message
+                    this.FailStorageMutation(message, true)
+                }
             }
             throw err
         }

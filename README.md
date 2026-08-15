@@ -40,6 +40,8 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 
 2) **Initial setup**
 - Launch, create a profile, assign keybinds, and set notification/update preferences.
+- Keybind edits become active immediately. Use **Save** to persist them; closing the
+  app or switching profiles prompts to save, discard, or keep editing when changes remain.
 
 3) **Wet read workflow**
 - Copy your wet read text to clipboard.

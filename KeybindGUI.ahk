@@ -83,7 +83,7 @@ class KeybindGUI {
         y += 30
         this.gui.Add("Button", "xm y" y " w160", "Modality Attendings").OnEvent("Click", (*) => this.ShowModalityAttendingsDialog())
 
-        this.gui.OnEvent("Close", (*) => ExitApp())
+        this.gui.OnEvent("Close", (*) => this.CloseMainWindow())
         this.gui.Show()
         
         if applyBinds
@@ -91,6 +91,8 @@ class KeybindGUI {
     }
 
     OpenProfileSelector() {
+        if !this.ResolveDirtyProfileBeforeLeaving()
+            return false
         ; A selector has no active profile. Suspend the old profile before exposing any
         ; operation which can rename or delete it.
         this.PrepareForProfileSwitch()
@@ -98,6 +100,17 @@ class KeybindGUI {
             this.gui.Destroy()
         this.gui := ""
         return this.ShowProfileSelector()
+    }
+
+    CloseMainWindow() {
+        if !this.ResolveDirtyProfileBeforeLeaving()
+            return false
+        this.RequestExit()
+        return true
+    }
+
+    RequestExit() {
+        ExitApp()
     }
 
     PrepareForProfileSwitch() {
@@ -233,12 +246,19 @@ class KeybindGUI {
             )
             return false
         }
-        this.RestoreCapturedRuntimeAndNotify(
-            ProfileManager.profiles[dialog.profileName],
-            "The selected function changed while this dialog was open. Reopen it before applying changes.",
-            "Function Changed",
-            true
-        )
+        message := "The selected function changed while this dialog was open. Reopen it before applying changes."
+        if IsObject(KeybindGUI.captureRuntimeProfile) {
+            this.RestoreCapturedRuntimeAndNotify(
+                ProfileManager.profiles[dialog.profileName],
+                message,
+                "Function Changed",
+                true
+            )
+        } else {
+            ; A scope dialog never suspends runtime bindings. Rejecting a stale
+            ; callback must not create an unnecessary Off/On failure boundary.
+            this.NotifyUser(message, "Function Changed", "Icon!")
+        }
         try dialog.Destroy()
         return false
     }
@@ -323,8 +343,16 @@ class KeybindGUI {
             ProfileManager.currentProfile := name
             inputGui.Destroy()
             this.CreateMainGUI()
+            return true
         } else {
-            MsgBox("Enter a unique profile name without file-system characters or reserved Windows device names.", "Invalid Profile Name", "Icon!")
+            this.NotifyUser(
+                this.ProfileStorageFailureText(
+                    "Enter a unique profile name without file-system characters or reserved Windows device names."
+                ),
+                ProfileManager.lastError != "" ? "Profile Creation Failed" : "Invalid Profile Name",
+                "Icon!"
+            )
+            return false
         }
     }
 
@@ -586,6 +614,7 @@ class KeybindGUI {
                 return false
             }
             KeybindGUI.captureRuntimeProfile := 0
+            this.MarkProfileDirty(promptGui.profileName)
             return true
         } catch as err {
             if bindingChanged {
@@ -695,6 +724,73 @@ class KeybindGUI {
         }
 
         MsgBox("Profile saved successfully!", "Success")
+        this.ClearProfileDirty(profileName)
+        return true
+    }
+
+    EnsureDirtyProfiles() {
+        if !this.HasOwnProp("dirtyProfiles")
+            this.dirtyProfiles := Map()
+        return this.dirtyProfiles
+    }
+
+    MarkProfileDirty(profileName := "") {
+        if (profileName = "")
+            profileName := ProfileManager.currentProfile
+        if (profileName != "")
+            this.EnsureDirtyProfiles()[profileName] := true
+    }
+
+    ClearProfileDirty(profileName) {
+        dirty := this.EnsureDirtyProfiles()
+        if dirty.Has(profileName)
+            dirty.Delete(profileName)
+    }
+
+    IsProfileDirty(profileName := "") {
+        if (profileName = "")
+            profileName := ProfileManager.currentProfile
+        return profileName != "" && this.EnsureDirtyProfiles().Has(profileName)
+    }
+
+    ChooseUnsavedProfileAction(profileName) {
+        if this.HasOwnProp("profileLeaveDriver")
+            return this.profileLeaveDriver.Choose(profileName)
+        return MsgBox(
+            "Profile '" profileName "' has unsaved keybind changes."
+                . "`n`nYes = Save, No = Discard, Cancel = keep editing.",
+            "Unsaved Profile Changes",
+            "YesNoCancel Icon!"
+        )
+    }
+
+    ResolveDirtyProfileBeforeLeaving() {
+        profileName := ProfileManager.currentProfile
+        if !this.IsProfileDirty(profileName)
+            return true
+
+        choice := this.ChooseUnsavedProfileAction(profileName)
+        if (choice == "Cancel")
+            return false
+        if (choice == "Yes")
+            return this.SaveCurrentProfile()
+        if !(choice == "No")
+            return false
+
+        try {
+            stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath(profileName))
+        } catch as err {
+            this.NotifyUser(
+                "The saved profile could not be reloaded, so the unsaved changes were retained.`n`n" err.Message,
+                "Discard Failed",
+                "Icon!"
+            )
+            return false
+        }
+        ProfileManager.profiles[profileName] := stored
+        ProfileManager.profileRevisions[profileName] :=
+            ProfileManager.GetProfileRevision(profileName) + 1
+        this.ClearProfileDirty(profileName)
         return true
     }
 
@@ -966,11 +1062,25 @@ class KeybindGUI {
             name,
             parentGui
         )
+        if !this.CaptureRenameDialogState(renameGui, name) {
+            renameGui.Destroy()
+            return false
+        }
         renameGui.Add("Text",, "Enter new name for profile '" name "':")
         nameEdit := renameGui.Add("Edit", "w200", name)
         renameGui.Add("Button",, "OK").OnEvent("Click", (*) => this.RenameProfile(name, nameEdit.Value, renameGui, parentGui))
         renameGui.Add("Button", "x+10", "Cancel").OnEvent("Click", (*) => renameGui.Destroy())
         renameGui.Show()
+        return true
+    }
+
+    CaptureRenameDialogState(renameGui, name) {
+        if !ProfileManager.profiles.Has(name)
+            return false
+        renameGui.profileName := name
+        renameGui.profilePointer := ObjPtr(ProfileManager.profiles[name])
+        renameGui.profileRevision := ProfileManager.GetProfileRevision(name)
+        return true
     }
 
     RenameProfile(oldName, newName, renameGui, parentGui := 0) {
@@ -984,14 +1094,19 @@ class KeybindGUI {
         }
 
         if (ProfileManager.RenameProfile(oldName, newName)) {
+            this.ClearProfileDirty(oldName)
+            this.ClearProfileDirty(newName)
             renameGui.Destroy()
             if (parentGui) {
                 parentGui.Destroy()
                 this.ShowProfileSelector()  ; Refresh the selector
             } else {
                 this.gui.Destroy()
-                this.CreateMainGUI()  ; Refresh the main GUI
+                ; Renaming changes storage/display identity only. Rebuilding the
+                ; window must not tear down and re-register unchanged hotkeys.
+                this.CreateMainGUI(false)
             }
+            return true
         } else {
             MsgBox(
                 this.ProfileStorageFailureText(
@@ -1000,6 +1115,7 @@ class KeybindGUI {
                 "Profile Rename Failed",
                 "Icon!"
             )
+            return false
         }
     }
 
@@ -1015,7 +1131,13 @@ class KeybindGUI {
     RenameDialogIsCurrent(oldName, renameGui, parentGui := 0) {
         capturedName := ""
         try capturedName := renameGui.profileName
-        valid := capturedName = oldName && ProfileManager.profiles.Has(oldName)
+        valid := this.GuiIsLive(renameGui)
+            && capturedName == oldName
+            && ProfileManager.profiles.Has(oldName)
+            && HasProp(renameGui, "profilePointer")
+            && ObjPtr(ProfileManager.profiles[oldName]) = renameGui.profilePointer
+            && HasProp(renameGui, "profileRevision")
+            && ProfileManager.GetProfileRevision(oldName) = renameGui.profileRevision
         if valid {
             valid := parentGui
                 ? this.GuiIsLive(parentGui)
@@ -1172,6 +1294,7 @@ class KeybindGUI {
                 return false
             }
             ProfileManager.profiles[profileName] := candidate
+            this.ClearProfileDirty(profileName)
 
             ; Just destroy both GUIs and recreate them
             selectorGui.Destroy()
@@ -1253,6 +1376,7 @@ class KeybindGUI {
         ; Add to ListView (removed type)
         listView.Add(, funcName, "Unassigned", this.ScopeLabel(funcName))
         this.ResizeColumns(listView)
+        this.MarkProfileDirty(profileName)
 
         customGui.Destroy()
         
@@ -1295,6 +1419,7 @@ class KeybindGUI {
         ; Add to ListView (removed type)
         listView.Add(, funcName, "Unassigned", this.ScopeLabel(funcName))
         this.ResizeColumns(listView)
+        this.MarkProfileDirty(profileName)
 
         selectorGui.Destroy()
         
@@ -1354,6 +1479,7 @@ class KeybindGUI {
             }
             ; No longer delete the custom function itself, only its binding.
             ProfileManager.profiles[profileName] := candidate
+            this.MarkProfileDirty(profileName)
             try this.ResizeColumns(listView)
             return true
         }
@@ -1476,6 +1602,7 @@ class KeybindGUI {
             }
 
             scopeGui.Destroy()
+            this.MarkProfileDirty(scopeGui.profileName)
             return true
         } catch as err {
             if changed
@@ -1540,6 +1667,8 @@ class KeybindGUI {
             return
         }
         ProfileManager.profiles[profileName] := candidate
+        this.ClearProfileDirty(profileName)
         modGui.Destroy()
+        return true
     }
 }
