@@ -22,12 +22,15 @@ class WetReadTest {
         "StickyRootMustBelongToPacsProcess",
         "StickyOpenerRejectsSameProcessWrongWindowButton",
         "StickyOpenerRejectsAmbiguousSameWindowButtons",
+        "StickyOpenerRejectsTitleChangeBeforeInvoke",
+        "StickyOpenerRejectsDuplicateAppearingBeforeInvoke",
         "StickyOpenerRejectsUnactivatedStickyWindow",
         "StickyOpenerPinsNewlyActiveExactWindow",
         "StickyDriverUsesExactValidatedWindowHandle",
         "StickyNoteTargetRequiresExpectedTypeProcessAndCapability",
         "StickyNoteTargetMustBeTheUniqueWritableField",
         "NativeDirectWriteRefusesStaleStickyTarget",
+        "NativeFocusRefusesStaleStickyTargetBeforeAnyUIAction",
         "NativeControlWithoutHandleIsUnsupported",
         "NativeSendRefusesLostFocus",
         "NativeSendRefusesWrongStickyControlFocus",
@@ -272,6 +275,26 @@ class WetReadTest {
         Assert.Equal(0, driver.invokeCalls)
     }
 
+    StickyOpenerRejectsTitleChangeBeforeInvoke() {
+        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
+        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
+        driver := FakeStickyNoteWindowDriver(pacsRoot)
+        driver.livePacsTitle := "Different PACS Window"
+
+        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
+        Assert.Equal(0, driver.invokeCalls)
+    }
+
+    StickyOpenerRejectsDuplicateAppearingBeforeInvoke() {
+        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
+        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
+        driver := FakeStickyNoteWindowDriver(pacsRoot)
+        driver.exactPacsWindowCount := 2
+
+        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
+        Assert.Equal(0, driver.invokeCalls)
+    }
+
     StickyOpenerRejectsUnactivatedStickyWindow() {
         button := FakeStickyTargetElement(
             UIA.Type.Button,
@@ -352,6 +375,21 @@ class WetReadTest {
 
         Assert.False(driver.WriteUIA(field, "new wet read"))
         Assert.Equal(0, field.writeCalls)
+    }
+
+    NativeFocusRefusesStaleStickyTargetBeforeAnyUIAction() {
+        focusDriver := FakeWetReadFocusDriver(false)
+        driver := NativeWetReadDriver(
+            "ahk_id 200",
+            FakeWetReadWindowDriver(true),
+            focusDriver
+        )
+
+        Assert.Throws(
+            () => driver.Focus(FakeWetReadField()),
+            "no longer the unique expected target"
+        )
+        Assert.Equal(0, focusDriver.requestCalls)
     }
 
     NativeControlWithoutHandleIsUnsupported() {
@@ -644,6 +682,8 @@ class FakeStickyNoteWindowDriver {
         this.stickyRoot := stickyRoot
         this.activatedStickyHwnd := activatedStickyHwnd
         this.invokeCalls := 0
+        this.livePacsTitle := "Vue PACS"
+        this.exactPacsWindowCount := 1
     }
 
     CaptureActivePacs(*) {
@@ -660,6 +700,13 @@ class FakeStickyNoteWindowDriver {
 
     IsActive(hwnd) {
         return hwnd = this.pacsRoot.WinId
+    }
+
+    IsExpectedPacsSession(target, hwnd, processId) {
+        return this.exactPacsWindowCount = 1
+            && this.livePacsTitle == target.title
+            && hwnd = this.pacsRoot.WinId
+            && processId = this.pacsRoot.ProcessId
     }
 
     InvokeStickyButton(*) {
@@ -694,9 +741,11 @@ class FakeWetReadWindowDriver {
 class FakeWetReadFocusDriver {
     __New(matches) {
         this.matches := matches
+        this.requestCalls := 0
     }
 
     RequestFocus(*) {
+        this.requestCalls++
     }
 
     IsExpectedTarget(*) {

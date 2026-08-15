@@ -16,29 +16,51 @@ class NativeStickyNoteWindowDriver {
         if !IsObject(target) || !HasProp(target, "title") || !HasProp(target, "exe")
             return 0
 
-        matches := []
-        try windows := WinGetList("ahk_exe " target.exe)
-        catch
+        matches := this.FindExactPacsWindows(target)
+        if !IsObject(matches)
             return 0
-
-        for hwnd in windows {
-            title := ""
-            processName := ""
-            try title := WinGetTitle("ahk_id " hwnd)
-            try processName := WinGetProcessName("ahk_id " hwnd)
-            if (title == target.title && processName = target.exe)
-                matches.Push(hwnd)
-        }
         if (matches.Length != 1)
             return 0
 
-        hwnd := matches[1]
+        hwnd := matches[1].hwnd
         try {
             WinActivate("ahk_id " hwnd)
             return WinWaitActive("ahk_id " hwnd, , 2) = hwnd ? hwnd : 0
         } catch {
             return 0
         }
+    }
+
+    FindExactPacsWindows(target) {
+        matches := []
+        try windows := WinGetList("ahk_exe " target.exe)
+        catch
+            return 0
+
+        for hwnd in windows {
+            try {
+                title := WinGetTitle("ahk_id " hwnd)
+                processName := WinGetProcessName("ahk_id " hwnd)
+                processId := WinGetPID("ahk_id " hwnd)
+            } catch {
+                ; A disappearing/opaque same-process window makes uniqueness
+                ; uncertain. Do not silently exclude it from the candidate set.
+                return 0
+            }
+            if (title == target.title && StrLower(processName) == StrLower(target.exe))
+                matches.Push({hwnd: hwnd, processId: processId})
+        }
+        return matches
+    }
+
+    IsExpectedPacsSession(target, hwnd, processId) {
+        if (hwnd <= 0 || processId <= 0)
+            return false
+        matches := this.FindExactPacsWindows(target)
+        return IsObject(matches)
+            && matches.Length = 1
+            && matches[1].hwnd = hwnd
+            && matches[1].processId = processId
     }
 
     GetRoot(hwnd) {
@@ -106,7 +128,10 @@ class StickyNoteOpener {
         if !this.SamePacsRoot(pacsRoot, liveRoot, pacsHwnd)
             return 0
         button := this.FindUniqueStickyButton(liveRoot)
-        if !button || !driver.InvokeStickyButton(button)
+        if (!button
+            || !driver.IsExpectedPacsSession(pacsTarget, pacsHwnd, liveRoot.ProcessId)
+            || !driver.IsActive(pacsHwnd)
+            || !driver.InvokeStickyButton(button))
             return 0
 
         ; A pre-existing, inactive Sticky Notes window cannot satisfy this wait.
@@ -309,6 +334,10 @@ class NativeWetReadDriver {
             throw Error(this.targetTitle " is no longer active; focus was not changed")
 
         loop 3 {
+            if !this.focusDriver.IsExpectedTarget(this.targetTitle, field)
+                throw Error(this.targetTitle " expected text field is no longer the unique expected target; focus was not changed")
+            if !this.windowDriver.IsActive(this.targetTitle)
+                throw Error(this.targetTitle " is no longer active; focus was not changed")
             this.focusDriver.RequestFocus(field)
             if this.focusDriver.IsExpectedFocus(this.targetTitle, field)
                 return true
