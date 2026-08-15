@@ -29,7 +29,10 @@ class KeybindGUITest {
         "TestCustomDeleteRollsBackWhenLaterRegistrationFails",
         "TestStaleRemoveConfirmationCannotDeleteReplacementRow",
         "TestStaleCustomDeleteCannotDeleteRecreatedCommand",
-        "TestRowDeleteAndRuntimeRestoreFailureRequiresRestartWarning"
+        "TestRowDeleteAndRuntimeRestoreFailureRequiresRestartWarning",
+        "TestRejectedKeybindWarnsWhenPriorRuntimeCannotBeRestored",
+        "TestRejectedScopeWarnsWhenPriorRuntimeCannotBeRestored",
+        "TestStaleProfileDeleteCannotDeleteRecreatedProfile"
     ]
 
     Setup() {
@@ -824,6 +827,132 @@ class KeybindGUITest {
         Assert.True(InStr(notifications.message, "simulated restore failure") > 0)
     }
 
+    TestRejectedKeybindWarnsWhenPriorRuntimeCannotBeRestored() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalListening := KeybindGUI.isListening
+        originalControl := KeybindGUI.listeningControl
+        originalHook := KeybindGUI.activeInputHook
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F23"
+        profile.scopes["Sign Report"] := "Any"
+        listView := FunctionalListView("Sign Report", "Ctrl + F23", "Any window")
+        prompt := FakeProfileDialog("Test")
+        hook := FakeCaptureHook("F24")
+        notifications := CapturingNotificationDriver()
+        gui := {base: RollbackFailingKeybindGUI.Prototype}
+        gui.applyCalls := 0
+        gui.restoreCalls := 0
+        gui.notificationDriver := notifications
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            Assert.True(gui.CaptureFunctionDialogState(prompt, "Sign Report", listView, 1))
+            KeybindGUI.isListening := true
+            KeybindGUI.listeningControl := listView
+            KeybindGUI.activeInputHook := hook
+
+            result := gui.OnInputEnd("Sign Report", listView, prompt, hook)
+            keptBind := profile.binds["Sign Report"]
+            keptRow := listView.GetText(1, 2)
+        } finally {
+            KeybindGUI.activeInputHook := 0
+            KeybindGUI.isListening := false
+            KeybindGUI.listeningControl := ""
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            KeybindGUI.isListening := originalListening
+            KeybindGUI.listeningControl := originalControl
+            KeybindGUI.activeInputHook := originalHook
+        }
+
+        Assert.False(result)
+        Assert.Equal("^F23", keptBind)
+        Assert.Equal("Ctrl + F23", keptRow)
+        Assert.Equal(1, gui.restoreCalls)
+        Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
+        Assert.True(InStr(notifications.message, "simulated restore failure") > 0)
+    }
+
+    TestRejectedScopeWarnsWhenPriorRuntimeCannotBeRestored() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F23"
+        profile.scopes["Sign Report"] := "Any"
+        listView := FunctionalListView("Sign Report", "Ctrl + F23", "Any window")
+        dialog := FakeProfileDialog("Test")
+        notifications := CapturingNotificationDriver()
+        gui := {base: RollbackFailingKeybindGUI.Prototype}
+        gui.applyCalls := 0
+        gui.restoreCalls := 0
+        gui.notificationDriver := notifications
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            Assert.True(gui.CaptureFunctionDialogState(dialog, "Sign Report", listView, 1))
+            result := gui.ApplyScope("Sign Report", true, false, listView, 1, dialog)
+            keptScope := profile.scopes["Sign Report"]
+            keptRow := listView.GetText(1, 3)
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.False(result)
+        Assert.Equal("Any", keptScope)
+        Assert.Equal("Any window", keptRow)
+        Assert.Equal(1, gui.restoreCalls)
+        Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
+        Assert.True(InStr(notifications.message, "simulated restore failure") > 0)
+    }
+
+    TestStaleProfileDeleteCannotDeleteRecreatedProfile() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalDefault := ProfileManager.defaultProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        originalRevisions := ProfileManager.profileRevisions
+        tempRoot := A_Temp "\pacs_stale_profile_delete_" A_TickCount
+        oldProfile := ProfileManager.NewProfile()
+        otherProfile := ProfileManager.NewProfile()
+        selector := FakeProfileDialog()
+        gui := {base: ProfileDeleteTestGUI.Prototype}
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profileRevisions := Map()
+            ProfileManager.profiles := Map("A", oldProfile, "B", otherProfile)
+            ProfileManager.currentProfile := "B"
+            ProfileManager.defaultProfile := ""
+            ProfileManager.SaveProfile("A", oldProfile)
+            ProfileManager.SaveProfile("B", otherProfile)
+            gui.confirmationDriver := RecreateProfileConfirmationDriver("A")
+
+            result := gui.DeleteProfile("A", selector)
+            keptReplacement := ProfileManager.profiles.Has("A")
+                && ProfileManager.profiles["A"].modalityAttendings.Has("Marker")
+                && ProfileManager.profiles["A"].modalityAttendings["Marker"] == "replacement"
+            keptFile := FileExist(ProfileManager.ProfilePath("A")) != ""
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.defaultProfile := originalDefault
+            ProfileManager.profilesPath := originalProfilesPath
+            ProfileManager.profileRevisions := originalRevisions
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.False(result)
+        Assert.True(keptReplacement)
+        Assert.True(keptFile)
+        Assert.False(selector.destroyed)
+    }
+
     PrepareBlockedProfileSave() {
         state := {
             profiles: ProfileManager.profiles,
@@ -919,6 +1048,27 @@ class FailedRestoreKeybindGUI extends PassiveRuntimeKeybindGUI {
     }
 }
 
+class RollbackFailingKeybindGUI extends KeybindGUI {
+    ApplyBinds(*) {
+        this.applyCalls++
+        return false
+    }
+
+    RestoreRuntimeProfile(profile, &errorText) {
+        this.restoreCalls++
+        errorText := "simulated restore failure"
+        return false
+    }
+
+    ResizeColumns(*) {
+    }
+}
+
+class ProfileDeleteTestGUI extends KeybindGUI {
+    ShowProfileSelector() {
+    }
+}
+
 class AlwaysConfirmDriver {
     Confirm(*) {
         return true
@@ -947,6 +1097,20 @@ class RecreateCustomConfirmationDriver extends AlwaysConfirmDriver {
         this.profile.customFuncs.Delete("Custom: Keep")
         this.profile.customFuncs["Custom: Keep"] := {keys: "NEW", window: ""}
         this.profile.binds["Custom: Keep"] := "^F22"
+        return true
+    }
+}
+
+class RecreateProfileConfirmationDriver extends AlwaysConfirmDriver {
+    __New(profileName) {
+        this.profileName := profileName
+    }
+
+    Confirm(*) {
+        replacement := ProfileManager.NewProfile()
+        replacement.modalityAttendings["Marker"] := "replacement"
+        ProfileManager.profiles[this.profileName] := replacement
+        ProfileManager.SaveProfile(this.profileName, replacement)
         return true
     }
 }

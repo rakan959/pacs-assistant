@@ -353,7 +353,24 @@ class KeybindGUI {
             return
         }
 
-        if (MsgBox("Are you sure you want to delete profile '" name "'?", "Confirm Delete", "YesNo Icon!") = "Yes") {
+        deletionState := this.CaptureProfileDeletionState(name)
+        if !deletionState {
+            MsgBox("The selected profile is no longer available.", "Profile Changed", "Icon!")
+            return false
+        }
+
+        if this.ConfirmDestructiveAction(
+            "Are you sure you want to delete profile '" name "'?",
+            "Confirm Delete"
+        ) {
+            if !this.ProfileDeletionStateIsCurrent(deletionState) {
+                this.NotifyUser(
+                    "The selected profile changed while confirmation was open. Reopen the profile selector before deleting it.",
+                    "Profile Changed",
+                    "Icon!"
+                )
+                return false
+            }
             if (ProfileManager.DeleteProfile(name)) {
                 if (name = ProfileManager.currentProfile) {
                     ; If we deleted the current profile, switch to another one
@@ -366,10 +383,38 @@ class KeybindGUI {
                 }
                 selectorGui.Destroy()
                 this.ShowProfileSelector()  ; Refresh the selector
+                return true
             } else {
                 MsgBox("Cannot delete the last remaining profile.", "Error", "Icon!")
             }
         }
+        return false
+    }
+
+    CaptureProfileDeletionState(name) {
+        if (!ProfileManager.profiles.Has(name)
+            || !ProfileManager.IsValidProfileName(name))
+            return 0
+        profile := ProfileManager.profiles[name]
+        return {
+            name: name,
+            profilePointer: ObjPtr(profile),
+            revision: ProfileManager.GetProfileRevision(name),
+            profileCount: ProfileManager.profiles.Count,
+            currentProfile: ProfileManager.currentProfile,
+            defaultProfile: ProfileManager.defaultProfile
+        }
+    }
+
+    ProfileDeletionStateIsCurrent(state) {
+        if (!state
+            || !ProfileManager.profiles.Has(state.name)
+            || ProfileManager.profiles.Count != state.profileCount
+            || ProfileManager.GetProfileRevision(state.name) != state.revision
+            || !(ProfileManager.currentProfile == state.currentProfile)
+            || !(ProfileManager.defaultProfile == state.defaultProfile))
+            return false
+        return ObjPtr(ProfileManager.profiles[state.name]) = state.profilePointer
     }
 
     /**
@@ -494,8 +539,14 @@ class KeybindGUI {
                 if modifiedRow
                     control.Modify(modifiedRow,, funcName, this.PrettifyHotkey(oldBind))
                 ; The failed candidate has already been reported. Restore the prior
-                ; runtime set without producing a second dialog for the same action.
-                this.ApplyBinds(false)
+                ; runtime set quietly when possible, but surface uncertainty when
+                ; native teardown/re-registration cannot prove that restoration.
+                this.RestoreRuntimeAndNotify(
+                    currentProfile,
+                    "The new keybind was rejected and the previous profile value was retained.",
+                    "Keybind Recovery Failed",
+                    false
+                )
                 return false
             }
             return true
@@ -510,9 +561,14 @@ class KeybindGUI {
                 try control.Modify(modifiedRow,, funcName, this.PrettifyHotkey(oldBind))
             this.StopListening()
             try promptGui.Destroy()
-            ; Restore the last known-good registrations without masking the original
-            ; control/apply error if recovery itself has a problem.
-            try this.ApplyBinds()
+            ; Preserve the original control/apply exception, but never hide an
+            ; uncertain live shortcut state behind the restored profile value.
+            try this.RestoreRuntimeAndNotify(
+                currentProfile,
+                "The keybind change failed and the previous profile value was retained.",
+                "Keybind Recovery Failed",
+                false
+            )
             throw err
         }
     }
@@ -643,14 +699,15 @@ class KeybindGUI {
         return MsgBox(message, title, options)
     }
 
-    RestoreRuntimeAndNotify(originalProfile, message, title) {
+    RestoreRuntimeAndNotify(originalProfile, message, title, notifyOnSuccess := true) {
         restoreError := ""
         restored := this.RestoreRuntimeProfile(originalProfile, &restoreError)
         if !restored {
             message .= "`n`nThe previous runtime bindings could not be fully restored: " restoreError
                 . ". Restart PACS Assistant before relying on its shortcuts."
         }
-        this.NotifyUser(message, title, "Icon!")
+        if (notifyOnSuccess || !restored)
+            this.NotifyUser(message, title, "Icon!")
         return restored
     }
 
@@ -1299,6 +1356,7 @@ class KeybindGUI {
 
         oldScope := ProfileManager.GetScope(funcName)
         newScope := HotkeyManager.ScopeFromFlags(requirePACS, requirePowerScribe)
+        currentProfile := ProfileManager.profiles[scopeGui.profileName]
         changed := false
 
         try {
@@ -1311,7 +1369,12 @@ class KeybindGUI {
                 ProfileManager.SetScope(funcName, oldScope)
                 listView.Modify(rowIndex,, funcName, listView.GetText(rowIndex, 2), this.ScopeLabel(funcName))
                 this.ResizeColumns(listView)
-                this.ApplyBinds(false)
+                this.RestoreRuntimeAndNotify(
+                    currentProfile,
+                    "The scope change was rejected and the previous profile value was retained.",
+                    "Scope Recovery Failed",
+                    false
+                )
                 return false
             }
 
@@ -1322,7 +1385,12 @@ class KeybindGUI {
                 ProfileManager.SetScope(funcName, oldScope)
             try listView.Modify(rowIndex,, funcName, listView.GetText(rowIndex, 2), this.ScopeLabel(funcName))
             try this.ResizeColumns(listView)
-            try this.ApplyBinds(false)
+            try this.RestoreRuntimeAndNotify(
+                currentProfile,
+                "The scope change failed and the previous profile value was retained.",
+                "Scope Recovery Failed",
+                false
+            )
             throw err
         }
     }
