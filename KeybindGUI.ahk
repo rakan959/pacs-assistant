@@ -1107,6 +1107,8 @@ class KeybindGUI {
         if !this.DialogProfileIsCurrent(selectorGui)
             return 0
         profileName := selectorGui.profileName
+        if this.IsProfileDirty(profileName)
+            return 0
         profile := ProfileManager.profiles[profileName]
         if !profile.customFuncs.Has(funcName)
             return 0
@@ -1119,6 +1121,7 @@ class KeybindGUI {
             profileName: profileName,
             profilePointer: ObjPtr(profile),
             profileRevision: ProfileManager.GetProfileRevision(profileName),
+            mutationRevision: KeybindGUI.GetProfileMutationRevision(profileName),
             functionName: funcName,
             configPointer: ObjPtr(config),
             keys: config.keys,
@@ -1134,7 +1137,9 @@ class KeybindGUI {
         if (!state
             || !this.DialogProfileIsCurrent(selectorGui)
             || !(selectorGui.profileName == state.profileName)
-            || ProfileManager.GetProfileRevision(state.profileName) != state.profileRevision)
+            || ProfileManager.GetProfileRevision(state.profileName) != state.profileRevision
+            || KeybindGUI.GetProfileMutationRevision(state.profileName) != state.mutationRevision
+            || this.IsProfileDirty(state.profileName))
             return false
         profile := ProfileManager.profiles[state.profileName]
         if (ObjPtr(profile) != state.profilePointer

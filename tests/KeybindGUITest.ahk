@@ -51,6 +51,7 @@ class KeybindGUITest {
         "TestCustomDeleteRollsBackWhenLaterRegistrationFails",
         "TestStaleRemoveConfirmationCannotDeleteReplacementRow",
         "TestStaleCustomDeleteCannotDeleteRecreatedCommand",
+        "TestCustomDeleteRejectsConcurrentUnrelatedDirtyEdit",
         "TestRowDeleteAndRuntimeRestoreFailureRequiresRestartWarning",
         "TestRejectedKeybindWarnsWhenPriorRuntimeCannotBeRestored",
         "TestRejectedScopeWarnsWhenPriorRuntimeCannotBeRestored",
@@ -1718,6 +1719,51 @@ class KeybindGUITest {
         Assert.Equal(0, gui.applyCalls)
     }
 
+    TestCustomDeleteRejectsConcurrentUnrelatedDirtyEdit() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        tempRoot := A_Temp "\pacs_custom_delete_dirty_race_" A_TickCount
+        profile := ProfileManager.NewProfile()
+        profile.binds["Custom: Keep"] := "^F23"
+        profile.scopes["Custom: Keep"] := "Any"
+        profile.customFuncs["Custom: Keep"] := {keys: "OLD", window: ""}
+        profile.binds["Sign Report"] := "^F12"
+        profile.scopes["Sign Report"] := "Any"
+        dialog := FakeProfileDialog("Test")
+        gui := {base: PassiveRuntimeKeybindGUI.Prototype, gui: ""}
+        gui.applyCalls := 0
+        gui.confirmationDriver := DirtyOtherBindConfirmationDriver(gui, profile)
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            ProfileManager.SaveProfile("Test", profile)
+
+            result := gui.DeleteCustomFunction("Custom: Keep", dialog)
+            stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath("Test"))
+            liveKept := profile.customFuncs.Has("Custom: Keep")
+            storedKept := stored.customFuncs.Has("Custom: Keep")
+            storedScope := stored.scopes["Sign Report"]
+            dirtyKept := gui.IsProfileDirty("Test")
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profilesPath := originalProfilesPath
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.False(result)
+        Assert.True(liveKept)
+        Assert.True(storedKept)
+        Assert.Equal("Any", storedScope)
+        Assert.True(dirtyKept)
+        Assert.Equal(0, gui.applyCalls)
+    }
+
     TestRowDeleteAndRuntimeRestoreFailureRequiresRestartWarning() {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
@@ -2348,6 +2394,19 @@ class RecreateCustomConfirmationDriver extends AlwaysConfirmDriver {
         this.profile.customFuncs.Delete("Custom: Keep")
         this.profile.customFuncs["Custom: Keep"] := {keys: "NEW", window: ""}
         this.profile.binds["Custom: Keep"] := "^F22"
+        return true
+    }
+}
+
+class DirtyOtherBindConfirmationDriver extends AlwaysConfirmDriver {
+    __New(gui, profile) {
+        this.gui := gui
+        this.profile := profile
+    }
+
+    Confirm(*) {
+        this.profile.scopes["Sign Report"] := "PowerScribe"
+        this.gui.MarkProfileDirty("Test")
         return true
     }
 }
