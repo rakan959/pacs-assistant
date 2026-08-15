@@ -7,25 +7,25 @@
 class PACSCommands {
     static commands := Map(
         "Toggle Dictation", (*) => sendPs("{F4}"),
-        "Select Next Field", (*) => (WinActivate("PowerScribe"), Send("{Tab}")),
-        "Select Previous Field", (*) => (WinActivate("PowerScribe"), Send("+{Tab}")),
-        "Delete Previous Word", (*) => (WinActivate("PowerScribe"), Send("^{Backspace}")),
-        "Delete Next Word", (*) => (WinActivate("PowerScribe"), Send("^{Delete}")),
+        "Select Next Field", (*) => PowerScribe.SendKeys("{Tab}"),
+        "Select Previous Field", (*) => PowerScribe.SendKeys("+{Tab}"),
+        "Delete Previous Word", (*) => PowerScribe.SendKeys("^{Backspace}"),
+        "Delete Next Word", (*) => PowerScribe.SendKeys("^{Delete}"),
         "Draft Report", (*) => sendPs("{F9}"),
         "Sign Report", (*) => sendPs("{F12}"),
         "Open/Force Restart PACS", (*) => restartPACS(),
         "Paste Wet Read", (*) => wetRead(),
         "Toggle PowerScribe Window", (*) => toggleWindow("PowerScribe"),
         "Toggle EPIC Window", (*) => toggleWindow("Hyperspace"),
-        "Next Series", (*) => (WinActivate("Vue PACS Client"), Send("{Right}")),
-        "Previous Series", (*) => (WinActivate("Vue PACS Client"), Send("{Left}")),
+        "Next Series", (*) => AppControl.SendKeysToWindow("Vue PACS Client", "{Right}"),
+        "Previous Series", (*) => AppControl.SendKeysToWindow("Vue PACS Client", "{Left}"),
         "Set PowerScribe Microphone", (*) => MicrophoneManager.ApplyNow()
     )
 
     static CreateCustomKeybind(keys, targetWindow := "") {
         ; Create a function that stores its configuration
         func := targetWindow != "" ?
-            (*) => (WinActivate(targetWindow), Send(keys)) :
+            (*) => AppControl.SendKeysToWindow(targetWindow, keys) :
             (*) => Send(keys)
 
         ; Store the configuration

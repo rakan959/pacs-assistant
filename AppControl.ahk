@@ -2,11 +2,59 @@
 #Include UIA-v2/Lib/UIA.ahk
 
 /**
+ * Thin wrapper around focus-sensitive AutoHotkey primitives. Tests replace this
+ * driver so clinical commands can prove their target and payload without emitting
+ * real keystrokes.
+ */
+class NativeWindowDriver {
+    Activate(winTitle, timeoutSeconds) {
+        try {
+            if !WinExist(winTitle)
+                return false
+            WinActivate(winTitle)
+            return WinWaitActive(winTitle, , timeoutSeconds) != 0
+        } catch {
+            return false
+        }
+    }
+
+    SendKeys(keys) {
+        Send(keys)
+    }
+
+    SendText(text) {
+        SendText(text)
+    }
+
+    Pause(milliseconds) {
+        Sleep(milliseconds)
+    }
+}
+
+/**
  * Starting, stopping and switching the clinical applications.
  */
 class AppControl {
     ; A window title or body that looks like an unsaved-changes prompt
     static savePromptPattern := "i)(save|unsaved)"
+    static activationTimeoutSeconds := 2
+    static windowDriver := NativeWindowDriver()
+
+    static ActivateWindow(winTitle) {
+        return this.windowDriver.Activate(winTitle, this.activationTimeoutSeconds)
+    }
+
+    static SendKeysToWindow(winTitle, keys) {
+        if !this.ActivateWindow(winTitle)
+            return false
+
+        try {
+            this.windowDriver.SendKeys(keys)
+            return true
+        } catch {
+            return false
+        }
+    }
 }
 
 /**
@@ -165,7 +213,7 @@ toggleWindow(winName) {
     if WinExist(winName) {
         if WinGetMinMax(winName) = -1  ; -1 indicates window is minimized
         {
-            WinActivate(winName)  ; Restore and activate the window
+            AppControl.ActivateWindow(winName)  ; Restore and activate the window
         }
         else
         {

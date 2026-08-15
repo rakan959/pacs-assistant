@@ -7,6 +7,7 @@
 #Include HotkeyManagerTest.ahk
 #Include ProfileManagerTest.ahk
 #Include PACSCommandsTest.ahk
+#Include ClinicalAutomationTest.ahk
 #Include KeybindGUITest.ahk
 #Include UIAValueTest.ahk
 
@@ -17,6 +18,7 @@ TestRunner.AddTest(PACSMonitorTest)
 TestRunner.AddTest(HotkeyManagerTest)
 TestRunner.AddTest(ProfileManagerTest)
 TestRunner.AddTest(PACSCommandsTest)
+TestRunner.AddTest(ClinicalAutomationTest)
 TestRunner.AddTest(KeybindGUITest)
 TestRunner.AddTest(UIAValueTest)
 

@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
+#Include AppControl.ahk
 #Include UIAValue.ahk
 
 /**
@@ -17,6 +18,41 @@ class PowerScribe {
     ; Whether a piece of text reads like a report body rather than some other field
     static LooksLikeReport(text) {
         return RegExMatch(text, "i)EXAMINATION:") > 0
+    }
+
+    /**
+     * Chooses only report-shaped text. Returning an unrelated UI value is worse than
+     * returning nothing because it silently falls through to the MSK routing rule.
+     */
+    static SelectReportText(candidates, fallbackText := "") {
+        for text in candidates {
+            if this.LooksLikeReport(text)
+                return text
+        }
+        return this.LooksLikeReport(fallbackText) ? fallbackText : ""
+    }
+
+    static SendKeys(keys) {
+        return AppControl.SendKeysToWindow(this.windowTitle, keys)
+    }
+
+    static SetAttending(attending) {
+        if !AppControl.ActivateWindow(this.windowTitle)
+            return false
+
+        driver := AppControl.windowDriver
+        try {
+            driver.SendKeys("{Alt down}ta{Alt up}")
+            driver.Pause(100)
+            ; Attending names are data, not AutoHotkey Send syntax. SendText keeps
+            ; characters such as +, ^ and braces literal.
+            driver.SendText(attending)
+            driver.Pause(100)
+            driver.SendKeys("{tab}{space}{tab}{Enter}")
+            return true
+        } catch {
+            return false
+        }
     }
 }
 
@@ -51,17 +87,11 @@ class ReportModality {
 }
 
 sendPs(x) {
-    WinActivate("PowerScribe")
-    Send x
+    return PowerScribe.SendKeys(x)
 }
 
 setAttending(x) {
-    WinActivate("PowerScribe")
-    Send "{Alt down}ta{Alt up}"
-    Sleep(100)
-    Send x
-    Sleep(100)
-    Send "{tab}{space}{tab}{Enter}"
+    return PowerScribe.SetAttending(x)
 }
 
 /**
@@ -83,8 +113,8 @@ readReportText() {
         return ""
     }
 
-    ; The report editor presents as a Document, but has been seen as a plain Edit
-    best := ""
+    ; The report editor presents as a Document, but has been seen as a plain Edit.
+    candidates := []
     for condition in [{Type: "Document"}, {Type: "Edit"}] {
         elements := ""
         try {
@@ -95,28 +125,18 @@ readReportText() {
 
         for el in elements {
             text := ""
-            text := UIAValue.Read(el)
+            try text := UIAValue.Read(el)
             if (text = "")
                 continue
-
-            ; A real report names the study, so prefer that over any other text field
-            if PowerScribe.LooksLikeReport(text)
-                return text
-
-            if (StrLen(text) > StrLen(best))
-                best := text
+            candidates.Push(text)
         }
     }
 
-    if (best != "")
-        return best
-
     ; Positional fallback for the case where nothing matched by type
-    try {
-        return UIAValue.Read(root.ElementFromPath(PowerScribe.reportPath))
-    }
+    fallbackText := ""
+    try fallbackText := UIAValue.Read(root.ElementFromPath(PowerScribe.reportPath))
 
-    return ""
+    return PowerScribe.SelectReportText(candidates, fallbackText)
 }
 
 /**
@@ -135,8 +155,8 @@ checkAttending(haystack) {
     modality := ReportModality.Classify(haystack)
     attending := ProfileManager.GetModalityAttending(modality)
 
-    if (attending != "")
-        setAttending(attending)
+    if (attending != "" && !PowerScribe.SetAttending(attending))
+        throw Error("Attending could not be assigned because PACS Assistant could not activate PowerScribe")
 
     return modality
 }
