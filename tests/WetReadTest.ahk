@@ -12,9 +12,11 @@ class WetReadTest {
         "UIABecomingUnsupportedStillRestoresAnEarlierWrite",
         "FailedControlVerificationRestoresThePreviousNote",
         "SendExceptionRestoresThePreviousNoteAndClipboard",
+        "ClearFailureAfterMutationRestoresThePreviousNote",
         "ClipboardRestoreFailureIsReported",
         "UnreadableNoteDoesNotAttemptPaste",
         "UnreadableNativeFieldFailsClosed",
+        "NativeSendRefusesLostFocus",
         "RoutingFailureReportsTheActualCause"
     ]
 
@@ -117,6 +119,19 @@ class WetReadTest {
         Assert.Equal("original clipboard", driver.clipboardValue)
     }
 
+    ClearFailureAfterMutationRestoresThePreviousNote() {
+        driver := FakeWetReadDriver("existing note", "original clipboard")
+        driver.clearFailuresRemaining := 1
+
+        result := WetReadPasteEngine.Paste(1, "new wet read", "send", driver)
+
+        Assert.False(result.success)
+        Assert.True(result.restored)
+        Assert.Equal("existing note", driver.fieldValue)
+        Assert.Equal(2, driver.clearCalls)
+        Assert.Equal("original clipboard", driver.clipboardValue)
+    }
+
     ClipboardRestoreFailureIsReported() {
         driver := FakeWetReadDriver("existing note", "original clipboard")
         driver.throwOnClipboardRestore := true
@@ -148,13 +163,24 @@ class WetReadTest {
         )
     }
 
+    NativeSendRefusesLostFocus() {
+        windowDriver := FakeWetReadWindowDriver(false)
+        driver := NativeWetReadDriver("Sticky Notes", windowDriver)
+
+        Assert.Throws(
+            () => driver.Clear(FakeWetReadField()),
+            "no longer active"
+        )
+        Assert.Equal(0, windowDriver.sent.Length)
+    }
+
     RoutingFailureReportsTheActualCause() {
         message := AttendingFailureMessage(
             "EXAMINATION: CT CHEST",
-            Error("could not activate PowerScribe")
+            Error("could not safely control PowerScribe")
         )
 
-        Assert.True(InStr(message, "could not activate PowerScribe") > 0)
+        Assert.True(InStr(message, "could not safely control PowerScribe") > 0)
         Assert.False(InStr(message, "Could not read the report") > 0)
     }
 }
@@ -172,6 +198,7 @@ class FakeWetReadDriver {
         this.throwOnClipboardRestore := false
         this.throwOnRead := false
         this.clearCalls := 0
+        this.clearFailuresRemaining := 0
     }
 
     Read(field) {
@@ -186,6 +213,10 @@ class FakeWetReadDriver {
     Clear(field) {
         this.clearCalls++
         this.fieldValue := ""
+        if this.clearFailuresRemaining > 0 {
+            this.clearFailuresRemaining--
+            throw Error("simulated clear failure after mutation")
+        }
     }
 
     CaptureClipboard() {
@@ -233,5 +264,28 @@ class FakeWetReadDriver {
 class UnsupportedWetReadElement {
     GetPropertyValue(propertyId) {
         return ""
+    }
+}
+
+class FakeWetReadField {
+    SetFocus() {
+    }
+
+    Click(*) {
+    }
+}
+
+class FakeWetReadWindowDriver {
+    __New(active) {
+        this.active := active
+        this.sent := []
+    }
+
+    IsActive(title) {
+        return this.active
+    }
+
+    SendKeys(keys) {
+        this.sent.Push(keys)
     }
 }

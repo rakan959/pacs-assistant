@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
+#Include AppControl.ahk
 #Include Settings.ahk
 #Include ProfileManager.ahk
 #Include PowerScribe.ahk
@@ -10,6 +11,11 @@
  * small interface makes rollback behavior deterministic under test.
  */
 class NativeWetReadDriver {
+    __New(targetTitle := "Sticky Notes", windowDriver := NativeWindowDriver()) {
+        this.targetTitle := targetTitle
+        this.windowDriver := windowDriver
+    }
+
     Read(field) {
         result := UIAValue.TryRead(field)
         if !result.supported
@@ -27,8 +33,7 @@ class NativeWetReadDriver {
 
     Clear(field) {
         this.Focus(field)
-        Send("^a")
-        Send("{Backspace}")
+        this.SendKeysToTarget("^a{Backspace}")
         Sleep(50)
     }
 
@@ -50,7 +55,13 @@ class NativeWetReadDriver {
 
     PasteClipboard(field) {
         this.Focus(field)
-        Send("^v")
+        this.SendKeysToTarget("^v")
+    }
+
+    SendKeysToTarget(keys) {
+        if !this.windowDriver.IsActive(this.targetTitle)
+            throw Error(this.targetTitle " is no longer active; no keys were sent")
+        this.windowDriver.SendKeys(keys)
     }
 
     WriteUIA(field, value) {
@@ -136,8 +147,10 @@ class WetReadPasteEngine {
             }
 
             loop this.attempts {
-                driver.Clear(field)
+                ; Clear can mutate before it raises. Mark the transaction dirty first
+                ; so every uncertain/partial clear takes the rollback path.
                 fieldChanged := true
+                driver.Clear(field)
                 driver.PasteClipboard(field)
                 if driver.WaitForValue(field, text, this.verifyTimeoutMs) {
                     result.success := true

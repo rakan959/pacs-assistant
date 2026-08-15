@@ -42,14 +42,18 @@ class PowerScribe {
 
         driver := AppControl.windowDriver
         try {
-            driver.SendKeys("{Alt down}ta{Alt up}")
+            if !AppControl.SendKeysToActiveWindow(this.windowTitle, "{Alt down}ta{Alt up}")
+                return false
             driver.Pause(100)
             ; Attending names are data, not AutoHotkey Send syntax. SendText keeps
             ; characters such as +, ^ and braces literal.
-            driver.SendText(attending)
+            if !AppControl.SendTextToActiveWindow(this.windowTitle, attending)
+                return false
             driver.Pause(100)
-            driver.SendKeys("{tab}{space}{tab}{Enter}")
-            return true
+            return AppControl.SendKeysToActiveWindow(
+                this.windowTitle,
+                "{tab}{space}{tab}{Enter}"
+            )
         } catch {
             return false
         }
@@ -101,7 +105,7 @@ class AttendingRouting {
         attending := attendingLookup.Call(modality)
 
         if (attending != "" && !attendingWriter.Call(attending))
-            throw Error("Attending could not be assigned because PACS Assistant could not activate PowerScribe")
+            throw Error("Attending could not be assigned because PACS Assistant could not safely control PowerScribe")
 
         return modality
     }

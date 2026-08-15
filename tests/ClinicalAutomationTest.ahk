@@ -6,15 +6,22 @@
 class ClinicalAutomationTest {
     static Tests := [
         "ActivationFailureDoesNotSend",
+        "ActivationCanSucceedButFocusCheckStopsSend",
         "TargetedSendActivatesBeforeSending",
         "BuiltInClinicalCommandUsesConfirmedTarget",
         "TargetedCustomCommandUsesConfirmedTarget",
         "AttendingNameUsesLiteralText",
+        "AttendingStopsBeforeTextWhenFocusMoves",
         "AttendingRoutingUsesInjectedDependencies",
         "BlankAttendingSkipsPowerScribeWrite",
-        "FailedAttendingActivationIsReported",
+        "FailedAttendingControlIsReported",
         "RestartTreatsAlreadyExitedProcessAsStopped",
         "RestartDetectsStubbornProcess",
+        "NativeLookupErrorsAreNotAbsence",
+        "RestartLookupUncertaintyCancelsStop",
+        "WindowOwnershipUncertaintyCancelsStop",
+        "PacsLauncherRejectsNonShortcutMatch",
+        "PacsLauncherAcceptsInstalledShortcut",
         "ReportSelectionUsesOnlyReportShapedText",
         "ReportSelectionRejectsUnrelatedFallbackText"
     ]
@@ -37,16 +44,28 @@ class ClinicalAutomationTest {
         Assert.Equal("activate", driver.calls[1].kind)
     }
 
+    ActivationCanSucceedButFocusCheckStopsSend() {
+        driver := FakeWindowDriver(true, false)
+        AppControl.windowDriver := driver
+
+        Assert.False(AppControl.SendKeysToWindow("PowerScribe", "{F12}"))
+        Assert.Equal(2, driver.calls.Length)
+        Assert.Equal("activate", driver.calls[1].kind)
+        Assert.Equal("active", driver.calls[2].kind)
+    }
+
     TargetedSendActivatesBeforeSending() {
         driver := FakeWindowDriver()
         AppControl.windowDriver := driver
 
         Assert.True(AppControl.SendKeysToWindow("Vue PACS Client", "{Right}"))
-        Assert.Equal(2, driver.calls.Length)
+        Assert.Equal(3, driver.calls.Length)
         Assert.Equal("activate", driver.calls[1].kind)
         Assert.Equal("Vue PACS Client", driver.calls[1].value)
-        Assert.Equal("keys", driver.calls[2].kind)
-        Assert.Equal("{Right}", driver.calls[2].value)
+        Assert.Equal("active", driver.calls[2].kind)
+        Assert.Equal("Vue PACS Client", driver.calls[2].value)
+        Assert.Equal("keys", driver.calls[3].kind)
+        Assert.Equal("{Right}", driver.calls[3].value)
     }
 
     BuiltInClinicalCommandUsesConfirmedTarget() {
@@ -57,7 +76,8 @@ class ClinicalAutomationTest {
 
         Assert.Equal("activate", driver.calls[1].kind)
         Assert.Equal(PowerScribe.windowTitle, driver.calls[1].value)
-        Assert.Equal("{F12}", driver.calls[2].value)
+        Assert.Equal("active", driver.calls[2].kind)
+        Assert.Equal("{F12}", driver.calls[3].value)
     }
 
     TargetedCustomCommandUsesConfirmedTarget() {
@@ -69,7 +89,8 @@ class ClinicalAutomationTest {
 
         Assert.Equal("activate", driver.calls[1].kind)
         Assert.Equal("Custom Clinical Window", driver.calls[1].value)
-        Assert.Equal("^d", driver.calls[2].value)
+        Assert.Equal("active", driver.calls[2].kind)
+        Assert.Equal("^d", driver.calls[3].value)
     }
 
     AttendingNameUsesLiteralText() {
@@ -78,15 +99,30 @@ class ClinicalAutomationTest {
         attending := "Smith + Jones {Neuro}"
 
         Assert.True(PowerScribe.SetAttending(attending))
-        Assert.Equal(6, driver.calls.Length)
+        Assert.Equal(9, driver.calls.Length)
         Assert.Equal("activate", driver.calls[1].kind)
         Assert.Equal(PowerScribe.windowTitle, driver.calls[1].value)
-        Assert.Equal("keys", driver.calls[2].kind)
-        Assert.Equal("{Alt down}ta{Alt up}", driver.calls[2].value)
-        Assert.Equal("text", driver.calls[4].kind)
-        Assert.Equal(attending, driver.calls[4].value)
-        Assert.Equal("keys", driver.calls[6].kind)
-        Assert.Equal("{tab}{space}{tab}{Enter}", driver.calls[6].value)
+        Assert.Equal("active", driver.calls[2].kind)
+        Assert.Equal("keys", driver.calls[3].kind)
+        Assert.Equal("{Alt down}ta{Alt up}", driver.calls[3].value)
+        Assert.Equal("active", driver.calls[5].kind)
+        Assert.Equal("text", driver.calls[6].kind)
+        Assert.Equal(attending, driver.calls[6].value)
+        Assert.Equal("active", driver.calls[8].kind)
+        Assert.Equal("keys", driver.calls[9].kind)
+        Assert.Equal("{tab}{space}{tab}{Enter}", driver.calls[9].value)
+    }
+
+    AttendingStopsBeforeTextWhenFocusMoves() {
+        driver := FakeWindowDriver(true, [true, false])
+        AppControl.windowDriver := driver
+
+        Assert.False(PowerScribe.SetAttending("Smith"))
+
+        for call in driver.calls
+            Assert.False(call.kind = "text", "Attending text must not be sent after focus moves")
+        Assert.Equal(5, driver.calls.Length)
+        Assert.Equal("active", driver.calls[5].kind)
     }
 
     AttendingRoutingUsesInjectedDependencies() {
@@ -115,7 +151,7 @@ class ClinicalAutomationTest {
         Assert.Equal(0, writes.Length)
     }
 
-    FailedAttendingActivationIsReported() {
+    FailedAttendingControlIsReported() {
         profile := ProfileManager.NewProfile()
         profile.modalityAttendings["Chest"] := "Smith"
         ProfileManager.profiles["Test"] := profile
@@ -124,7 +160,7 @@ class ClinicalAutomationTest {
 
         Assert.Throws(
             () => checkAttending("EXAMINATION: CT CHEST"),
-            "could not activate PowerScribe"
+            "could not safely control PowerScribe"
         )
     }
 
@@ -144,6 +180,67 @@ class ClinicalAutomationTest {
 
         Assert.True(result.found)
         Assert.False(result.stopped)
+    }
+
+    NativeLookupErrorsAreNotAbsence() {
+        driver := NativeAppLifecycleDriver()
+
+        Assert.Throws(() => driver.FindProcess({}))
+        Assert.Throws(() => driver.ProcessExists({}))
+    }
+
+    RestartLookupUncertaintyCancelsStop() {
+        AppControl.lifecycleDriver := FakeAppLifecycleDriver("lookup-error")
+
+        result := AppControl.StopTarget("mp.exe")
+
+        Assert.False(result.found)
+        Assert.False(result.stopped)
+        Assert.True(InStr(result.error, "lookup failed") > 0)
+    }
+
+    WindowOwnershipUncertaintyCancelsStop() {
+        driver := FakeAppLifecycleDriver("ownership-error")
+        AppControl.lifecycleDriver := driver
+
+        result := AppControl.StopTarget("Vue PACS")
+
+        Assert.True(result.found)
+        Assert.False(result.stopped)
+        Assert.True(InStr(result.error, "ownership failed") > 0)
+        Assert.Equal(0, driver.killCalls)
+    }
+
+    PacsLauncherRejectsNonShortcutMatch() {
+        root := A_Temp "\pacs_launch_" A_TickCount "_" Random(1000, 9999)
+        DirCreate(root)
+        FileAppend("not a shortcut", root "\Vue Client (Integrated) helper.cmd")
+        driver := FakeAppLifecycleDriver("launcher")
+        AppControl.lifecycleDriver := driver
+
+        try {
+            Assert.False(AppControl.LaunchVuePacs(root))
+            Assert.Equal(0, driver.launches.Length)
+        } finally {
+            DirDelete(root, true)
+        }
+    }
+
+    PacsLauncherAcceptsInstalledShortcut() {
+        root := A_Temp "\pacs_launch_" A_TickCount "_" Random(1000, 9999)
+        DirCreate(root)
+        shortcut := root "\Vue Client (Integrated).lnk"
+        FileAppend("test shortcut", shortcut)
+        driver := FakeAppLifecycleDriver("launcher")
+        AppControl.lifecycleDriver := driver
+
+        try {
+            Assert.True(AppControl.LaunchVuePacs(root))
+            Assert.Equal(1, driver.launches.Length)
+            Assert.Equal(shortcut, driver.launches[1])
+        } finally {
+            DirDelete(root, true)
+        }
     }
 
     ReportSelectionUsesOnlyReportShapedText() {
@@ -176,14 +273,20 @@ class ClinicalAutomationTest {
 }
 
 class FakeWindowDriver {
-    __New(activationResult := true) {
+    __New(activationResult := true, activeResults := true) {
         this.activationResult := activationResult
+        this.activeResults := activeResults is Array ? activeResults.Clone() : [activeResults]
         this.calls := []
     }
 
     Activate(title, timeoutSeconds) {
         this.calls.Push({kind: "activate", value: title, timeout: timeoutSeconds})
         return this.activationResult
+    }
+
+    IsActive(title) {
+        this.calls.Push({kind: "active", value: title})
+        return this.activeResults.Length ? this.activeResults.RemoveAt(1) : true
     }
 
     SendKeys(keys) {
@@ -202,17 +305,27 @@ class FakeWindowDriver {
 class FakeAppLifecycleDriver {
     __New(mode) {
         this.mode := mode
+        this.launches := []
+        this.killCalls := 0
     }
 
     FindProcess(target) {
+        if (this.mode = "lookup-error")
+            throw Error("lookup failed")
+        if (this.mode = "ownership-error")
+            return 0
         return 4242
     }
 
     FindWindow(target) {
+        if (this.mode = "ownership-error")
+            return 31337
         return 0
     }
 
     GetWindowProcessId(hwnd) {
+        if (this.mode = "ownership-error")
+            throw Error("ownership failed")
         return 0
     }
 
@@ -231,9 +344,12 @@ class FakeAppLifecycleDriver {
     }
 
     KillWindow(hwnd) {
+        this.killCalls++
         return true
     }
 
     Launch(path) {
+        this.launches.Push(path)
+        return true
     }
 }

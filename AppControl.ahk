@@ -18,6 +18,11 @@ class NativeWindowDriver {
         }
     }
 
+    IsActive(winTitle) {
+        try return WinActive(winTitle) != 0
+        return false
+    }
+
     SendKeys(keys) {
         Send(keys)
     }
@@ -38,28 +43,23 @@ class NativeWindowDriver {
  */
 class NativeAppLifecycleDriver {
     FindProcess(target) {
-        try return ProcessExist(target)
-        return 0
+        return ProcessExist(target)
     }
 
     FindWindow(target) {
-        try return WinExist(target)
-        return 0
+        return WinExist(target)
     }
 
     GetWindowProcessId(hwnd) {
-        try return WinGetPID("ahk_id " hwnd)
-        return 0
+        return WinGetPID("ahk_id " hwnd)
     }
 
     ProcessExists(pid) {
-        try return ProcessExist(pid) != 0
-        return false
+        return ProcessExist(pid) != 0
     }
 
     WindowExists(hwnd) {
-        try return WinExist("ahk_id " hwnd) != 0
-        return false
+        return WinExist("ahk_id " hwnd) != 0
     }
 
     StopProcess(pid) {
@@ -104,8 +104,30 @@ class AppControl {
         if !this.ActivateWindow(winTitle)
             return false
 
+        return this.SendKeysToActiveWindow(winTitle, keys)
+    }
+
+    /**
+     * Emits keys only while the intended target is still active. Activation and a
+     * later send are separate OS operations; a popup or user focus change can occur
+     * between them, so every focus-sensitive emission rechecks the postcondition.
+     */
+    static SendKeysToActiveWindow(winTitle, keys) {
         try {
+            if !this.windowDriver.IsActive(winTitle)
+                return false
             this.windowDriver.SendKeys(keys)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    static SendTextToActiveWindow(winTitle, text) {
+        try {
+            if !this.windowDriver.IsActive(winTitle)
+                return false
+            this.windowDriver.SendText(text)
             return true
         } catch {
             return false
@@ -146,9 +168,10 @@ class AppControl {
         ; Capture ownership before killing the window: afterwards the handle may be
         ; invalid even though its process is still alive.
         try pid := driver.GetWindowProcessId(hwnd)
-        catch {
-            pid := 0
-        }
+        catch as err
+            return {found: true, stopped: false, error: err.Message}
+        if !pid
+            return {found: true, stopped: false, error: "Window process ownership could not be confirmed"}
 
         try windowStopped := driver.KillWindow(hwnd)
         catch as err
@@ -172,9 +195,10 @@ class AppControl {
 
     static LaunchVuePacs(directory) {
         try {
-            Loop Files, directory "\*" {
-                if !InStr(A_LoopFileName, "Vue Client (Integrated)")
-                    continue
+            ; Only the installed Windows shortcut is a valid launch target. A broad
+            ; substring match could treat a similarly named script as PACS and report
+            ; a successful restart after launching the wrong entry.
+            Loop Files, directory "\Vue Client (Integrated).lnk", "F" {
                 try return this.lifecycleDriver.Launch(A_LoopFileFullPath) ? true : false
                 catch
                     return false
