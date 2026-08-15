@@ -20,6 +20,10 @@ class WetReadTest {
         "UnreadableNoteDoesNotAttemptPaste",
         "UnreadableNativeFieldFailsClosed",
         "StickyRootMustBelongToPacsProcess",
+        "StickyOpenerRejectsSameProcessWrongWindowButton",
+        "StickyOpenerRejectsAmbiguousSameWindowButtons",
+        "StickyOpenerIgnoresInactivePreexistingSticky",
+        "StickyOpenerPinsNewlyActiveExactWindow",
         "StickyDriverUsesExactValidatedWindowHandle",
         "StickyNoteTargetRequiresExpectedTypeProcessAndCapability",
         "StickyNoteTargetMustBeTheUniqueWritableField",
@@ -238,6 +242,67 @@ class WetReadTest {
 
         Assert.True(NativeWetReadDriver.IsExpectedStickyRoot(pacsRoot, stickyRoot))
         Assert.False(NativeWetReadDriver.IsExpectedStickyRoot(pacsRoot, unrelatedRoot))
+    }
+
+    StickyOpenerRejectsSameProcessWrongWindowButton() {
+        wrongWindowButton := FakeStickyTargetElement(
+            UIA.Type.Button,
+            42,
+            false,
+            999,
+            "scn_sticky_notes"
+        )
+        pacsRoot := FakeStickyTargetRoot(42, [wrongWindowButton], 100)
+        driver := FakeStickyNoteWindowDriver(pacsRoot)
+
+        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
+        Assert.Equal(0, driver.invokeCalls)
+    }
+
+    StickyOpenerRejectsAmbiguousSameWindowButtons() {
+        first := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
+        second := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
+        pacsRoot := FakeStickyTargetRoot(42, [first, second], 100)
+        driver := FakeStickyNoteWindowDriver(pacsRoot)
+
+        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
+        Assert.Equal(0, driver.invokeCalls)
+    }
+
+    StickyOpenerIgnoresInactivePreexistingSticky() {
+        button := FakeStickyTargetElement(
+            UIA.Type.Button,
+            42,
+            false,
+            100,
+            "scn_sticky_notes"
+        )
+        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
+        staleSticky := FakeStickyTargetRoot(42, [], 200)
+        driver := FakeStickyNoteWindowDriver(pacsRoot, staleSticky, 0)
+
+        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
+        Assert.Equal(1, driver.invokeCalls)
+    }
+
+    StickyOpenerPinsNewlyActiveExactWindow() {
+        button := FakeStickyTargetElement(
+            UIA.Type.Button,
+            42,
+            false,
+            100,
+            "scn_sticky_notes"
+        )
+        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
+        stickyRoot := FakeStickyTargetRoot(42, [], 200)
+        driver := FakeStickyNoteWindowDriver(pacsRoot, stickyRoot, 200)
+
+        session := StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"})
+
+        Assert.Equal(100, session.pacsHwnd)
+        Assert.Equal(200, session.stickyHwnd)
+        Assert.True(session.stickyRoot = stickyRoot)
+        Assert.Equal(1, driver.invokeCalls)
     }
 
     StickyDriverUsesExactValidatedWindowHandle() {
@@ -475,10 +540,11 @@ class FakeWritableWetReadElement {
 }
 
 class FakeStickyTargetElement {
-    __New(type, processId, readable := false, windowId := 100) {
+    __New(type, processId, readable := false, windowId := 100, name := "") {
         this.Type := type
         this.ProcessId := processId
         this.WinId := windowId
+        this.Name := name
         this.IsEnabled := true
         this.IsValuePatternAvailable := readable
         this.IsLegacyIAccessiblePatternAvailable := false
@@ -496,11 +562,52 @@ class FakeStickyTargetRoot {
     FindElements(condition) {
         matches := []
         for child in this.children {
-            if ((condition.Type = "Document" && child.Type = UIA.Type.Document)
-                || (condition.Type = "Edit" && child.Type = UIA.Type.Edit))
+            if (HasProp(condition, "Name") && child.Name = condition.Name)
+                matches.Push(child)
+            else if (HasProp(condition, "Type")
+                && ((condition.Type = "Document" && child.Type = UIA.Type.Document)
+                || (condition.Type = "Edit" && child.Type = UIA.Type.Edit)))
                 matches.Push(child)
         }
         return matches
+    }
+}
+
+class FakeStickyNoteWindowDriver {
+    __New(pacsRoot, stickyRoot := 0, activatedStickyHwnd := 0) {
+        this.pacsRoot := pacsRoot
+        this.stickyRoot := stickyRoot
+        this.activatedStickyHwnd := activatedStickyHwnd
+        this.invokeCalls := 0
+    }
+
+    CaptureActivePacs(*) {
+        return this.pacsRoot.WinId
+    }
+
+    GetRoot(hwnd) {
+        if (hwnd = this.pacsRoot.WinId)
+            return this.pacsRoot
+        if (this.stickyRoot && hwnd = this.stickyRoot.WinId)
+            return this.stickyRoot
+        return 0
+    }
+
+    IsActive(hwnd) {
+        return hwnd = this.pacsRoot.WinId
+    }
+
+    InvokeStickyButton(*) {
+        this.invokeCalls++
+        return true
+    }
+
+    WaitForActiveSticky(*) {
+        return this.activatedStickyHwnd
+    }
+
+    GetOwner(*) {
+        return 0
     }
 }
 

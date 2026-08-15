@@ -6,6 +6,168 @@
 #Include PowerScribe.ahk
 #Include UIAValue.ahk
 
+/**
+ * Resolves the PACS and Sticky Notes top-level windows without relying on the
+ * process-wide substring title mode. The returned HWNDs are the transaction
+ * identity for every later UIA and focus check.
+ */
+class NativeStickyNoteWindowDriver {
+    CaptureActivePacs(target) {
+        if !IsObject(target) || !HasProp(target, "title") || !HasProp(target, "exe")
+            return 0
+
+        matches := []
+        try windows := WinGetList("ahk_exe " target.exe)
+        catch
+            return 0
+
+        for hwnd in windows {
+            title := ""
+            processName := ""
+            try title := WinGetTitle("ahk_id " hwnd)
+            try processName := WinGetProcessName("ahk_id " hwnd)
+            if (title == target.title && processName = target.exe)
+                matches.Push(hwnd)
+        }
+        if (matches.Length != 1)
+            return 0
+
+        hwnd := matches[1]
+        try {
+            WinActivate("ahk_id " hwnd)
+            return WinWaitActive("ahk_id " hwnd, , 2) = hwnd ? hwnd : 0
+        } catch {
+            return 0
+        }
+    }
+
+    GetRoot(hwnd) {
+        try return UIA.ElementFromHandle("ahk_id " hwnd)
+        return 0
+    }
+
+    IsActive(hwnd) {
+        try return WinActive("ahk_id " hwnd) = hwnd
+        return false
+    }
+
+    InvokeStickyButton(button) {
+        try {
+            button.Click()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    WaitForActiveSticky(processId, timeoutSeconds) {
+        selector := "Sticky Notes ahk_pid " processId
+        try {
+            if !WinWaitActive(selector, , timeoutSeconds)
+                return 0
+            hwnd := WinActive(selector)
+            if (hwnd <= 0 || !(WinGetTitle("ahk_id " hwnd) == "Sticky Notes"))
+                return 0
+            return hwnd
+        } catch {
+            return 0
+        }
+    }
+
+    GetOwner(hwnd) {
+        try return DllCall("GetWindow", "ptr", hwnd, "uint", 4, "ptr")
+        return 0
+    }
+}
+
+class StickyNoteOpener {
+    __New(driver := 0) {
+        this.driver := driver ? driver : NativeStickyNoteWindowDriver()
+    }
+
+    Open(pacsTarget) {
+        driver := this.driver
+        pacsHwnd := driver.CaptureActivePacs(pacsTarget)
+        if (pacsHwnd <= 0)
+            return 0
+
+        pacsRoot := driver.GetRoot(pacsHwnd)
+        if !this.IsExpectedPacsRoot(pacsRoot, pacsHwnd)
+            return 0
+        button := this.FindUniqueStickyButton(pacsRoot)
+        if !button
+            return 0
+
+        ; Reacquire the root and semantic button immediately before the click. A
+        ; study/window change between discovery and action must fail closed.
+        if !driver.IsActive(pacsHwnd)
+            return 0
+        liveRoot := driver.GetRoot(pacsHwnd)
+        if !this.SamePacsRoot(pacsRoot, liveRoot, pacsHwnd)
+            return 0
+        button := this.FindUniqueStickyButton(liveRoot)
+        if !button || !driver.InvokeStickyButton(button)
+            return 0
+
+        ; A pre-existing, inactive Sticky Notes window cannot satisfy this wait.
+        ; Capture the window that became active as a concrete HWND.
+        stickyHwnd := driver.WaitForActiveSticky(liveRoot.ProcessId, 2)
+        if (stickyHwnd <= 0 || stickyHwnd = pacsHwnd)
+            return 0
+        owner := driver.GetOwner(stickyHwnd)
+        if (owner && owner != pacsHwnd)
+            return 0
+
+        stickyRoot := driver.GetRoot(stickyHwnd)
+        if !NativeWetReadDriver.IsExpectedStickyRoot(liveRoot, stickyRoot)
+            return 0
+        try {
+            if (stickyRoot.WinId != stickyHwnd)
+                return 0
+        } catch {
+            return 0
+        }
+
+        return {
+            pacsHwnd: pacsHwnd,
+            pacsRoot: liveRoot,
+            stickyHwnd: stickyHwnd,
+            stickyRoot: stickyRoot
+        }
+    }
+
+    IsExpectedPacsRoot(root, hwnd) {
+        try return root && hwnd > 0 && root.WinId = hwnd && root.ProcessId > 0
+        return false
+    }
+
+    SamePacsRoot(expected, actual, hwnd) {
+        try return this.IsExpectedPacsRoot(actual, hwnd)
+            && actual.ProcessId = expected.ProcessId
+        return false
+    }
+
+    FindUniqueStickyButton(root) {
+        candidates := []
+        try elements := root.FindElements({Name: "scn_sticky_notes"})
+        catch
+            return 0
+
+        for element in elements {
+            try {
+                if (element.Name == "scn_sticky_notes"
+                    && element.Type = UIA.Type.Button
+                    && element.IsEnabled
+                    && element.ProcessId = root.ProcessId
+                    && element.WinId = root.WinId) {
+                    candidates.Push(element)
+                }
+            }
+        }
+        return candidates.Length = 1 ? candidates[1] : 0
+    }
+}
+
 class NativeWetReadFocusDriver {
     RequestFocus(field) {
         try field.SetFocus()
@@ -445,49 +607,14 @@ wetRead() {
 			attendingError := err
 	}
 
-	; Activate Vue PACS and open sticky notes. Fail before emitting any keys if PACS
-	; cannot be confirmed as the active target.
-	pacsTitle := "Vue PACS ahk_exe mp.exe"
-	if !AppControl.ActivateWindow(pacsTitle) {
-		MsgBox("Could not activate Vue PACS.")
+	; Resolve a unique exact PACS title/executable, invoke a unique same-window
+	; semantic button, and capture only the Sticky Notes window that becomes active.
+	stickySession := StickyNoteOpener().Open({title: "Vue PACS", exe: "mp.exe"})
+	if !stickySession {
+		MsgBox("The active Vue PACS Sticky Notes target could not be verified. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
 		return
 	}
-	Sleep(150)
-	try mpEl := UIA.ElementFromHandle(pacsTitle)
-	catch {
-		MsgBox("Could not connect to Vue PACS accessibility controls.")
-		return
-	}
-	pacsPid := 0
-	try pacsPid := mpEl.ProcessId
-	if (pacsPid <= 0) {
-		MsgBox("Vue PACS process identity could not be verified.")
-		return
-	}
-	try {
-		mpEl.FindElement({Name:"scn_sticky_notes"}).Click()
-	} catch {
-		MsgBox("Could not find Sticky Notes button in PACS.")
-		return
-	}
-
-	; Bind the dialog to the PACS process. A plain title could match an unrelated
-	; same-title window and turn that window into the trusted root for later writes.
-	stickyTitle := "Sticky Notes ahk_pid " pacsPid
-	if !WinWait(stickyTitle, , 2) {
-		MsgBox("Sticky Notes window did not appear.")
-		return
-	}
-
-	try sticky := UIA.ElementFromHandle(stickyTitle)
-	catch {
-		MsgBox("Could not connect to the Sticky Notes window.")
-		return
-	}
-	if !NativeWetReadDriver.IsExpectedStickyRoot(mpEl, sticky) {
-		MsgBox("Sticky Notes did not belong to the active Vue PACS process. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-		return
-	}
+	sticky := stickySession.stickyRoot
 	try wetReadDriver := NativeWetReadDriver.ForRoot(sticky)
 	catch {
 		MsgBox("Sticky Notes window identity could not be pinned. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
