@@ -19,6 +19,7 @@ class WetReadTest {
         "ClipboardRestoreFailureIsReported",
         "UnreadableNoteDoesNotAttemptPaste",
         "UnreadableNativeFieldFailsClosed",
+        "StickyRootMustBelongToPacsProcess",
         "StickyNoteTargetRequiresExpectedTypeProcessAndCapability",
         "StickyNoteTargetMustBeTheUniqueWritableField",
         "NativeDirectWriteRefusesStaleStickyTarget",
@@ -227,6 +228,15 @@ class WetReadTest {
             () => driver.Read(UnsupportedWetReadElement()),
             "cannot be read safely"
         )
+    }
+
+    StickyRootMustBelongToPacsProcess() {
+        pacsRoot := FakeStickyTargetRoot(42, [])
+        stickyRoot := FakeStickyTargetRoot(42, [], 200)
+        unrelatedRoot := FakeStickyTargetRoot(99, [], 300)
+
+        Assert.True(NativeWetReadDriver.IsExpectedStickyRoot(pacsRoot, stickyRoot))
+        Assert.False(NativeWetReadDriver.IsExpectedStickyRoot(pacsRoot, unrelatedRoot))
     }
 
     StickyNoteTargetRequiresExpectedTypeProcessAndCapability() {

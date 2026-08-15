@@ -45,6 +45,19 @@ class NativeWetReadDriver {
         this.focusDriver := focusDriver
     }
 
+    static IsExpectedStickyRoot(pacsRoot, stickyRoot) {
+        if !pacsRoot || !stickyRoot
+            return false
+        try {
+            pacsProcess := pacsRoot.ProcessId
+            return pacsProcess > 0
+                && stickyRoot.ProcessId = pacsProcess
+                && stickyRoot.WinId > 0
+        } catch {
+            return false
+        }
+    }
+
     /**
      * Positional UIA paths are permitted only as locators. Verify that the result
      * is an enabled, writable text control owned by the Sticky Notes process before
@@ -432,6 +445,12 @@ wetRead() {
 		MsgBox("Could not connect to Vue PACS accessibility controls.")
 		return
 	}
+	pacsPid := 0
+	try pacsPid := mpEl.ProcessId
+	if (pacsPid <= 0) {
+		MsgBox("Vue PACS process identity could not be verified.")
+		return
+	}
 	try {
 		mpEl.FindElement({Name:"scn_sticky_notes"}).Click()
 	} catch {
@@ -439,15 +458,21 @@ wetRead() {
 		return
 	}
 
-	; Wait for sticky notes window
-	if !WinWait("Sticky Notes", , 2) {
+	; Bind the dialog to the PACS process. A plain title could match an unrelated
+	; same-title window and turn that window into the trusted root for later writes.
+	stickyTitle := "Sticky Notes ahk_pid " pacsPid
+	if !WinWait(stickyTitle, , 2) {
 		MsgBox("Sticky Notes window did not appear.")
 		return
 	}
 
-	try sticky := UIA.ElementFromHandle("Sticky Notes")
+	try sticky := UIA.ElementFromHandle(stickyTitle)
 	catch {
 		MsgBox("Could not connect to the Sticky Notes window.")
+		return
+	}
+	if !NativeWetReadDriver.IsExpectedStickyRoot(mpEl, sticky) {
+		MsgBox("Sticky Notes did not belong to the active Vue PACS process. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
 		return
 	}
 	try sticky.SetFocus()
@@ -474,7 +499,12 @@ wetRead() {
 		clipText := RegExReplace(clipText, "(\r)?\n", "`r`n")
 	}
 
-	result := WetReadPasteEngine.Paste(noteField, clipText, pasteMode)
+	result := WetReadPasteEngine.Paste(
+		noteField,
+		clipText,
+		pasteMode,
+		NativeWetReadDriver(stickyTitle)
+	)
 
 	if result.unsupported {
 		method := pasteMode = "uia" ? "UIA Value" : "ControlSetText"
