@@ -48,7 +48,7 @@ class UIAValue {
 
         ; An empty value is valid, but the property APIs also return an empty default
         ; for unsupported patterns. Capability flags are the only safe way to tell
-        ; those states apart before a destructive replace-and-rollback transaction.
+        ; those states apart before a direct-write transaction.
         legacySupported := false
         try legacySupported := element.GetPropertyValue(UIA.Property.IsLegacyIAccessiblePatternAvailable) ? true : false
 
