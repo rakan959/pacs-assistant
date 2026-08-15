@@ -32,6 +32,61 @@ class NativeWindowDriver {
 }
 
 /**
+ * Process and window lifecycle primitives used by restartPACS. Every terminating
+ * operation verifies the target is actually gone, while treating an already-exited
+ * race as success.
+ */
+class NativeAppLifecycleDriver {
+    FindProcess(target) {
+        try return ProcessExist(target)
+        return 0
+    }
+
+    FindWindow(target) {
+        try return WinExist(target)
+        return 0
+    }
+
+    GetWindowProcessId(hwnd) {
+        try return WinGetPID("ahk_id " hwnd)
+        return 0
+    }
+
+    ProcessExists(pid) {
+        try return ProcessExist(pid) != 0
+        return false
+    }
+
+    WindowExists(hwnd) {
+        try return WinExist("ahk_id " hwnd) != 0
+        return false
+    }
+
+    StopProcess(pid) {
+        try ProcessClose(pid)
+        catch {
+            return !this.ProcessExists(pid)
+        }
+
+        try ProcessWaitClose(pid, 2)
+        return !this.ProcessExists(pid)
+    }
+
+    KillWindow(hwnd) {
+        try WinKill("ahk_id " hwnd)
+        catch {
+            return !this.WindowExists(hwnd)
+        }
+        return !this.WindowExists(hwnd)
+    }
+
+    Launch(path) {
+        Run(path)
+        return true
+    }
+}
+
+/**
  * Starting, stopping and switching the clinical applications.
  */
 class AppControl {
@@ -39,6 +94,7 @@ class AppControl {
     static savePromptPattern := "i)(save|unsaved)"
     static activationTimeoutSeconds := 2
     static windowDriver := NativeWindowDriver()
+    static lifecycleDriver := NativeAppLifecycleDriver()
 
     static ActivateWindow(winTitle) {
         return this.windowDriver.Activate(winTitle, this.activationTimeoutSeconds)
@@ -54,6 +110,77 @@ class AppControl {
         } catch {
             return false
         }
+    }
+
+    /**
+     * Stops a target addressed by process name or window title.
+     * @returns {found, stopped}; stopped is false on lookup uncertainty or when a
+     * target survives termination, allowing restartPACS to fail closed.
+     */
+    static StopTarget(target) {
+        driver := this.lifecycleDriver
+
+        try pid := driver.FindProcess(target)
+        catch as err
+            return {found: false, stopped: false, error: err.Message}
+
+        if pid {
+            try stopped := driver.StopProcess(pid)
+            catch as err {
+                ; A process may exit between discovery and termination. Verify the
+                ; postcondition before reporting that race as a restart failure.
+                try alreadyStopped := !driver.ProcessExists(pid)
+                catch
+                    alreadyStopped := false
+                return {found: true, stopped: alreadyStopped, error: err.Message}
+            }
+            return {found: true, stopped: stopped ? true : false}
+        }
+
+        try hwnd := driver.FindWindow(target)
+        catch as err
+            return {found: false, stopped: false, error: err.Message}
+        if !hwnd
+            return {found: false, stopped: true}
+
+        ; Capture ownership before killing the window: afterwards the handle may be
+        ; invalid even though its process is still alive.
+        try pid := driver.GetWindowProcessId(hwnd)
+        catch {
+            pid := 0
+        }
+
+        try windowStopped := driver.KillWindow(hwnd)
+        catch as err
+            return {found: true, stopped: false, error: err.Message}
+
+        if pid {
+            try processAlive := driver.ProcessExists(pid)
+            catch as err
+                return {found: true, stopped: false, error: err.Message}
+            if processAlive {
+                try processStopped := driver.StopProcess(pid)
+                catch as err
+                    return {found: true, stopped: false, error: err.Message}
+                return {found: true, stopped: processStopped ? true : false}
+            }
+            return {found: true, stopped: true}
+        }
+
+        return {found: true, stopped: windowStopped ? true : false}
+    }
+
+    static LaunchVuePacs(directory) {
+        try {
+            Loop Files, directory "\*" {
+                if !InStr(A_LoopFileName, "Vue Client (Integrated)")
+                    continue
+                try return this.lifecycleDriver.Launch(A_LoopFileFullPath) ? true : false
+                catch
+                    return false
+            }
+        }
+        return false
     }
 }
 
@@ -158,20 +285,7 @@ clickSaveChangesButton(hwnd) {
 
 restartPACS() {
     anyClosed := false
-
-    ; Helper function to track if anything was closed
-    closeKillAndTrack(x) {
-        if ProcessExist(x) {
-            ProcessClose(x)
-            anyClosed := true
-        } else if WinExist(x) {
-            WinKill(x)
-            if WinExist(x) {
-                ProcessClose(WinGetProcessName(x))
-            }
-            anyClosed := true
-        }
-    }
+    failedTargets := []
 
     ; Close PowerScribe gracefully first so an in-progress report can be saved. The
     ; hard kill below still runs as a fallback if it does not exit in time.
@@ -180,33 +294,45 @@ restartPACS() {
             anyClosed := true
     }
 
-    closeKillAndTrack("Command - ")
-    closeKillAndTrack("WinDbg:")
-    closeKillAndTrack("Vue PACS")
-    closeKillAndTrack("Explorer Portal")
-    closeKillAndTrack("PowerScribe")
-    closeKillAndTrack("Hyperspace")
-    closeKillAndTrack("mp.exe")
-    closeKillAndTrack("NativeBridge.exe")
+    for target in [
+        "Command - ",
+        "WinDbg:",
+        "Vue PACS",
+        "Explorer Portal",
+        "PowerScribe",
+        "Hyperspace",
+        "mp.exe",
+        "NativeBridge.exe"
+    ] {
+        result := AppControl.StopTarget(target)
+        if result.found
+            anyClosed := true
+        if !result.stopped
+            failedTargets.Push(target)
+    }
+
+    if failedTargets.Length {
+        names := ""
+        for target in failedTargets
+            names .= (names = "" ? "" : ", ") target
+        MsgBox(
+            "PACS Assistant could not stop: " names ". The restart was cancelled to avoid launching duplicate clinical clients.",
+            "PACS Restart Cancelled",
+            "Icon!"
+        )
+        return false
+    }
 
     if anyClosed {
         Sleep(500)
     }
 
     ; The shortcut sits on either the all-users desktop or this user's own
-    launchVuePacs(directory) {
-        Loop Files, directory "\*" {
-            if InStr(A_LoopFileName, "Vue Client (Integrated)") {
-                Run A_LoopFileFullPath
-                return true
-            }
-        }
+    if !(AppControl.LaunchVuePacs(A_DesktopCommon) || AppControl.LaunchVuePacs(A_Desktop)) {
+        MsgBox "ERROR: PACS not found..."
         return false
     }
-
-    if !(launchVuePacs(A_DesktopCommon) || launchVuePacs(A_Desktop)) {
-        MsgBox "ERROR: PACS not found..."
-    }
+    return true
 }
 
 toggleWindow(winName) {

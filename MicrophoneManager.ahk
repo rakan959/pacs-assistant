@@ -155,13 +155,18 @@ class MicrophoneManager {
             return 0
         }
 
-        combo := el.WaitElement({AutomationId: this.comboAutomationId}, 500)
+        return this.FindMicrophoneComboInRoot(el)
+    }
+
+    static FindMicrophoneComboInRoot(root) {
+        combo := 0
+        try combo := root.WaitElement({AutomationId: this.comboAutomationId}, 500)
         if combo
             return combo
 
         ; Positional fallback, only accepted if it really is the microphone dropdown
         try {
-            combo := el.ElementFromPath(this.comboPath)
+            combo := root.ElementFromPath(this.comboPath)
             if (combo.AutomationId = this.comboAutomationId)
                 return combo
         }

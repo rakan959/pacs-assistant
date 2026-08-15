@@ -191,9 +191,13 @@ class PACSMonitor {
     }
 
     static Notify(text, title, options := "") {
-        try this.notifier.Call(text, title, options)
+        try {
+            this.notifier.Call(text, title, options)
+            return true
+        }
         catch as err {
             OutputDebug("PACS notification failed: " err.Message)
+            return false
         }
     }
 
@@ -341,21 +345,30 @@ class PACSMonitor {
             Settings.PlayAlertSound(Settings.Get("AlertSound"))
         }
 
+        deliveryFailed := false
         if Settings.Get("MessageBoxNewCase") {
             ; Create a TrayTip for each new study
             for study in newStudies {
-                this.Notify(study.studyType, "New Study Available", "Iconi")
+                if !this.Notify(study.studyType, "New Study Available", "Iconi")
+                    deliveryFailed := true
             }
 
             ; If there are multiple studies, show a summary notification
             if newStudies.Length > 1 {
                 Sleep(1000)  ; Wait a bit to not overlap notifications
-                this.Notify(
+                if !this.Notify(
                     newStudies.Length " new studies available",
                     "Multiple New Studies",
                     "Iconi"
                 )
+                    deliveryFailed := true
             }
         }
+
+        ; ProcessRows commits accessions only after this method returns. A failed
+        ; delivery must therefore escape so the next scan can retry rather than
+        ; permanently treating an unseen clinical alert as consumed.
+        if deliveryFailed
+            throw Error("One or more new-study notifications could not be delivered")
     }
 }

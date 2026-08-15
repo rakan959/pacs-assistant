@@ -10,10 +10,11 @@
  * touched, which verifies that the adapter checks support before invoking a pattern.
  */
 class FakeElement {
-    __New(value := "", legacyValue := "", hasValuePattern := true) {
+    __New(value := "", legacyValue := "", hasValuePattern := true, hasLegacyPattern := false) {
         this.storedValue := value
         this.legacyValue := legacyValue
         this.hasValuePattern := hasValuePattern
+        this.hasLegacyPattern := hasLegacyPattern
         this.valueWasWritten := false
     }
 
@@ -22,6 +23,7 @@ class FakeElement {
             case UIA.Property.ValueValue: return this.storedValue
             case UIA.Property.LegacyIAccessibleValue: return this.legacyValue
             case UIA.Property.IsValuePatternAvailable: return this.hasValuePattern
+            case UIA.Property.IsLegacyIAccessiblePatternAvailable: return this.hasLegacyPattern
         }
         return ""
     }
@@ -37,6 +39,8 @@ class UIAValueTest {
         "TestReadPrefersValueProperty",
         "TestReadFallsBackToLegacyValue",
         "TestReadReturnsBlankWhenNothingExposed",
+        "TestTryReadPreservesSupportedBlank",
+        "TestTryReadRejectsUnsupportedBlank",
         "TestCanWriteReflectsPatternAvailability",
         "TestWriteRefusesWhenPatternMissing",
         "TestWriteSucceedsWhenPatternPresent"
@@ -54,6 +58,20 @@ class UIAValueTest {
         Assert.Equal("", UIAValue.Read(FakeElement("", "")))
         ; An object that raises on every property must not propagate
         Assert.Equal("", UIAValue.Read({}))
+    }
+
+    TestTryReadPreservesSupportedBlank() {
+        result := UIAValue.TryRead(FakeElement("", "", true, false))
+
+        Assert.True(result.supported)
+        Assert.Equal("", result.value)
+    }
+
+    TestTryReadRejectsUnsupportedBlank() {
+        result := UIAValue.TryRead(FakeElement("", "", false, false))
+
+        Assert.False(result.supported)
+        Assert.Equal("", result.value)
     }
 
     TestCanWriteReflectsPatternAvailability() {

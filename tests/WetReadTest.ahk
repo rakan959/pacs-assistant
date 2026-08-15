@@ -12,7 +12,10 @@ class WetReadTest {
         "UIABecomingUnsupportedStillRestoresAnEarlierWrite",
         "FailedControlVerificationRestoresThePreviousNote",
         "SendExceptionRestoresThePreviousNoteAndClipboard",
-        "ClipboardRestoreFailureIsReported"
+        "ClipboardRestoreFailureIsReported",
+        "UnreadableNoteDoesNotAttemptPaste",
+        "UnreadableNativeFieldFailsClosed",
+        "RoutingFailureReportsTheActualCause"
     ]
 
     ClipboardFailureDoesNotTouchTheNote() {
@@ -124,6 +127,36 @@ class WetReadTest {
         Assert.False(result.clipboardRestored)
         Assert.True(InStr(result.error, "Clipboard restore failed") > 0)
     }
+
+    UnreadableNoteDoesNotAttemptPaste() {
+        driver := FakeWetReadDriver("existing note", "original clipboard")
+        driver.throwOnRead := true
+
+        result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
+
+        Assert.False(result.success)
+        Assert.Equal("read", result.reason)
+        Assert.Equal("existing note", driver.fieldValue)
+        Assert.Equal(0, driver.clearCalls)
+        Assert.Equal(0, driver.uiaCalls)
+    }
+
+    UnreadableNativeFieldFailsClosed() {
+        Assert.Throws(
+            () => NativeWetReadDriver().Read(UnsupportedWetReadElement()),
+            "cannot be read safely"
+        )
+    }
+
+    RoutingFailureReportsTheActualCause() {
+        message := AttendingFailureMessage(
+            "EXAMINATION: CT CHEST",
+            Error("could not activate PowerScribe")
+        )
+
+        Assert.True(InStr(message, "could not activate PowerScribe") > 0)
+        Assert.False(InStr(message, "Could not read the report") > 0)
+    }
 }
 
 class FakeWetReadDriver {
@@ -137,10 +170,13 @@ class FakeWetReadDriver {
         this.uiaSupportedCalls := 0
         this.uiaCalls := 0
         this.throwOnClipboardRestore := false
+        this.throwOnRead := false
         this.clearCalls := 0
     }
 
     Read(field) {
+        if this.throwOnRead
+            throw Error("simulated unreadable field")
         return this.fieldValue
     }
 
@@ -191,5 +227,11 @@ class FakeWetReadDriver {
 
     WaitForValue(field, expected, timeoutMs) {
         return this.fieldValue = expected
+    }
+}
+
+class UnsupportedWetReadElement {
+    GetPropertyValue(propertyId) {
+        return ""
     }
 }

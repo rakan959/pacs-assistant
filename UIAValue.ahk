@@ -16,25 +16,38 @@
  */
 class UIAValue {
     /**
-     * Reads an element's value without instantiating a pattern.
+     * Reads an element's value without instantiating a pattern and reports whether
+     * an empty value is supported or merely UIA's default for an absent pattern.
      * Falls back to the legacy accessibility value, mirroring what UIA-v2's own
      * Value getter tries, minus the unsafe pattern construction.
-     * @returns the value, or "" if the element exposes none
+     * @returns {supported, value}
      */
-    static Read(element) {
+    static TryRead(element) {
         try {
             text := element.GetPropertyValue(UIA.Property.ValueValue)
             if (text != "")
-                return text
+                return {supported: true, value: text}
         }
 
         try {
             text := element.GetPropertyValue(UIA.Property.LegacyIAccessibleValue)
             if (text != "")
-                return text
+                return {supported: true, value: text}
         }
 
-        return ""
+        ; An empty value is valid, but the property APIs also return an empty default
+        ; for unsupported patterns. Capability flags are the only safe way to tell
+        ; those states apart before a destructive replace-and-rollback transaction.
+        valueSupported := false
+        legacySupported := false
+        try valueSupported := element.GetPropertyValue(UIA.Property.IsValuePatternAvailable) ? true : false
+        try legacySupported := element.GetPropertyValue(UIA.Property.IsLegacyIAccessiblePatternAvailable) ? true : false
+
+        return {supported: valueSupported || legacySupported, value: ""}
+    }
+
+    static Read(element) {
+        return this.TryRead(element).value
     }
 
     ; Whether this element can be written through ValuePattern

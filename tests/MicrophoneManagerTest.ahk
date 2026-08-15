@@ -5,6 +5,8 @@
 class MicrophoneManagerTest {
     static Tests := [
         "WaitForSelectionRequiresTheRequestedValue",
+        "FindMicrophoneComboUsesFallbackAfterPrimaryFailure",
+        "FindMicrophoneComboReturnsZeroWhenLookupsFail",
         "FinalSelectionFailureNotifiesOnce",
         "OperationalErrorIsRecorded",
         "PickerReappearanceStartsANewLoginSession"
@@ -30,6 +32,21 @@ class MicrophoneManagerTest {
 
         Assert.True(MicrophoneManager.WaitForSelection(matching, "PowerMic", 0))
         Assert.False(MicrophoneManager.WaitForSelection(other, "PowerMic", 0))
+    }
+
+    FindMicrophoneComboUsesFallbackAfterPrimaryFailure() {
+        expected := FakeMicrophoneElement(MicrophoneManager.comboAutomationId)
+        root := FakeMicrophoneRoot(true, expected)
+
+        actual := MicrophoneManager.FindMicrophoneComboInRoot(root)
+
+        Assert.Equal(expected, actual)
+    }
+
+    FindMicrophoneComboReturnsZeroWhenLookupsFail() {
+        root := FakeMicrophoneRoot(true, 0, true)
+
+        Assert.Equal(0, MicrophoneManager.FindMicrophoneComboInRoot(root))
     }
 
     FinalSelectionFailureNotifiesOnce() {
@@ -84,5 +101,31 @@ class FakeMicrophoneCombo {
         if (propertyId = UIA.Property.ValueValue)
             return this.value
         return ""
+    }
+}
+
+class FakeMicrophoneElement {
+    __New(automationId) {
+        this.AutomationId := automationId
+    }
+}
+
+class FakeMicrophoneRoot {
+    __New(waitThrows := false, fallback := 0, fallbackThrows := false) {
+        this.waitThrows := waitThrows
+        this.fallback := fallback
+        this.fallbackThrows := fallbackThrows
+    }
+
+    WaitElement(criteria, timeoutMs) {
+        if this.waitThrows
+            throw Error("simulated primary lookup failure")
+        return 0
+    }
+
+    ElementFromPath(path) {
+        if this.fallbackThrows
+            throw Error("simulated fallback failure")
+        return this.fallback
     }
 }

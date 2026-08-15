@@ -11,7 +11,10 @@
  */
 class NativeWetReadDriver {
     Read(field) {
-        return UIAValue.Read(field)
+        result := UIAValue.TryRead(field)
+        if !result.supported
+            throw Error("Sticky Notes value cannot be read safely")
+        return result.value
     }
 
     Focus(field) {
@@ -251,6 +254,20 @@ checkAttending(reportText) {
     )
 }
 
+AttendingFailureMessage(reportText, routingError := 0) {
+	if (reportText = "")
+		return "Could not read the report from PowerScribe, so the attending was not assigned. Set it manually."
+
+	if routingError {
+		detail := IsObject(routingError) && HasProp(routingError, "Message")
+			? routingError.Message
+			: String(routingError)
+		return "The report was read, but the attending could not be assigned: " detail ". Set it manually."
+	}
+
+	return "The report was read, but no attending was assigned. Set it manually."
+}
+
 wetRead() {
 	; Use clipboard contents; bail out if empty to avoid blank notes
 	clipText := A_Clipboard
@@ -269,12 +286,14 @@ wetRead() {
 	; wet read - the sticky note is the point - but it does get reported at the end,
 	; because a report that silently keeps the wrong attending goes to the wrong queue.
 	attendingRouted := false
+	attendingError := 0
 	haystack := readReportText()
 	if (haystack != "") {
 		try {
 			checkAttending(haystack)
 			attendingRouted := true
-		}
+		} catch as err
+			attendingError := err
 	}
 
 	; Activate Vue PACS and open sticky notes. Fail before emitting any keys if PACS
@@ -347,7 +366,7 @@ wetRead() {
 	}
 
 	if !attendingRouted {
-		MsgBox("Could not read the report from PowerScribe, so the attending was not assigned. Set it manually.", "Attending Not Assigned", "Icon!")
+		MsgBox(AttendingFailureMessage(haystack, attendingError), "Attending Not Assigned", "Icon!")
 	}
 	Return
 }

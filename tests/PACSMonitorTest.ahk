@@ -13,7 +13,8 @@ class PACSMonitorTest {
         "TestOnSettingsChangedRespectsAutoRefresh",
         "TestRefreshFailureNotificationUsesTextThenTitle",
         "TestScanFailuresNotifyOnceAndReset",
-        "TestNewStudyNotificationUsesTextThenTitle"
+        "TestNewStudyNotificationUsesTextThenTitle",
+        "TestFailedAlertDoesNotConsumeAccession"
     ]
     
     Setup() {
@@ -152,6 +153,19 @@ class PACSMonitorTest {
         Assert.Equal("CT HEAD", this.notifications[1].text)
         Assert.Equal("New Study Available", this.notifications[1].title)
     }
+
+    TestFailedAlertDoesNotConsumeAccession() {
+        Settings.Set("MessageBoxNewCase", true)
+        Settings.Set("AudioAlertNewCase", false)
+        PACSMonitor.testMode := false
+        PACSMonitor.notifier := FailPACSNotification
+
+        Assert.Throws(
+            () => PACSMonitor.ProcessRows([{Name: "CT HEAD WITHOUT CONTRAST 12345678"}]),
+            "notifications could not be delivered"
+        )
+        Assert.False(PACSMonitor.HasAccession("12345678"))
+    }
     
     Teardown() {
         PACSMonitor.StopMonitoring()
@@ -166,4 +180,8 @@ class PACSMonitorTest {
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalSettings
     }
+}
+
+FailPACSNotification(*) {
+    throw Error("simulated notification failure")
 }

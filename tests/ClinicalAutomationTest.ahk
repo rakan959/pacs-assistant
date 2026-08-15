@@ -13,12 +13,15 @@ class ClinicalAutomationTest {
         "AttendingRoutingUsesInjectedDependencies",
         "BlankAttendingSkipsPowerScribeWrite",
         "FailedAttendingActivationIsReported",
+        "RestartTreatsAlreadyExitedProcessAsStopped",
+        "RestartDetectsStubbornProcess",
         "ReportSelectionUsesOnlyReportShapedText",
         "ReportSelectionRejectsUnrelatedFallbackText"
     ]
 
     Setup() {
         this.originalDriver := AppControl.windowDriver
+        this.originalLifecycleDriver := HasProp(AppControl, "lifecycleDriver") ? AppControl.lifecycleDriver : 0
         this.originalProfiles := ProfileManager.profiles
         this.originalCurrentProfile := ProfileManager.currentProfile
         ProfileManager.profiles := Map()
@@ -125,6 +128,24 @@ class ClinicalAutomationTest {
         )
     }
 
+    RestartTreatsAlreadyExitedProcessAsStopped() {
+        AppControl.lifecycleDriver := FakeAppLifecycleDriver("already-exited")
+
+        result := AppControl.StopTarget("mp.exe")
+
+        Assert.True(result.found)
+        Assert.True(result.stopped)
+    }
+
+    RestartDetectsStubbornProcess() {
+        AppControl.lifecycleDriver := FakeAppLifecycleDriver("stubborn")
+
+        result := AppControl.StopTarget("mp.exe")
+
+        Assert.True(result.found)
+        Assert.False(result.stopped)
+    }
+
     ReportSelectionUsesOnlyReportShapedText() {
         report := "EXAMINATION: MRI BRAIN`n`nFINDINGS: Normal."
         candidates := [
@@ -147,6 +168,8 @@ class ClinicalAutomationTest {
 
     Teardown() {
         AppControl.windowDriver := this.originalDriver
+        if this.originalLifecycleDriver
+            AppControl.lifecycleDriver := this.originalLifecycleDriver
         ProfileManager.profiles := this.originalProfiles
         ProfileManager.currentProfile := this.originalCurrentProfile
     }
@@ -173,5 +196,44 @@ class FakeWindowDriver {
 
     Pause(milliseconds) {
         this.calls.Push({kind: "pause", value: milliseconds})
+    }
+}
+
+class FakeAppLifecycleDriver {
+    __New(mode) {
+        this.mode := mode
+    }
+
+    FindProcess(target) {
+        return 4242
+    }
+
+    FindWindow(target) {
+        return 0
+    }
+
+    GetWindowProcessId(hwnd) {
+        return 0
+    }
+
+    ProcessExists(pid) {
+        return this.mode = "stubborn"
+    }
+
+    WindowExists(hwnd) {
+        return false
+    }
+
+    StopProcess(pid) {
+        if (this.mode = "already-exited")
+            throw Error("process disappeared before termination")
+        return false
+    }
+
+    KillWindow(hwnd) {
+        return true
+    }
+
+    Launch(path) {
     }
 }
