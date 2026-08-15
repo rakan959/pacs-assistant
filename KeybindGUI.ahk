@@ -649,8 +649,10 @@ class KeybindGUI {
                 return false
             }
             KeybindGUI.captureRuntimeProfile := 0
-            this.ReleaseCaptureTransaction()
             this.MarkProfileDirty(promptGui.profileName)
+            ; Dirty publication must precede re-enabling the owner: a queued
+            ; Close/Switch callback must observe the Save/Discard/Cancel gate.
+            this.ReleaseCaptureTransaction()
             return true
         } catch as err {
             if bindingChanged {

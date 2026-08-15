@@ -18,6 +18,7 @@ class KeybindGUITest {
         "TestCaptureStartFailureWarnsWhenRuntimeCannotBeRestored",
         "TestActiveCaptureBlocksSaveAndFunctionRemoval",
         "TestStaleRealCaptureRestoresCurrentProfileNotSnapshot",
+        "TestCapturedBindPublishesDirtyStateBeforeReleasingOwner",
         "TestCancelCaptureWarnsWhenPriorRuntimeCannotBeRestored",
         "TestModifierRestartFailureWarnsWhenPriorRuntimeCannotBeRestored",
         "TestCaptureFailureRestoresBindingAndHookState",
@@ -403,6 +404,50 @@ class KeybindGUITest {
         Assert.True(profileAbsent)
         Assert.True(runtimeAbsent)
         Assert.True(prompt.destroyed)
+    }
+
+    TestCapturedBindPublishesDirtyStateBeforeReleasingOwner() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalActive := HotkeyManager.activeHotkeys
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
+        prompt := FakeProfileDialog("Test")
+        gui := {base: CapturePublicationOrderGUI.Prototype, events: []}
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            HotkeyManager.activeHotkeys := Map()
+            Assert.True(gui.CaptureFunctionDialogState(
+                prompt,
+                "Sign Report",
+                listView,
+                1
+            ))
+            Assert.True(gui.BeginListening("Sign Report", listView, prompt))
+            result := gui.OnInputEnd(
+                "Sign Report",
+                listView,
+                prompt,
+                KeybindGUI.activeInputHook
+            )
+        } finally {
+            try gui.StopListening()
+            KeybindGUI.captureRuntimeProfile := 0
+            KeybindGUI.isListening := false
+            KeybindGUI.activeInputHook := 0
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            HotkeyManager.activeHotkeys := originalActive
+        }
+
+        Assert.True(result)
+        Assert.Equal(2, gui.events.Length)
+        Assert.Equal("dirty", gui.events[1])
+        Assert.Equal("release", gui.events[2])
     }
 
     TestCancelCaptureWarnsWhenPriorRuntimeCannotBeRestored() {
@@ -1927,6 +1972,18 @@ class CaptureMutationGuardGUI extends KeybindGUI {
             title: title,
             options: options
         })
+    }
+}
+
+class CapturePublicationOrderGUI extends CaptureMutationGuardGUI {
+    MarkProfileDirty(profileName := "") {
+        this.events.Push("dirty")
+        return super.MarkProfileDirty(profileName)
+    }
+
+    ReleaseCaptureTransaction() {
+        this.events.Push("release")
+        return super.ReleaseCaptureTransaction()
     }
 }
 
