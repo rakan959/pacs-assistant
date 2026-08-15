@@ -16,11 +16,13 @@ class KeybindGUITest {
         "TestProfileSwitchPreparationStopsActiveCapture",
         "TestProfileSwitchAbortsWhenCaptureCannotStop",
         "TestCaptureStartFailureWarnsWhenRuntimeCannotBeRestored",
+        "TestCapturePromptShowFailureRestoresRuntimeAndReleasesOwner",
         "TestStaleCaptureBeforeSuspensionReleasesWithoutRuntimeMutation",
         "TestActiveCaptureBlocksSaveAndFunctionRemoval",
         "TestClinicalCommandBlocksProfileMutationAndExit",
         "TestTrayExitUsesTheSameClinicalAndCaptureGate",
         "TestStaleRealCaptureRestoresCurrentProfileNotSnapshot",
+        "TestProfileBoundDialogRejectsSameNameReplacement",
         "TestCapturedBindPublishesDirtyStateBeforeReleasingOwner",
         "TestCancelCaptureWarnsWhenPriorRuntimeCannotBeRestored",
         "TestCancelCaptureRetainsTransactionWhenHookCannotStop",
@@ -43,6 +45,7 @@ class KeybindGUITest {
         "TestRenameDialogCannotMutateSameNameReplacement",
         "TestRenamePromptHonorsDirtyCancel",
         "TestCaseOnlyRenamePersistsResolvedDirtyChanges",
+        "TestSaveChoiceRejectsProfileChangedDuringDirtyPrompt",
         "TestDiscardBeforeRenameRestoresRuntimeAndMainView",
         "TestDiscardBeforeCaseRenameKeepsStoredRuntime",
         "TestSuccessfulMainRenameDoesNotReapplyHotkeys",
@@ -326,6 +329,57 @@ class KeybindGUITest {
         Assert.True(InStr(notifications.message, "simulated capture restore failure") > 0)
     }
 
+    TestCapturePromptShowFailureRestoresRuntimeAndReleasesOwner() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalActive := HotkeyManager.activeHotkeys
+        originalListening := KeybindGUI.isListening
+        originalHook := KeybindGUI.activeInputHook
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
+        prompt := ThrowingShowProfileDialog("Test")
+        owner := FakeCaptureOwnerGui()
+        gui := {
+            base: ShowFailureRecoveryGUI.Prototype,
+            gui: owner,
+            restoreCalls: 0,
+            notifications: []
+        }
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            HotkeyManager.activeHotkeys := Map()
+            KeybindGUI.isListening := false
+            KeybindGUI.activeInputHook := 0
+            Assert.True(gui.CaptureFunctionDialogState(
+                prompt,
+                "Sign Report",
+                listView,
+                1
+            ))
+            Assert.True(gui.BeginListening("Sign Report", listView, prompt))
+            hook := KeybindGUI.activeInputHook
+
+            result := gui.ShowStartedCapturePrompt(prompt)
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            HotkeyManager.activeHotkeys := originalActive
+            KeybindGUI.isListening := originalListening
+            KeybindGUI.activeInputHook := originalHook
+        }
+
+        Assert.False(result)
+        Assert.True(prompt.destroyed)
+        Assert.True(hook.stopped)
+        Assert.Equal(1, gui.restoreCalls)
+        Assert.False(KeybindGUI.captureTransactionActive)
+        Assert.False(owner.disabled)
+    }
+
     TestActiveCaptureBlocksSaveAndFunctionRemoval() {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
@@ -406,6 +460,37 @@ class KeybindGUITest {
         Assert.True(customStillExists)
         Assert.Equal("Any", profile.scopes["Sign Report"])
         Assert.Equal(1, rowCount)
+    }
+
+    TestProfileBoundDialogRejectsSameNameReplacement() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalRevisions := ProfileManager.profileRevisions
+        oldProfile := ProfileManager.NewProfile()
+        replacement := ProfileManager.NewProfile()
+        dialog := FakeProfileDialog("Test", 1)
+        dialog.requiresLiveProfileIdentity := true
+        dialog.profileObject := oldProfile
+        dialog.profileStorageRevision := 1
+        dialog.profileMutationSnapshot := 0
+        dialog.ownerHwnd := 0
+        gui := {base: LiveDialogIdentityGUI.Prototype}
+
+        try {
+            ProfileManager.profiles := Map("Test", oldProfile)
+            ProfileManager.currentProfile := "Test"
+            ProfileManager.profileRevisions := Map("Test", 1)
+            ProfileManager.profiles["Test"] := replacement
+
+            result := gui.DialogProfileIsCurrent(dialog)
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profileRevisions := originalRevisions
+        }
+
+        Assert.False(result)
+        Assert.True(dialog.destroyed)
     }
 
     TestClinicalCommandBlocksProfileMutationAndExit() {
@@ -1514,6 +1599,51 @@ class KeybindGUITest {
         Assert.False(gui.IsProfileDirty("night"))
     }
 
+    TestSaveChoiceRejectsProfileChangedDuringDirtyPrompt() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalProfilesPath := ProfileManager.profilesPath
+        originalRevisions := ProfileManager.profileRevisions
+        tempRoot := A_Temp "\pacs_dirty_prompt_race_" DllCall("GetTickCount64", "UInt64")
+        prompted := ProfileManager.NewProfile()
+        prompted.binds["Sign Report"] := "^F13"
+        prompted.scopes["Sign Report"] := "Any"
+        replacement := ProfileManager.NewProfile()
+        replacement.binds["Draft Report"] := "^F14"
+        replacement.scopes["Draft Report"] := "Any"
+        gui := {
+            base: DirtyLeaveTestGUI.Prototype,
+            profileLeaveDriver: CallbackProfileLeaveDriver(
+                "Yes",
+                (*) => ProfileManager.currentProfile := "Replacement"
+            )
+        }
+
+        try {
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profileRevisions := Map("Prompted", 0, "Replacement", 0)
+            ProfileManager.profiles := Map("Prompted", prompted, "Replacement", replacement)
+            ProfileManager.currentProfile := "Prompted"
+            ProfileManager.SaveProfile("Prompted", prompted)
+            gui.MarkProfileDirty("Prompted")
+
+            result := gui.ResolveDirtyProfileBeforeLeaving()
+            replacementWasSaved := FileExist(ProfileManager.ProfilePath("Replacement")) != ""
+            promptedRemainsDirty := gui.IsProfileDirty("Prompted")
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profilesPath := originalProfilesPath
+            ProfileManager.profileRevisions := originalRevisions
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.False(result)
+        Assert.False(replacementWasSaved)
+        Assert.True(promptedRemainsDirty)
+    }
+
     TestDiscardBeforeRenameRestoresRuntimeAndMainView() {
         state := this.PrepareDiscardRenameState("pacs_discard_rename_cancel_")
         gui := state.gui
@@ -2560,6 +2690,27 @@ class CaptureMutationGuardGUI extends KeybindGUI {
     }
 }
 
+class ShowFailureRecoveryGUI extends CaptureMutationGuardGUI {
+    HasMainWindow() {
+        return true
+    }
+
+    RestoreRuntimeProfile(profile, &errorText) {
+        this.restoreCalls++
+        return super.RestoreRuntimeProfile(profile, &errorText)
+    }
+}
+
+class LiveDialogIdentityGUI extends KeybindGUI {
+    GuiIsLive(*) {
+        return true
+    }
+
+    StopListening() {
+        return true
+    }
+}
+
 class CapturePublicationOrderGUI extends CaptureMutationGuardGUI {
     MarkProfileDirty(profileName := "") {
         this.events.Push("dirty")
@@ -2799,6 +2950,18 @@ class FixedProfileLeaveDriver {
     }
 }
 
+class CallbackProfileLeaveDriver extends FixedProfileLeaveDriver {
+    __New(choice, callback) {
+        super.__New(choice)
+        this.callback := callback
+    }
+
+    Choose(*) {
+        this.callback.Call()
+        return this.choice
+    }
+}
+
 class ProfileDeleteTestGUI extends KeybindGUI {
     ShowProfileSelector() {
     }
@@ -2935,5 +3098,11 @@ class FakeProfileDialog {
 
     Destroy() {
         this.destroyed := true
+    }
+}
+
+class ThrowingShowProfileDialog extends FakeProfileDialog {
+    Show(*) {
+        throw Error("simulated GUI Show failure")
     }
 }

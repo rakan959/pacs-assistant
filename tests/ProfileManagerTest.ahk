@@ -10,6 +10,8 @@ class ProfileManagerTest {
         "TestProfileRename",
         "TestProfileCaseOnlyRename",
         "TestCaseOnlyRenameDoubleMoveFailureRemainsReloadable",
+        "TestInterruptedCaseOnlyRenameIsRecoveredOnStartup",
+        "TestInterruptedCaseOnlyRenameNeverOverwritesConflictingProfile",
         "TestProfileDeletionRules",
         "TestFailedDefaultDeletionPreservesProfile",
         "TestDefaultDeleteRollbackFailureIsSurfacedAndReconciled",
@@ -159,6 +161,48 @@ class ProfileManagerTest {
         ProfileManager.LoadProfiles()
         Assert.True(ProfileManager.profiles.Has("Night"))
         Assert.Equal("^s", ProfileManager.profiles["Night"].binds["Sign Report"])
+    }
+
+    TestInterruptedCaseOnlyRenameIsRecoveredOnStartup() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        profile.scopes["Sign Report"] := "Any"
+        canonicalPath := ProfileManager.profilesPath "\Night.ini"
+        interruptedPath := canonicalPath ".case-rename-1234-1"
+        ProfileManager.SaveProfile("Night", profile)
+        FileMove(canonicalPath, interruptedPath)
+
+        ProfileManager.LoadProfiles()
+
+        Assert.True(ProfileManager.profiles.Has("Night"))
+        Assert.Equal("^s", ProfileManager.profiles["Night"].binds["Sign Report"])
+        Assert.True(FileExist(canonicalPath) != "")
+        Assert.False(FileExist(interruptedPath) != "")
+        Assert.False(ProfileManager.recoveryRequired)
+        Assert.Equal(0, ProfileManager.loadErrors.Length)
+    }
+
+    TestInterruptedCaseOnlyRenameNeverOverwritesConflictingProfile() {
+        original := ProfileManager.NewProfile()
+        original.binds["Sign Report"] := "^s"
+        original.scopes["Sign Report"] := "Any"
+        ProfileManager.SaveProfile("Night", original)
+
+        conflicting := ProfileManager.CloneProfile(original)
+        conflicting.binds["Sign Report"] := "^n"
+        conflictingPath := ProfileManager.profilesPath "\Conflicting.ini"
+        ProfileManager.SaveProfile("Conflicting", conflicting)
+        interruptedPath := ProfileManager.profilesPath "\Night.ini.case-rename-1234-1"
+        FileMove(conflictingPath, interruptedPath)
+
+        ProfileManager.LoadProfiles()
+
+        Assert.True(ProfileManager.profiles.Has("Night"))
+        Assert.Equal("^s", ProfileManager.profiles["Night"].binds["Sign Report"])
+        Assert.True(FileExist(interruptedPath) != "")
+        Assert.True(ProfileManager.recoveryRequired)
+        Assert.Equal(1, ProfileManager.loadErrors.Length)
+        Assert.True(InStr(ProfileManager.loadErrors[1].message, "conflicts") > 0)
     }
 
     TestProfileDeletionRules() {

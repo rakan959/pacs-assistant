@@ -66,6 +66,7 @@ class ProfileManager {
         this.loadErrors := []
 
         if DirExist(this.profilesPath) {
+            this.RecoverInterruptedCaseRenames()
             Loop Files this.profilesPath "\*.ini" {
                 ; Remove only the enumerated extension. StrReplace removed embedded
                 ; occurrences too, so reading.ini.room.ini reloaded as reading.room.
@@ -87,6 +88,46 @@ class ProfileManager {
             this.currentProfile := previousProfile
         else
             this.currentProfile := ""
+    }
+
+    static RecoverInterruptedCaseRenames() {
+        ; A case-only rename has to pass through a same-directory temporary name on
+        ; Windows. If the process or workstation stops after the first move, the
+        ; bytes still exist but no longer match the normal *.ini discovery pattern.
+        ; Recover that original canonical name before loading any profiles.
+        Loop Files this.profilesPath "\*.ini.case-rename-*", "F" {
+            temporaryPath := A_LoopFileFullPath
+            if !RegExMatch(
+                A_LoopFileName,
+                "^(.+\.ini)\.case-rename-\d+-\d+$",
+                &match
+            )
+                continue
+
+            canonicalPath := this.profilesPath "\" match[1]
+            try {
+                ; Never move malformed bytes into the canonical profile namespace.
+                this.LoadProfile(temporaryPath)
+                if FileExist(canonicalPath) {
+                    this.LoadProfile(canonicalPath)
+                    if !(FileRead(canonicalPath) == FileRead(temporaryPath))
+                        throw Error(
+                            "Interrupted case-only rename conflicts with the existing canonical profile"
+                        )
+                    this.storageDriver.DeleteFile(temporaryPath)
+                    continue
+                }
+
+                this.storageDriver.MoveFile(temporaryPath, canonicalPath, false)
+                this.LoadProfile(canonicalPath)
+            } catch as err {
+                this.recoveryRequired := true
+                this.loadErrors.Push({
+                    path: temporaryPath,
+                    message: "Interrupted case-only rename could not be recovered: " err.Message
+                })
+            }
+        }
     }
 
     static LoadProfile(path) {
@@ -215,10 +256,10 @@ class ProfileManager {
         for funcName, _ in profile.customFuncs
             customFunctionList .= funcName "|"
         IniWrite(customFunctionList, path, "CustomFunctions", "Order")
-        for funcName, func in profile.customFuncs {
+        for funcName, customConfig in profile.customFuncs {
             if (InStr(funcName, "Custom: ") = 1) {
-                IniWrite(func.keys, path, "CustomFunctions", funcName "_keys")
-                IniWrite(func.window, path, "CustomFunctions", funcName "_window")
+                IniWrite(customConfig.keys, path, "CustomFunctions", funcName "_keys")
+                IniWrite(customConfig.window, path, "CustomFunctions", funcName "_window")
             }
         }
 

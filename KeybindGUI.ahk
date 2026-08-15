@@ -204,7 +204,10 @@ class KeybindGUI {
     GuiIsLive(gui) {
         if !IsObject(gui)
             return false
-        try return gui.Hwnd && WinExist("ahk_id " gui.Hwnd)
+        ; WinExist follows DetectHiddenWindows and therefore reports a newly built,
+        ; not-yet-shown Gui as absent. IsWindow proves the actual HWND lifetime for
+        ; both pre-show validation and stale callback rejection after Destroy().
+        try return gui.Hwnd > 0 && DllCall("IsWindow", "Ptr", gui.Hwnd)
         return false
     }
 
@@ -216,13 +219,43 @@ class KeybindGUI {
         options := this.GuiIsLive(ownerGui) ? "+Owner" ownerGui.Hwnd : ""
         dialog := Gui(options, title)
         dialog.profileName := profileName
+        if (profileName != "" && ProfileManager.profiles.Has(profileName)) {
+            ; Hold the exact object reference for the dialog's lifetime. Unlike a
+            ; numeric revision, this cannot ABA-match a deleted/recreated profile of
+            ; the same name because the retained object cannot be reused.
+            dialog.profileObject := ProfileManager.profiles[profileName]
+            dialog.profileStorageRevision := ProfileManager.GetProfileRevision(
+                profileName
+            )
+            dialog.profileMutationSnapshot := KeybindGUI.GetProfileMutationRevision(
+                profileName
+            )
+            dialog.ownerHwnd := this.GuiIsLive(ownerGui) ? ownerGui.Hwnd : 0
+            dialog.requiresLiveProfileIdentity := true
+        }
         return dialog
     }
 
     DialogProfileIsCurrent(dialog) {
         profileName := ""
         try profileName := dialog.profileName
-        if (profileName != ""
+        strongIdentityValid := true
+        if HasProp(dialog, "requiresLiveProfileIdentity") {
+            try strongIdentityValid := this.GuiIsLive(dialog)
+                && (!dialog.ownerHwnd
+                    || DllCall("IsWindow", "Ptr", dialog.ownerHwnd))
+                && HasProp(dialog, "profileObject")
+                && ProfileManager.profiles.Has(profileName)
+                && ProfileManager.profiles[profileName] == dialog.profileObject
+                && dialog.profileStorageRevision
+                    = ProfileManager.GetProfileRevision(profileName)
+                && dialog.profileMutationSnapshot
+                    = KeybindGUI.GetProfileMutationRevision(profileName)
+            catch
+                strongIdentityValid := false
+        }
+        if (strongIdentityValid
+            && profileName != ""
             && profileName = ProfileManager.currentProfile
             && ProfileManager.profiles.Has(profileName))
             return true
@@ -841,12 +874,26 @@ class KeybindGUI {
         return restored
     }
 
-    SaveCurrentProfile(allowDuringShutdown := false) {
+    SaveCurrentProfile(allowDuringShutdown := false, expectedMutationState := 0) {
         if !this.BeginProfileMutationTransaction("save the profile", allowDuringShutdown)
             return false
         try {
-            profileName := ProfileManager.currentProfile
-            mutationState := this.CaptureProfileMutationState(profileName)
+            if IsObject(expectedMutationState) {
+                profileName := expectedMutationState.profileName
+                if (!this.IsProfileDirty(profileName)
+                    || !this.ProfileMutationStateIsCurrent(expectedMutationState)) {
+                    this.NotifyUser(
+                        "The profile changed while the save prompt was open. Review the current changes and try again.",
+                        "Profile Changed",
+                        "Icon!"
+                    )
+                    return false
+                }
+                mutationState := expectedMutationState
+            } else {
+                profileName := ProfileManager.currentProfile
+                mutationState := this.CaptureProfileMutationState(profileName)
+            }
             try {
                 ; One immutable snapshot is both the persisted value and the runtime
                 ; contract. Success is not published until that same snapshot is live.
@@ -905,7 +952,7 @@ class KeybindGUI {
         profile := ProfileManager.profiles[profileName]
         return {
             profileName: profileName,
-            profilePtr: ObjPtr(profile),
+            profileObject: profile,
             mutationRevision: KeybindGUI.GetProfileMutationRevision(profileName)
         }
     }
@@ -914,7 +961,7 @@ class KeybindGUI {
         return IsObject(state)
             && ProfileManager.currentProfile == state.profileName
             && ProfileManager.profiles.Has(state.profileName)
-            && ObjPtr(ProfileManager.profiles[state.profileName]) = state.profilePtr
+            && ProfileManager.profiles[state.profileName] == state.profileObject
             && KeybindGUI.GetProfileMutationRevision(state.profileName) = state.mutationRevision
     }
 
@@ -1002,7 +1049,7 @@ class KeybindGUI {
         if (choice == "Cancel")
             return false
         if (choice == "Yes")
-            return this.SaveCurrentProfile(allowDuringShutdown)
+            return this.SaveCurrentProfile(allowDuringShutdown, mutationState)
         if !(choice == "No")
             return false
 
@@ -2088,8 +2135,24 @@ class KeybindGUI {
             return false
         }
 
-        promptGui.Show()
-        return true
+        return this.ShowStartedCapturePrompt(promptGui)
+    }
+
+    ShowStartedCapturePrompt(promptGui) {
+        try {
+            promptGui.Show()
+            return true
+        } catch as err {
+            restored := this.CancelKeybindPrompt(promptGui)
+            if restored {
+                this.NotifyUser(
+                    "The key-capture window could not be shown. Input capture was stopped and the previous shortcuts were restored.``n``n" err.Message,
+                    "Key Capture Could Not Start",
+                    "Icon!"
+                )
+            }
+            return false
+        }
     }
 
     ResizeColumns(listView) {
@@ -2253,8 +2316,8 @@ class KeybindGUI {
             return false
         }
         candidate := ProfileManager.CloneProfile(ProfileManager.profiles[profileName])
-        for modality, edit in edits {
-            candidate.modalityAttendings[modality] := Trim(edit.Value)
+        for modality, attendingEdit in edits {
+            candidate.modalityAttendings[modality] := Trim(attendingEdit.Value)
         }
 
         if !this.BeginProfileMutationTransaction("save attending assignments")
