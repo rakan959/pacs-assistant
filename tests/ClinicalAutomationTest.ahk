@@ -14,6 +14,7 @@ class ClinicalAutomationTest {
         "BuiltInClinicalCommandUsesConfirmedTarget",
         "WindowToggleRevalidatesUniqueSessionBeforeMutation",
         "NativePowerScribeCaptureRejectsImpostorAndDuplicate",
+        "NativePowerScribeHandleResolverRequiresExactIdentity",
         "TargetedCustomCommandUsesConfirmedTarget",
         "ClinicalCommandGateRejectsNestedBuiltIn",
         "ShutdownGateRejectsNewClinicalCommand",
@@ -232,6 +233,45 @@ class ClinicalAutomationTest {
             pid: 78
         }])
         Assert.Equal(0, nativeDriver.Capture(PowerScribe.windowTitle))
+    }
+
+    NativePowerScribeHandleResolverRequiresExactIdentity() {
+        nativeDriver := NativePowerScribeSessionDriver()
+        expected := {
+            hwnd: 601,
+            title: AppControl.powerScribeReportingTitle,
+            exe: AppControl.powerScribeExecutable,
+            pid: 77
+        }
+
+        AppControl.windowDriver := FakeExactWindowDriver([expected])
+        session := nativeDriver.SessionFromHandle(expected.hwnd)
+        Assert.Equal(expected.hwnd, session.hwnd)
+        Assert.Equal(expected.pid, session.processId)
+
+        AppControl.windowDriver := FakeExactWindowDriver([{
+            hwnd: 602,
+            title: AppControl.powerScribeReportingTitle " Extra",
+            exe: AppControl.powerScribeExecutable,
+            pid: 77
+        }])
+        Assert.Equal(0, nativeDriver.SessionFromHandle(602))
+
+        AppControl.windowDriver := FakeExactWindowDriver([{
+            hwnd: 603,
+            title: AppControl.powerScribeReportingTitle,
+            exe: "not-powerscribe.exe",
+            pid: 77
+        }])
+        Assert.Equal(0, nativeDriver.SessionFromHandle(603))
+
+        AppControl.windowDriver := FakeExactWindowDriver([{
+            hwnd: 604,
+            title: AppControl.powerScribeReportingTitle,
+            exe: AppControl.powerScribeExecutable,
+            pid: 0
+        }])
+        Assert.Equal(0, nativeDriver.SessionFromHandle(604))
     }
 
     TargetedCustomCommandUsesConfirmedTarget() {
