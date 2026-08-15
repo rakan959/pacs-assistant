@@ -263,8 +263,11 @@ class ProfileManager {
             if !HotkeyContract.IsValidScope(scope)
                 throw ValueError("Profile contains an unknown hotkey scope for '" funcName "'")
         }
-        for modality, _ in profile.modalityAttendings
+        for modality, _ in profile.modalityAttendings {
             this.RequireSafeIniKey(modality, "modality")
+            if (StrLower(modality) == "order")
+                throw ValueError("Profile modality name uses the reserved INI key 'Order'")
+        }
     }
 
     static RequireUniqueIniKeys(values, kind) {

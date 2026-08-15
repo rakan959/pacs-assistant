@@ -26,7 +26,9 @@ class ProfileManagerTest {
         "TestSaveRejectsMalformedCustomCommand",
         "TestSaveRejectsCaseCollidingCustomCommands",
         "TestSaveRejectsCaseCollidingModalities",
+        "TestSaveRejectsReservedModalityMetadataKey",
         "TestLoadRejectsCaseCollidingPersistedKeys",
+        "TestLoadRejectsReservedModalityMetadataKey",
         "TestFailedRenamePreservesOriginalProfile",
         "TestMalformedProfileDoesNotBlockValidProfiles",
         "TestDefaultProfileMustExist",
@@ -323,6 +325,17 @@ class ProfileManagerTest {
         Assert.False(FileExist(ProfileManager.profilesPath "\ModalityCollision.ini"))
     }
 
+    TestSaveRejectsReservedModalityMetadataKey() {
+        profile := ProfileManager.NewProfile()
+        profile.modalityAttendings["oRdEr"] := "Attending"
+
+        Assert.Throws(
+            () => ProfileManager.SaveProfile("ReservedModality", profile),
+            "reserved INI key"
+        )
+        Assert.False(FileExist(ProfileManager.profilesPath "\ReservedModality.ini"))
+    }
+
     TestLoadRejectsCaseCollidingPersistedKeys() {
         path := ProfileManager.profilesPath "\PersistedCollision.ini"
         FileAppend(
@@ -342,6 +355,22 @@ class ProfileManagerTest {
         Assert.Throws(
             () => ProfileManager.LoadProfile(path),
             "case-insensitive INI key"
+        )
+    }
+
+    TestLoadRejectsReservedModalityMetadataKey() {
+        path := ProfileManager.profilesPath "\PersistedReservedModality.ini"
+        FileAppend(
+            "[Functions]`n"
+            . "Order=`n"
+            . "[ModalityAttendings]`n"
+            . "Order=Order|`n",
+            path
+        )
+
+        Assert.Throws(
+            () => ProfileManager.LoadProfile(path),
+            "reserved INI key"
         )
     }
 
