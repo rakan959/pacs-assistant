@@ -643,7 +643,9 @@ class UpdateChecker {
     static notifiedVersion := ""
     static updateDialog := 0
     static updateAvailableNotifier := (text, title, options) => TrayTip(text, title, options)
-    static manualResultNotifier := (text, title, options) => MsgBox(text, title, options)
+    static manualResultNotifier := (text, title, options) => TrayTip(text, title, options)
+    static dialogAcquire := (*) => true
+    static dialogRelease := (*) => 0
     static updateCheckEligibleProbe := (*) => A_IsCompiled && !AppVersion.isDevBuild
     
     static Start() {
@@ -1247,10 +1249,19 @@ class UpdateChecker {
             )
             return false
         }
-        if this.UpdateDialogIsLive() {
-            try WinActivate("ahk_id " this.updateDialog.Hwnd)
-            return this.updateDialog
+        if !this.dialogAcquire.Call("open the update dialog") {
+            this.manualResultNotifier.Call(
+                "Wait for the active clinical or configuration operation to finish before opening the update dialog.",
+                "Update Dialog Unavailable",
+                "Icon!"
+            )
+            return false
         }
+        try {
+            if this.UpdateDialogIsLive() {
+                try WinActivate("ahk_id " this.updateDialog.Hwnd)
+                return this.updateDialog
+            }
             
         ; Create update dialog with modern styling
         updateGui := Gui(, "PACS Assistant - Update Available")
@@ -1310,9 +1321,10 @@ class UpdateChecker {
 
         updateGui.OnEvent("Close", dismiss)
 
-        this.updateDialog := updateGui
-        updateGui.Show()
-        return updateGui
+            this.updateDialog := updateGui
+            updateGui.Show()
+            return updateGui
+        } finally this.dialogRelease.Call()
     }
 
     static UpdateDialogIsLive() {

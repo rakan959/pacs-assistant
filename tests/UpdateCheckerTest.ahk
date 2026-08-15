@@ -19,6 +19,7 @@ class UpdateCheckerTest {
         "TestCachedPrereleaseIsInvalidatedWhenBetaSkippingEnabled",
         "TestSkippedCachedVersionCannotReopen",
         "TestManualCompletionDefersDialogDuringClinicalCommand",
+        "TestUpdateDialogRequiresPresentationLease",
         "TestAsyncRequestDisconnectBreaksCallbackOwnership",
         "TestStaleCallbackContextNeverFallsBackToReusedHandle",
         "TestNativeCallbackMasksThirtyTwoBitParameters",
@@ -59,6 +60,12 @@ class UpdateCheckerTest {
         this.originalUpdateCheckEligibleProbe := UpdateChecker.updateCheckEligibleProbe
         this.originalUpdateAvailableNotifier := UpdateChecker.updateAvailableNotifier
         this.originalManualResultNotifier := UpdateChecker.manualResultNotifier
+        this.originalDialogAcquire := UpdateChecker.HasOwnProp("dialogAcquire")
+            ? UpdateChecker.dialogAcquire
+            : 0
+        this.originalDialogRelease := UpdateChecker.HasOwnProp("dialogRelease")
+            ? UpdateChecker.dialogRelease
+            : 0
         this.originalPendingUpdateInfo := UpdateChecker.pendingUpdateInfo
         this.originalNotifiedVersion := UpdateChecker.notifiedVersion
         this.originalUpdateDialog := UpdateChecker.updateDialog
@@ -76,6 +83,8 @@ class UpdateCheckerTest {
             title: title,
             options: options
         })
+        UpdateChecker.dialogAcquire := (*) => true
+        UpdateChecker.dialogRelease := (*) => 0
         UpdateChecker.pendingUpdateInfo := 0
         UpdateChecker.notifiedVersion := ""
         UpdateChecker.updateDialog := 0
@@ -545,6 +554,22 @@ class UpdateCheckerTest {
         Assert.True(this.updateNotifications.Length >= 2)
     }
 
+    TestUpdateDialogRequiresPresentationLease() {
+        lease := FakeUpdatePresentationLease(false)
+        UpdateChecker.dialogAcquire := ObjBindMethod(lease, "Acquire")
+        UpdateChecker.dialogRelease := ObjBindMethod(lease, "Release")
+
+        result := UpdateChecker.ShowUpdateDialog(ValidUpdateInfo())
+        if IsObject(result)
+            UpdateChecker.CloseUpdateDialog(result)
+
+        Assert.False(result)
+        Assert.Equal(1, lease.acquireCalls)
+        Assert.Equal(0, lease.releaseCalls)
+        Assert.True(IsObject(UpdateChecker.pendingUpdateInfo))
+        Assert.Equal(1, this.manualNotifications.Length)
+    }
+
     TestAsyncRequestDisconnectBreaksCallbackOwnership() {
         operation := WinHttpTextRequest(
             "https://api.github.com/test",
@@ -674,6 +699,14 @@ class UpdateCheckerTest {
         UpdateChecker.updateCheckEligibleProbe := this.originalUpdateCheckEligibleProbe
         UpdateChecker.updateAvailableNotifier := this.originalUpdateAvailableNotifier
         UpdateChecker.manualResultNotifier := this.originalManualResultNotifier
+        if this.originalDialogAcquire
+            UpdateChecker.dialogAcquire := this.originalDialogAcquire
+        else
+            try UpdateChecker.DeleteProp("dialogAcquire")
+        if this.originalDialogRelease
+            UpdateChecker.dialogRelease := this.originalDialogRelease
+        else
+            try UpdateChecker.DeleteProp("dialogRelease")
         UpdateChecker.pendingUpdateInfo := this.originalPendingUpdateInfo
         UpdateChecker.notifiedVersion := this.originalNotifiedVersion
         UpdateChecker.updateDialog := this.originalUpdateDialog
@@ -681,6 +714,23 @@ class UpdateCheckerTest {
         UpdateChecker.lastRemindTime := 0
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalSettingsFile
+    }
+}
+
+class FakeUpdatePresentationLease {
+    __New(acquireResult := true) {
+        this.acquireResult := acquireResult
+        this.acquireCalls := 0
+        this.releaseCalls := 0
+    }
+
+    Acquire(*) {
+        this.acquireCalls++
+        return this.acquireResult
+    }
+
+    Release(*) {
+        this.releaseCalls++
     }
 }
 

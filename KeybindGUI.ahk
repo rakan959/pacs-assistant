@@ -20,6 +20,8 @@ class KeybindGUI {
     static shutdownTransactionActive := false
     static shutdownAuthorized := false
     static shutdownAction := ""
+    static uiPresentationTransactionActive := false
+    static uiPresentationTransactionAction := ""
     ; The V option would pass the selected key through to the foreground application.
     ; Capture is intentionally suppressing: the key is configuration data only.
     static inputHookOptions := ""
@@ -139,6 +141,7 @@ class KeybindGUI {
                 && !KeybindGUI.captureTransactionActive
                 && !KeybindGUI.profileMutationTransactionActive
                 && !Settings.writeTransactionActive
+                && !KeybindGUI.uiPresentationTransactionActive
                 && !KeybindGUI.shutdownTransactionActive) {
                 KeybindGUI.shutdownTransactionActive := true
                 KeybindGUI.shutdownAction := action
@@ -441,8 +444,12 @@ class KeybindGUI {
     }
 
     OpenNewProfilePrompt(selectorGui) {
-        selectorGui.Destroy()
-        return this.PromptNewProfile()
+        if !this.BeginProfileMutationTransaction("open the new-profile dialog")
+            return false
+        try {
+            selectorGui.Destroy()
+            return this.PromptNewProfile()
+        } finally this.EndProfileMutationTransaction()
     }
 
     PromptNewProfile() {
@@ -456,20 +463,36 @@ class KeybindGUI {
     }
 
     CloseNewProfilePrompt(inputGui) {
-        try inputGui.Destroy()
-        if (ProfileManager.profiles.Count > 0) {
-            this.ShowProfileSelector()
-            return
-        }
-        this.RequestExit()
+        if !this.BeginProfileMutationTransaction("close the new-profile dialog")
+            return false
+        try {
+            try inputGui.Destroy()
+            if (ProfileManager.profiles.Count > 0) {
+                this.ShowProfileSelector()
+                return true
+            }
+        } finally this.EndProfileMutationTransaction()
+        return this.RequestExit()
     }
 
     CreateProfile(name, inputGui) {
         name := Trim(name)
         if !this.BeginProfileMutationTransaction("create a profile")
             return false
+        inputDisabled := false
         try {
-            if ProfileManager.CreateProfile(name) {
+            try {
+                inputGui.Opt("+Disabled")
+                inputDisabled := true
+            } catch {
+                this.NotifyUser(
+                    "The new-profile dialog could not be locked for this change. Reopen it and try again.",
+                    "Profile Creation Failed",
+                    "Icon!"
+                )
+                return false
+            }
+            if this.CreateProfileRecord(name) {
                 ProfileManager.currentProfile := name
                 inputGui.Destroy()
                 this.CreateMainGUI()
@@ -483,8 +506,14 @@ class KeybindGUI {
                 "Icon!"
             )
             return false
-        } finally this.EndProfileMutationTransaction()
+        } finally {
+            if inputDisabled
+                try inputGui.Opt("-Disabled")
+            this.EndProfileMutationTransaction()
+        }
     }
+
+    CreateProfileRecord(name) => ProfileManager.CreateProfile(name)
 
     SelectProfile(name, selectorGui) {
         if (name = "" || !ProfileManager.profiles.Has(name))
@@ -1214,9 +1243,15 @@ class KeybindGUI {
         return MsgBox(message, title, options)
     }
 
+    NotifyUnavailable(message, title, options := "") {
+        if this.HasOwnProp("notificationDriver")
+            return this.notificationDriver.Notify(message, title, options)
+        return TrayTip(message, title, options)
+    }
+
     ProfileMutationAllowed(action, allowDuringShutdown := false) {
         if PACSCommands.clinicalCommandActive {
-            this.NotifyUser(
+            this.NotifyUnavailable(
                 "Wait for '" PACSCommands.activeClinicalCommand "' to finish before you " action ".",
                 "Clinical Command In Progress",
                 "Icon!"
@@ -1224,7 +1259,7 @@ class KeybindGUI {
             return false
         }
         if KeybindGUI.captureTransactionActive {
-            this.NotifyUser(
+            this.NotifyUnavailable(
                 "Finish or cancel the active key capture before you " action ".",
                 "Keybind In Progress",
                 "Icon!"
@@ -1232,7 +1267,7 @@ class KeybindGUI {
             return false
         }
         if KeybindGUI.profileMutationTransactionActive {
-            this.NotifyUser(
+            this.NotifyUnavailable(
                 "Wait for the current profile operation ('"
                     . KeybindGUI.profileMutationTransactionAction
                     . "') to finish before you " action ".",
@@ -1242,15 +1277,25 @@ class KeybindGUI {
             return false
         }
         if Settings.writeTransactionActive {
-            this.NotifyUser(
+            this.NotifyUnavailable(
                 "Wait for the current settings operation to finish before you " action ".",
                 "Settings Operation In Progress",
                 "Icon!"
             )
             return false
         }
+        if KeybindGUI.uiPresentationTransactionActive {
+            this.NotifyUnavailable(
+                "Wait for the current dialog operation ('"
+                    . KeybindGUI.uiPresentationTransactionAction
+                    . "') to finish before you " action ".",
+                "Dialog Operation In Progress",
+                "Icon!"
+            )
+            return false
+        }
         if (KeybindGUI.shutdownTransactionActive && !allowDuringShutdown) {
-            this.NotifyUser(
+            this.NotifyUnavailable(
                 "PACS Assistant is preparing to " KeybindGUI.shutdownAction
                     . ". Wait for that operation to finish before you " action ".",
                 "Shutdown In Progress",
@@ -1271,6 +1316,7 @@ class KeybindGUI {
                 && !KeybindGUI.captureTransactionActive
                 && !Settings.writeTransactionActive
                 && !KeybindGUI.profileMutationTransactionActive
+                && !KeybindGUI.uiPresentationTransactionActive
                 && (!KeybindGUI.shutdownTransactionActive || allowDuringShutdown)) {
                 KeybindGUI.profileMutationTransactionActive := true
                 KeybindGUI.profileMutationTransactionAction := action
@@ -1300,6 +1346,7 @@ class KeybindGUI {
                 && !KeybindGUI.captureTransactionActive
                 && !KeybindGUI.profileMutationTransactionActive
                 && !Settings.writeTransactionActive
+                && !KeybindGUI.uiPresentationTransactionActive
                 && !KeybindGUI.shutdownTransactionActive) {
                 KeybindGUI.captureTransactionActive := true
                 acquired := true
@@ -1329,6 +1376,32 @@ class KeybindGUI {
             ; This is the terminal publication step: callbacks can enter only after
             ; the owner/UI/runtime/dirty state has already been finalized.
             KeybindGUI.captureTransactionActive := false
+        } finally Critical("Off")
+    }
+
+    static TryBeginUiPresentation(action) {
+        acquired := false
+        Critical("On")
+        try {
+            if (!PACSCommands.clinicalCommandActive
+                && !KeybindGUI.captureTransactionActive
+                && !KeybindGUI.profileMutationTransactionActive
+                && !Settings.writeTransactionActive
+                && !KeybindGUI.shutdownTransactionActive
+                && !KeybindGUI.uiPresentationTransactionActive) {
+                KeybindGUI.uiPresentationTransactionActive := true
+                KeybindGUI.uiPresentationTransactionAction := action
+                acquired := true
+            }
+        } finally Critical("Off")
+        return acquired
+    }
+
+    static EndUiPresentation() {
+        Critical("On")
+        try {
+            KeybindGUI.uiPresentationTransactionAction := ""
+            KeybindGUI.uiPresentationTransactionActive := false
         } finally Critical("Off")
     }
 

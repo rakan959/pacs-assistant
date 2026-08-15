@@ -8,6 +8,7 @@ class SettingsTest {
         "TestSetAndGetValues",
         "TestMutationGuardRejectsSettingsWrite",
         "TestDialogGuardRejectsSettingsWindowBeforeCreation",
+        "TestPresentationLeaseRejectsSettingsWindowBeforeCreation",
         "TestMalformedPersistedSettingsUseDefaults",
         "TestExcessivePersistedRefreshIntervalUsesDefault",
         "TestSavingRejectsExcessiveRefreshInterval",
@@ -33,12 +34,24 @@ class SettingsTest {
         this.originalRevision := Settings.revision
         this.originalMutationGuard := Settings.mutationGuard
         this.originalDialogGuard := Settings.dialogGuard
+        this.originalDialogAcquire := Settings.HasOwnProp("dialogAcquire")
+            ? Settings.dialogAcquire
+            : 0
+        this.originalDialogRelease := Settings.HasOwnProp("dialogRelease")
+            ? Settings.dialogRelease
+            : 0
+        this.originalDialogUnavailableNotifier := Settings.HasOwnProp("dialogUnavailableNotifier")
+            ? Settings.dialogUnavailableNotifier
+            : 0
         this.originalWriteTransactionActive := Settings.writeTransactionActive
         this.tempFile := A_Temp "\settings_test_" A_TickCount ".ini"
         Settings.settingsFile := this.tempFile
         Settings.changeListeners := []
         Settings.mutationGuard := (*) => true
         Settings.dialogGuard := (*) => true
+        Settings.dialogAcquire := (*) => true
+        Settings.dialogRelease := (*) => 0
+        Settings.dialogUnavailableNotifier := (*) => 0
         Settings.writeTransactionActive := false
         Settings.SaveAllSettings()
     }
@@ -90,6 +103,22 @@ class SettingsTest {
         Settings.dialogGuard := (*) => false
 
         Assert.False(Settings.ShowDialog())
+    }
+
+    TestPresentationLeaseRejectsSettingsWindowBeforeCreation() {
+        lease := FakeSettingsPresentationLease(false)
+        Settings.dialogAcquire := ObjBindMethod(lease, "Acquire")
+        Settings.dialogRelease := ObjBindMethod(lease, "Release")
+        Settings.dialogUnavailableNotifier := ObjBindMethod(lease, "Notify")
+
+        result := Settings.ShowDialog()
+        if IsObject(result)
+            try result.Destroy()
+
+        Assert.False(result)
+        Assert.Equal(1, lease.acquireCalls)
+        Assert.Equal(0, lease.releaseCalls)
+        Assert.Equal(1, lease.notificationCalls)
     }
 
     TestMalformedPersistedSettingsUseDefaults() {
@@ -354,6 +383,18 @@ class SettingsTest {
         Settings.revision := this.originalRevision
         Settings.mutationGuard := this.originalMutationGuard
         Settings.dialogGuard := this.originalDialogGuard
+        if this.originalDialogAcquire
+            Settings.dialogAcquire := this.originalDialogAcquire
+        else
+            try Settings.DeleteProp("dialogAcquire")
+        if this.originalDialogRelease
+            Settings.dialogRelease := this.originalDialogRelease
+        else
+            try Settings.DeleteProp("dialogRelease")
+        if this.originalDialogUnavailableNotifier
+            Settings.dialogUnavailableNotifier := this.originalDialogUnavailableNotifier
+        else
+            try Settings.DeleteProp("dialogUnavailableNotifier")
         Settings.writeTransactionActive := this.originalWriteTransactionActive
     }
 }
@@ -368,6 +409,28 @@ FailSettingsReplace(*) {
 
 ReentrantSettingsReplace(*) {
     Settings.Set("SkippedUpdateVersion", "v9.9.9")
+}
+
+class FakeSettingsPresentationLease {
+    __New(acquireResult := true) {
+        this.acquireResult := acquireResult
+        this.acquireCalls := 0
+        this.releaseCalls := 0
+        this.notificationCalls := 0
+    }
+
+    Acquire(*) {
+        this.acquireCalls++
+        return this.acquireResult
+    }
+
+    Release(*) {
+        this.releaseCalls++
+    }
+
+    Notify(*) {
+        this.notificationCalls++
+    }
 }
 
 class FakeSettingsDialog {

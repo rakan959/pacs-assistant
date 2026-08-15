@@ -67,7 +67,9 @@ class KeybindGUITest {
         "TestConcurrentMutationDuringSaveRemainsDirtyAndRestoresNewRuntime",
         "TestClinicalCommandCannotInterruptProfileApply",
         "TestStaleProfileDeleteCannotDeleteRecreatedProfile",
-        "TestProfileSelectorCloseCannotInterruptDefaultProfileTransaction"
+        "TestProfileSelectorCloseCannotInterruptDefaultProfileTransaction",
+        "TestProfileCreationCloseCannotInterruptStorageTransaction",
+        "TestUiPresentationLeaseBlocksClinicalEntry"
     ]
 
     Setup() {
@@ -83,6 +85,12 @@ class KeybindGUITest {
         this.originalShutdownTransactionActive := KeybindGUI.shutdownTransactionActive
         this.originalShutdownAuthorized := KeybindGUI.shutdownAuthorized
         this.originalShutdownAction := KeybindGUI.shutdownAction
+        this.originalUiPresentationTransactionActive := KeybindGUI.HasOwnProp("uiPresentationTransactionActive")
+            ? KeybindGUI.uiPresentationTransactionActive
+            : false
+        this.originalUiPresentationTransactionAction := KeybindGUI.HasOwnProp("uiPresentationTransactionAction")
+            ? KeybindGUI.uiPresentationTransactionAction
+            : ""
         this.originalClinicalCommandActive := PACSCommands.clinicalCommandActive
         this.originalActiveClinicalCommand := PACSCommands.activeClinicalCommand
         this.originalCommandAvailabilityProbe := PACSCommands.commandAvailabilityProbe
@@ -96,6 +104,8 @@ class KeybindGUITest {
         KeybindGUI.shutdownTransactionActive := false
         KeybindGUI.shutdownAuthorized := false
         KeybindGUI.shutdownAction := ""
+        KeybindGUI.uiPresentationTransactionActive := false
+        KeybindGUI.uiPresentationTransactionAction := ""
         PACSCommands.clinicalCommandActive := false
         PACSCommands.activeClinicalCommand := ""
         PACSCommands.commandAvailabilityProbe := (*) => true
@@ -112,6 +122,8 @@ class KeybindGUITest {
         KeybindGUI.shutdownTransactionActive := this.originalShutdownTransactionActive
         KeybindGUI.shutdownAuthorized := this.originalShutdownAuthorized
         KeybindGUI.shutdownAction := this.originalShutdownAction
+        KeybindGUI.uiPresentationTransactionActive := this.originalUiPresentationTransactionActive
+        KeybindGUI.uiPresentationTransactionAction := this.originalUiPresentationTransactionAction
         PACSCommands.clinicalCommandActive := this.originalClinicalCommandActive
         PACSCommands.activeClinicalCommand := this.originalActiveClinicalCommand
         PACSCommands.commandAvailabilityProbe := this.originalCommandAvailabilityProbe
@@ -560,6 +572,70 @@ class KeybindGUITest {
         Assert.Equal(0, gui.mainWindowCalls)
         Assert.Equal(1, gui.selectorCalls)
         Assert.Equal("Night", capturedDefault)
+    }
+
+    TestProfileCreationCloseCannotInterruptStorageTransaction() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        inputGui := ReentrantSelectorDialog()
+        gui := {
+            base: ReentrantProfileCreationGUI.Prototype,
+            inputGui: inputGui,
+            mainWindowCalls: 0,
+            selectorCalls: 0,
+            exitCalls: 0,
+            closeAttempted: false,
+            closeResult: true,
+            observedDisabled: false
+        }
+
+        try {
+            ProfileManager.profiles := Map("Existing", ProfileManager.NewProfile())
+            ProfileManager.currentProfile := ""
+
+            result := gui.CreateProfile("New", inputGui)
+            capturedCurrent := ProfileManager.currentProfile
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+        }
+
+        Assert.True(result)
+        Assert.True(gui.closeAttempted)
+        Assert.False(gui.closeResult)
+        Assert.True(gui.observedDisabled)
+        Assert.Equal(1, inputGui.destroyCalls)
+        Assert.Equal(1, gui.mainWindowCalls)
+        Assert.Equal(0, gui.selectorCalls)
+        Assert.Equal(0, gui.exitCalls)
+        Assert.Equal("New", capturedCurrent)
+    }
+
+    TestUiPresentationLeaseBlocksClinicalEntry() {
+        callbackCalls := 0
+        originalProbe := PACSCommands.commandAvailabilityProbe
+        PACSCommands.commandAvailabilityProbe := (*) =>
+            !KeybindGUI.uiPresentationTransactionActive
+
+        try {
+            Assert.True(KeybindGUI.TryBeginUiPresentation("open Settings"))
+            blocked := PACSCommands.RunClinicalCommand(
+                "Sign Report",
+                (*) => callbackCalls++
+            )
+            Assert.False(blocked)
+            Assert.Equal(0, callbackCalls)
+
+            KeybindGUI.EndUiPresentation()
+            Assert.True(PACSCommands.RunClinicalCommand(
+                "Sign Report",
+                (*) => (callbackCalls++, true)
+            ))
+            Assert.Equal(1, callbackCalls)
+        } finally {
+            KeybindGUI.EndUiPresentation()
+            PACSCommands.commandAvailabilityProbe := originalProbe
+        }
     }
 
     TestTrayExitUsesTheSameClinicalAndCaptureGate() {
@@ -3138,10 +3214,18 @@ class FakeProfileDialog {
             ? profileRevision
             : ProfileManager.GetProfileRevision(profileName)
         this.profileMutationRevision := KeybindGUI.GetProfileMutationRevision(profileName)
+        this.disabled := false
     }
 
     Destroy() {
         this.destroyed := true
+    }
+
+    Opt(option) {
+        if (option = "+Disabled")
+            this.disabled := true
+        else if (option = "-Disabled")
+            this.disabled := false
     }
 }
 
@@ -3192,6 +3276,21 @@ class ProfileSelectorTransactionGUI extends KeybindGUI {
 
     ShowProfileSelector() {
         this.selectorCalls++
+        return true
+    }
+}
+
+class ReentrantProfileCreationGUI extends ProfileSelectorTransactionGUI {
+    CreateProfileRecord(name) {
+        this.closeAttempted := true
+        this.observedDisabled := this.inputGui.disabled
+        this.closeResult := this.CloseNewProfilePrompt(this.inputGui)
+        ProfileManager.profiles[name] := ProfileManager.NewProfile()
+        return true
+    }
+
+    RequestExit() {
+        this.exitCalls++
         return true
     }
 }

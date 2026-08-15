@@ -20,16 +20,23 @@ UpdateChecker.clinicalActivityProbe := (*) => PACSCommands.clinicalCommandActive
 PACSCommands.commandAvailabilityProbe := (*) => !KeybindGUI.shutdownTransactionActive
     && !KeybindGUI.captureTransactionActive
     && !KeybindGUI.profileMutationTransactionActive
+    && !KeybindGUI.uiPresentationTransactionActive
     && !Settings.writeTransactionActive
 Settings.mutationGuard := (*) => !PACSCommands.clinicalCommandActive
     && !KeybindGUI.shutdownTransactionActive
     && !KeybindGUI.captureTransactionActive
     && !KeybindGUI.profileMutationTransactionActive
+    && !KeybindGUI.uiPresentationTransactionActive
 Settings.dialogGuard := (*) => !PACSCommands.clinicalCommandActive
     && !KeybindGUI.shutdownTransactionActive
     && !KeybindGUI.captureTransactionActive
     && !KeybindGUI.profileMutationTransactionActive
+    && !KeybindGUI.uiPresentationTransactionActive
     && !Settings.writeTransactionActive
+Settings.dialogAcquire := ObjBindMethod(KeybindGUI, "TryBeginUiPresentation")
+Settings.dialogRelease := ObjBindMethod(KeybindGUI, "EndUiPresentation")
+UpdateChecker.dialogAcquire := ObjBindMethod(KeybindGUI, "TryBeginUiPresentation")
+UpdateChecker.dialogRelease := ObjBindMethod(KeybindGUI, "EndUiPresentation")
 
 ; Initialize the GUI when the script starts
 kbGUI := KeybindGUI()

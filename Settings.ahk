@@ -6,6 +6,9 @@ class Settings {
     static changeListeners := []
     static mutationGuard := (*) => true
     static dialogGuard := (*) => true
+    static dialogAcquire := (*) => true
+    static dialogRelease := (*) => 0
+    static dialogUnavailableNotifier := (text, title, options) => TrayTip(text, title, options)
     static writeTransactionActive := false
     static revision := 0
     static minRefreshIntervalSeconds := 10
@@ -281,14 +284,23 @@ class Settings {
     ; Show settings dialog
     static ShowDialog() {
         if !this.dialogGuard.Call() {
-            MsgBox(
+            this.dialogUnavailableNotifier.Call(
                 "Wait for the active clinical or configuration operation to finish before opening Settings.",
                 "Settings Unavailable",
                 "Icon!"
             )
             return false
         }
-        settingsGui := Gui(, "PACS Assistant - Settings")
+        if !this.dialogAcquire.Call("open Settings") {
+            this.dialogUnavailableNotifier.Call(
+                "Wait for the active clinical or configuration operation to finish before opening Settings.",
+                "Settings Unavailable",
+                "Icon!"
+            )
+            return false
+        }
+        try {
+            settingsGui := Gui(, "PACS Assistant - Settings")
         settingsGui.settingsRevision := this.revision
         settingsGui.SetFont("s10", "Segoe UI")
         checkboxes := Map()
@@ -345,8 +357,9 @@ class Settings {
         settingsGui.Add("Button", "x210 y365 w80", "Cancel")
             .OnEvent("Click", (*) => settingsGui.Destroy())
 
-        settingsGui.Show("w" this.dialogLogicalWidth " h" this.dialogLogicalHeight)
-        return settingsGui
+            settingsGui.Show("w" this.dialogLogicalWidth " h" this.dialogLogicalHeight)
+            return settingsGui
+        } finally this.dialogRelease.Call()
     }
     
     ; Find index of sound in alertSounds array

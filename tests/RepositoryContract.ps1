@@ -161,6 +161,12 @@ Assert-Matches $main '(?m)^#SingleInstance\s+Ignore\s*$' 'A second launch must n
 Assert-NotMatches $main '(?m)^#SingleInstance\s+Force\s*$' 'Force replacement bypasses shutdown and clinical transaction gates.'
 Assert-Matches $main 'OnExit\(\(exitReason, exitCode\) => kbGUI\.HandleProcessExit\(exitReason, exitCode\)\)' 'Tray and external exits must use the authoritative shutdown coordinator.'
 Assert-Matches $main 'UpdateChecker\.shutdownCoordinator\s*:=\s*kbGUI' 'Self-update must use the same shutdown coordinator as normal exit.'
+Assert-Matches $main '(?s)PACSCommands\.commandAvailabilityProbe\s*:=.*?KeybindGUI\.uiPresentationTransactionActive' 'Clinical commands must reject an activating-dialog presentation transaction.'
+Assert-Matches $main 'Settings\.dialogAcquire\s*:=\s*ObjBindMethod\(KeybindGUI,\s*"TryBeginUiPresentation"\)' 'Settings presentation must acquire the shared UI transaction.'
+Assert-Matches $main 'Settings\.dialogRelease\s*:=\s*ObjBindMethod\(KeybindGUI,\s*"EndUiPresentation"\)' 'Settings presentation must release the shared UI transaction.'
+Assert-Matches $main 'UpdateChecker\.dialogAcquire\s*:=\s*ObjBindMethod\(KeybindGUI,\s*"TryBeginUiPresentation"\)' 'Update presentation must acquire the shared UI transaction.'
+Assert-Matches $main 'UpdateChecker\.dialogRelease\s*:=\s*ObjBindMethod\(KeybindGUI,\s*"EndUiPresentation"\)' 'Update presentation must release the shared UI transaction.'
+Assert-Matches $updateChecker 'manualResultNotifier\s*:=\s*\(text, title, options\) => TrayTip' 'Asynchronous update results must use a nonactivating notification by default.'
 foreach ($subscriber in @('UpdateChecker', 'PACSMonitor', 'MicrophoneManager')) {
     Assert-Matches $main ("Settings\.AddChangeListener\(ObjBindMethod\(" + $subscriber) ("main.ahk must explicitly subscribe " + $subscriber + " to settings changes.")
 }
