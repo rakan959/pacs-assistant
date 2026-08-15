@@ -57,9 +57,8 @@ class NativeWindowDriver {
 }
 
 /**
- * Process and window lifecycle primitives used by restartPACS. Every terminating
- * operation verifies the target is actually gone, while treating an already-exited
- * race as success.
+ * Process-observation and exact-window lifecycle primitives used by restartPACS.
+ * Production restart never terminates a process discovered only by basename.
  */
 class NativeAppLifecycleDriver {
     FindProcess(target) {
@@ -78,18 +77,11 @@ class NativeAppLifecycleDriver {
         return WinExist("ahk_id " hwnd) != 0
     }
 
-    StopProcess(pid) {
-        try ProcessClose(pid)
-        catch {
-            return !this.ProcessExists(pid)
-        }
-
-        try ProcessWaitClose(pid, 2)
-        return !this.ProcessExists(pid)
-    }
-
-    CloseWindow(hwnd) {
-        try WinClose("ahk_id " hwnd, , 2)
+    CloseWindow(session) {
+        if !AppControl.ExactSessionIsLive(session)
+            return false
+        hwnd := session.hwnd
+        try WinClose(session.target, , 2)
         catch {
             return !this.WindowExists(hwnd)
         }
@@ -107,7 +99,7 @@ class NativeAppLifecycleDriver {
  */
 class AppControl {
     static activationTimeoutSeconds := 2
-    static maxMatchingProcesses := 32
+    static maxMatchingWindows := 32
     static powerScribeExecutable := "Nuance.PowerScribe360.exe"
     static powerScribeReportingTitle := "PowerScribe 360 | Reporting"
     static vuePacsExecutable := "mp.exe"
@@ -212,16 +204,29 @@ class AppControl {
     }
 
     static ExactSessionIsUniqueAndLive(session) {
-        if !session || !HasProp(session, "title") || !HasProp(session, "exe")
+        return this.ExactSessionIsLive(session, true)
+    }
+
+    static ExactSessionIsLive(session, requireUnique := false) {
+        if (!session
+            || !HasProp(session, "hwnd")
+            || !HasProp(session, "processId")
+            || !HasProp(session, "title")
+            || !HasProp(session, "exe"))
             return false
         try sessions := this.ResolveExactWindows(
             this.ExactWindowSpec(session.title, session.exe)
         )
         catch
             return false
-        return sessions.Length = 1
-            && sessions[1].hwnd = session.hwnd
-            && sessions[1].processId = session.processId
+        if (requireUnique && sessions.Length != 1)
+            return false
+        for liveSession in sessions {
+            if (liveSession.hwnd = session.hwnd
+                && liveSession.processId = session.processId)
+                return true
+        }
+        return false
     }
 
     static SendKeysToExactWindow(spec, keys) {
@@ -269,59 +274,23 @@ class AppControl {
     }
 
     /**
-     * Stops an explicitly typed process or closes an explicitly typed window.
-     * Process names are never reused as title selectors, and window targets never
-     * escalate to terminating a shared owner process.
+     * Closes an explicitly typed exact window. Bare process targets are rejected:
+     * the repository has no trustworthy installed full-path/creation identity for
+     * the generic PACS executables, so basename termination cannot be made safe.
      * @returns {found, stopped}; stopped is false on lookup uncertainty or when a
      * target survives, allowing restartPACS to fail closed.
      */
     static StopTarget(target, targetKind) {
-        if (targetKind = "process")
-            return this.StopProcessTarget(target)
         if (targetKind = "window")
             return this.CloseWindowTarget(target)
-        return {found: false, stopped: false, error: "Unsupported restart target kind: " targetKind}
-    }
-
-    static StopProcessTarget(target) {
-        driver := this.lifecycleDriver
-
-        foundProcess := false
-        stoppedProcesses := 0
-        loop {
-            try pid := driver.FindProcess(target)
-            catch as err
-                return {found: foundProcess, stopped: false, error: err.Message}
-            if !pid
-                break
-
-            foundProcess := true
-            if (stoppedProcesses >= this.maxMatchingProcesses) {
-                return {
-                    found: true,
-                    stopped: false,
-                    error: "Too many matching processes remained after bounded termination"
-                }
+        if (targetKind = "process") {
+            return {
+                found: false,
+                stopped: false,
+                error: "Bare-name process termination is not supported"
             }
-
-            try stopped := driver.StopProcess(pid)
-            catch as err {
-                ; A process may exit between discovery and termination. Verify the
-                ; postcondition before reporting that race as a restart failure.
-                try alreadyStopped := !driver.ProcessExists(pid)
-                catch
-                    alreadyStopped := false
-                if !alreadyStopped
-                    return {found: true, stopped: false, error: err.Message}
-                stoppedProcesses++
-                continue
-            }
-            if !stopped
-                return {found: true, stopped: false}
-            stoppedProcesses++
         }
-
-        return {found: foundProcess, stopped: true}
+        return {found: false, stopped: false, error: "Unsupported restart target kind: " targetKind}
     }
 
     static CloseWindowTarget(target) {
@@ -342,14 +311,14 @@ class AppControl {
             foundWindow := true
 
             for session in sessions {
-                if (stoppedWindows >= this.maxMatchingProcesses) {
+                if (stoppedWindows >= this.maxMatchingWindows) {
                     return {
                         found: true,
                         stopped: false,
                         error: "Too many matching windows remained after bounded closure"
                     }
                 }
-                try windowStopped := this.lifecycleDriver.CloseWindow(session.hwnd)
+                try windowStopped := this.lifecycleDriver.CloseWindow(session)
                 catch as err
                     return {found: true, stopped: false, error: err.Message}
                 if !windowStopped
@@ -366,8 +335,16 @@ class AppControl {
                 label: "Explorer Portal",
                 kind: "window"
             },
-            {target: "mp.exe", kind: "process"},
-            {target: "NativeBridge.exe", kind: "process"}
+            {
+                target: this.VuePacsWindowSpec(),
+                label: this.vuePacsTitle,
+                kind: "window"
+            },
+            {
+                target: this.VuePacsClientWindowSpec(),
+                label: this.vuePacsClientTitle,
+                kind: "window"
+            }
         ]
     }
 

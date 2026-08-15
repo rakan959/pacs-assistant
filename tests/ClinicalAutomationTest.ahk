@@ -34,16 +34,11 @@ class ClinicalAutomationTest {
         "BlankAttendingSkipsPowerScribeWrite",
         "UnknownExaminationRequiresManualAssignment",
         "FailedAttendingControlIsReported",
-        "RestartTreatsAlreadyExitedProcessAsStopped",
-        "RestartDetectsStubbornProcess",
-        "RestartStopsEveryMatchingProcess",
-        "RestartCapsRespawningProcessTermination",
-        "RestartRecheckUncertaintyFailsClosed",
         "NativeLookupErrorsAreNotAbsence",
-        "RestartLookupUncertaintyCancelsStop",
         "WindowCloseUncertaintyCancelsStop",
+        "WindowCloseCarriesAndRevalidatesCapturedSession",
         "SharedHostWindowStopDoesNotTerminateOwner",
-        "ProcessTargetNeverFallsThroughToSameTitleWindow",
+        "RestartRejectsBareProcessTermination",
         "RestartSpecsNeverHardStopPowerScribe",
         "RestartAbortsWhenPowerScribeSaveIsUnverified",
         "RestartAbortsForUnverifiedPowerScribeProcess",
@@ -489,76 +484,11 @@ class ClinicalAutomationTest {
         )
     }
 
-    RestartTreatsAlreadyExitedProcessAsStopped() {
-        AppControl.lifecycleDriver := FakeAppLifecycleDriver("already-exited")
-
-        result := AppControl.StopTarget("mp.exe", "process")
-
-        Assert.True(result.found)
-        Assert.True(result.stopped)
-    }
-
-    RestartDetectsStubbornProcess() {
-        AppControl.lifecycleDriver := FakeAppLifecycleDriver("stubborn")
-
-        result := AppControl.StopTarget("mp.exe", "process")
-
-        Assert.True(result.found)
-        Assert.False(result.stopped)
-    }
-
-    RestartStopsEveryMatchingProcess() {
-        driver := MultipleProcessLifecycleDriver([101, 202])
-        AppControl.lifecycleDriver := driver
-
-        result := AppControl.StopTarget("mp.exe", "process")
-
-        Assert.True(result.found)
-        Assert.True(result.stopped)
-        Assert.Equal(2, driver.stoppedPids.Length)
-        Assert.Equal(101, driver.stoppedPids[1])
-        Assert.Equal(202, driver.stoppedPids[2])
-    }
-
-    RestartCapsRespawningProcessTermination() {
-        driver := RespawningProcessLifecycleDriver()
-        AppControl.lifecycleDriver := driver
-
-        result := AppControl.StopTarget("mp.exe", "process")
-
-        Assert.True(result.found)
-        Assert.False(result.stopped)
-        Assert.Equal(AppControl.maxMatchingProcesses, driver.stopCalls)
-        Assert.True(InStr(result.error, "Too many") > 0)
-    }
-
-    RestartRecheckUncertaintyFailsClosed() {
-        driver := UncertainRecheckLifecycleDriver()
-        AppControl.lifecycleDriver := driver
-
-        result := AppControl.StopTarget("mp.exe", "process")
-
-        Assert.True(result.found)
-        Assert.False(result.stopped)
-        Assert.Equal(1, driver.stopCalls)
-        Assert.True(InStr(result.error, "recheck failed") > 0)
-    }
-
     NativeLookupErrorsAreNotAbsence() {
         driver := NativeAppLifecycleDriver()
 
         Assert.Throws(() => driver.FindProcess({}))
         Assert.Throws(() => driver.ProcessExists({}))
-    }
-
-    RestartLookupUncertaintyCancelsStop() {
-        AppControl.lifecycleDriver := FakeAppLifecycleDriver("lookup-error")
-
-        result := AppControl.StopTarget("mp.exe", "process")
-
-        Assert.False(result.found)
-        Assert.False(result.stopped)
-        Assert.True(InStr(result.error, "lookup failed") > 0)
     }
 
     WindowCloseUncertaintyCancelsStop() {
@@ -575,6 +505,21 @@ class ClinicalAutomationTest {
         Assert.False(result.stopped)
         Assert.True(InStr(result.error, "close failed") > 0)
         Assert.Equal(0, driver.killCalls)
+    }
+
+    WindowCloseCarriesAndRevalidatesCapturedSession() {
+        driver := RetitledWindowDriver()
+        AppControl.lifecycleDriver := NativeAppLifecycleDriver()
+        AppControl.windowDriver := driver
+
+        result := AppControl.StopTarget(
+            AppControl.ExplorerPortalWindowSpec(),
+            "window"
+        )
+
+        Assert.True(result.found)
+        Assert.False(result.stopped)
+        Assert.True(driver.titleReads >= 2)
     }
 
     SharedHostWindowStopDoesNotTerminateOwner() {
@@ -597,17 +542,18 @@ class ClinicalAutomationTest {
         Assert.Equal(51515, driver.windows[1])
     }
 
-    ProcessTargetNeverFallsThroughToSameTitleWindow() {
+    RestartRejectsBareProcessTermination() {
         driver := SameTitleWindowLifecycleDriver()
         AppControl.lifecycleDriver := driver
 
         result := AppControl.StopTarget("mp.exe", "process")
 
         Assert.False(result.found)
-        Assert.True(result.stopped)
+        Assert.False(result.stopped)
         Assert.Equal(0, driver.windowLookupCalls)
         Assert.Equal(0, driver.killCalls)
         Assert.Equal(0, driver.stopProcessCalls)
+        Assert.True(InStr(result.error, "not supported") > 0)
     }
 
     RestartSpecsNeverHardStopPowerScribe() {
@@ -685,16 +631,12 @@ class ClinicalAutomationTest {
 
         for spec in specs {
             Assert.True(HasProp(spec, "kind"))
-            if (spec.kind = "window") {
-                Assert.True(IsObject(spec.target))
-                Assert.True(HasProp(spec.target, "title"))
-                Assert.True(HasProp(spec.target, "exe"))
-                continue
-            }
-            Assert.Equal("process", spec.kind)
-            Assert.True(RegExMatch(spec.target, "i)^[^\\/:*?`"<>|]+\.exe$") > 0)
-            Assert.NotEqual(AppControl.powerScribeExecutable, spec.target)
+            Assert.Equal("window", spec.kind)
+            Assert.True(IsObject(spec.target))
+            Assert.True(HasProp(spec.target, "title"))
+            Assert.True(HasProp(spec.target, "exe"))
         }
+        Assert.Equal(3, specs.Length)
 
         Assert.Equal(
             "PowerScribe 360 | Reporting ahk_exe " AppControl.powerScribeExecutable,
@@ -1155,73 +1097,6 @@ class FakeAppLifecycleDriver {
     }
 }
 
-class MultipleProcessLifecycleDriver {
-    __New(pids) {
-        this.pids := pids.Clone()
-        this.stoppedPids := []
-    }
-
-    FindProcess(target) {
-        return this.pids.Length ? this.pids[1] : 0
-    }
-
-    StopProcess(pid) {
-        this.stoppedPids.Push(pid)
-        this.pids.RemoveAt(1)
-        return true
-    }
-
-    ProcessExists(pid) {
-        return false
-    }
-
-    FindWindow(target) {
-        return 0
-    }
-}
-
-class RespawningProcessLifecycleDriver {
-    __New() {
-        this.stopCalls := 0
-    }
-
-    FindProcess(target) {
-        return 101
-    }
-
-    StopProcess(pid) {
-        this.stopCalls++
-        return true
-    }
-
-    ProcessExists(pid) {
-        return false
-    }
-}
-
-class UncertainRecheckLifecycleDriver {
-    __New() {
-        this.lookupCalls := 0
-        this.stopCalls := 0
-    }
-
-    FindProcess(target) {
-        this.lookupCalls++
-        if (this.lookupCalls > 1)
-            throw Error("recheck failed")
-        return 101
-    }
-
-    StopProcess(pid) {
-        this.stopCalls++
-        return true
-    }
-
-    ProcessExists(pid) {
-        return false
-    }
-}
-
 class SharedHostWindowLifecycleDriver {
     __New() {
         this.windows := [31337, 41414, 51515]
@@ -1266,6 +1141,8 @@ class SharedHostWindowLifecycleDriver {
 
     CloseWindow(hwnd) {
         this.closeCalls++
+        if IsObject(hwnd)
+            hwnd := hwnd.hwnd
         for index, candidate in this.windows {
             if (candidate = hwnd) {
                 this.windows.RemoveAt(index)
@@ -1284,6 +1161,30 @@ class SharedHostWindowLifecycleDriver {
         this.stopProcessCalls++
         return true
     }
+}
+
+class RetitledWindowDriver {
+    __New() {
+        this.titleReads := 0
+    }
+
+    ListWindowsByExecutable(*) {
+        return [31337]
+    }
+
+    GetTitle(*) {
+        this.titleReads++
+        return this.titleReads = 1 ? "Explorer Portal" : "Unrelated Edge Window"
+    }
+
+    GetProcessName(*) {
+        return "msedge.exe"
+    }
+
+    GetProcessId(*) {
+        return 4242
+    }
+
 }
 
 class SameTitleWindowLifecycleDriver {
