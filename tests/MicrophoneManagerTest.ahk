@@ -10,8 +10,11 @@ class MicrophoneManagerTest {
         "MicrophoneComboMustBeUniqueWithinTheExactWindow",
         "PartialMicrophoneNameMustResolveUniquely",
         "ExactMicrophoneNameWinsOverPartialMatches",
+        "MicrophoneItemMustBelongToTheExactCombo",
         "SelectionUsesOneExactItemWithoutDirectTextWrite",
+        "SelectedItemCannotReplaceTheComboValuePostcondition",
         "AmbiguousPartialSelectionDoesNotMutate",
+        "PickerLookupErrorsReachTheBoundedFailureNotification",
         "FinalSelectionFailureNotifiesOnce",
         "OperationalErrorIsRecorded",
         "PickerReappearanceStartsANewLoginSession"
@@ -30,6 +33,7 @@ class MicrophoneManagerTest {
         MicrophoneManager.failureNotified := false
         MicrophoneManager.lastError := ""
         MicrophoneManager.pickerPresent := false
+        MicrophoneManager.attemptedWindow := 0
     }
 
     WaitForSelectionRequiresTheExactResolvedValue() {
@@ -40,14 +44,12 @@ class MicrophoneManagerTest {
         Assert.True(MicrophoneManager.WaitForSelection(
             fixture.session,
             "PowerMic III",
-            0,
-            fixture.items[1]
+            0
         ))
         Assert.False(MicrophoneManager.WaitForSelection(
             fixture.session,
             "PowerMic",
-            0,
-            fixture.items[1]
+            0
         ))
     }
 
@@ -59,8 +61,7 @@ class MicrophoneManagerTest {
         Assert.True(MicrophoneManager.WaitForSelection(
             fixture.session,
             "powermic iii",
-            0,
-            fixture.items[1]
+            0
         ))
     }
 
@@ -98,7 +99,9 @@ class MicrophoneManagerTest {
         duplicate := FakeMicrophoneCombo(42, 100, MicrophoneManager.comboAutomationId)
         fixture.root.combos.Push(duplicate)
 
-        Assert.Equal(0, MicrophoneManager.FindMicrophoneComboInRoot(fixture.root))
+        result := MicrophoneManager.ResolveMicrophoneComboInRoot(fixture.root)
+        Assert.Equal("ambiguous", result.status)
+        Assert.Equal(0, result.combo)
     }
 
     PartialMicrophoneNameMustResolveUniquely() {
@@ -125,6 +128,24 @@ class MicrophoneManagerTest {
         Assert.True(resolved.item == fixture.items[1])
     }
 
+    MicrophoneItemMustBelongToTheExactCombo() {
+        fixture := MicrophoneFixture([])
+        unrelatedCombo := FakeMicrophoneCombo(42, 100, "unrelatedCombo")
+        unrelatedItem := FakeMicrophoneItem(
+            42,
+            100,
+            "PowerMic III",
+            unrelatedCombo
+        )
+        fixture.root.items := [unrelatedItem]
+
+        Assert.Equal(0, MicrophoneManager.ResolveMicrophoneItem(
+            fixture.root,
+            fixture.combo,
+            "PowerMic"
+        ))
+    }
+
     SelectionUsesOneExactItemWithoutDirectTextWrite() {
         fixture := MicrophoneFixture(["Internal Microphone", "PowerMic III"])
         MicrophoneManager.sessionDriver := fixture.driver
@@ -141,6 +162,22 @@ class MicrophoneManagerTest {
         Assert.Equal(0, fixture.combo.writeCalls)
     }
 
+    SelectedItemCannotReplaceTheComboValuePostcondition() {
+        fixture := MicrophoneFixture(["PowerMic III"])
+        fixture.items[1].updatesComboOnSelect := false
+        MicrophoneManager.sessionDriver := fixture.driver
+
+        succeeded := MicrophoneManager.SelectMicrophone(
+            fixture.session,
+            fixture.combo,
+            "PowerMic"
+        )
+
+        Assert.False(succeeded)
+        Assert.Equal("Internal Microphone", fixture.combo._value)
+        Assert.Equal(1, fixture.items[1].selectCalls)
+    }
+
     AmbiguousPartialSelectionDoesNotMutate() {
         fixture := MicrophoneFixture(["PowerMic III", "PowerMic Mobile"])
         MicrophoneManager.sessionDriver := fixture.driver
@@ -155,6 +192,20 @@ class MicrophoneManagerTest {
         Assert.Equal(0, fixture.items[1].selectCalls)
         Assert.Equal(0, fixture.items[2].selectCalls)
         Assert.Equal(0, fixture.combo.writeCalls)
+    }
+
+    PickerLookupErrorsReachTheBoundedFailureNotification() {
+        fixture := MicrophoneFixture(["PowerMic III"])
+        fixture.driver.rootError := "simulated picker lookup failure"
+        MicrophoneManager.sessionDriver := fixture.driver
+
+        Loop MicrophoneManager.maxAttempts
+            MicrophoneManager.CheckForLogin()
+
+        Assert.Equal(MicrophoneManager.maxAttempts, MicrophoneManager.attempts)
+        Assert.True(MicrophoneManager.failureNotified)
+        Assert.Equal(1, this.notifications.Length)
+        Assert.Equal("simulated picker lookup failure", MicrophoneManager.lastError)
     }
 
     FinalSelectionFailureNotifiesOnce() {
@@ -198,6 +249,7 @@ class MicrophoneManagerTest {
         MicrophoneManager.failureNotified := false
         MicrophoneManager.lastError := ""
         MicrophoneManager.pickerPresent := false
+        MicrophoneManager.attemptedWindow := 0
     }
 }
 
@@ -238,6 +290,11 @@ class FakeMicrophoneSessionDriver {
     __New(session, root) {
         this.session := session
         this._root := root
+        this.rootError := ""
+    }
+
+    CaptureResult() {
+        return {status: "unique", session: this.session}
     }
 
     IsLive(session) {
@@ -247,6 +304,8 @@ class FakeMicrophoneSessionDriver {
     }
 
     Root(session) {
+        if (this.rootError != "")
+            throw Error(this.rootError)
         return this.IsLive(session) ? this._root : 0
     }
 }
@@ -351,6 +410,7 @@ class FakeMicrophoneItem {
         this.IsSelectionItemPatternAvailable := true
         this.selected := false
         this.selectCalls := 0
+        this.updatesComboOnSelect := true
         this.combo := combo
         this.SelectionItemPattern := FakeMicrophoneSelectionPattern(this)
     }
@@ -367,9 +427,12 @@ class FakeMicrophoneSelectionPattern {
         this.item := item
     }
 
+    SelectionContainer => this.item.combo
+
     Select() {
         this.item.selectCalls++
         this.item.selected := true
-        this.item.combo._value := this.item.Name
+        if this.item.updatesComboOnSelect
+            this.item.combo._value := this.item.Name
     }
 }
