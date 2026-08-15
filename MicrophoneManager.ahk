@@ -283,11 +283,6 @@ class MicrophoneManager {
         return {status: "absent", combo: 0, error: ""}
     }
 
-    static IsExpectedMicrophoneCombo(root, candidate) {
-        try return this.InspectMicrophoneCombo(root, candidate)
-        return false
-    }
-
     static InspectMicrophoneCombo(root, candidate) {
         if !root || !candidate
             return false

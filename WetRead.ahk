@@ -625,28 +625,6 @@ AttendingFailureMessage(reportText, routingError := 0) {
 	return "The report was read, but no attending was assigned. Set it manually."
 }
 
-RunWetReadPasteWithAttendingOutcome(
-	pasteAction,
-	attendingRouted,
-	reportText,
-	routingError := 0,
-	notifier := 0
-) {
-	; The sticky workflow contains several legitimate fail-closed early returns. Keep
-	; attending outcome reporting outside that control flow so none of those exits can
-	; suppress the clinically distinct manual-routing warning.
-	try return pasteAction.Call()
-	finally {
-		if !attendingRouted {
-			message := AttendingFailureMessage(reportText, routingError)
-			if notifier
-				notifier.Call(message, "Attending Not Assigned", "Icon!")
-			else
-				MsgBox(message, "Attending Not Assigned", "Icon!")
-		}
-	}
-}
-
 RunPinnedWetReadWorkflow(
 	clipText,
 	pasteMode,

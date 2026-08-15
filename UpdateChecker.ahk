@@ -551,10 +551,6 @@ class WinHttpTextRequest {
         this.BeginClose("cancel", 0)
     }
 
-    Disconnect() {
-        this.Cancel()
-    }
-
     CheckTimeout() {
         if (this.state = "closing" || this.state = "closed")
             return
@@ -781,32 +777,6 @@ class UpdateChecker {
     static LoadSkippedVersion() {
         this.skippedVersion := Settings.Get("SkippedUpdateVersion")
         return this.skippedVersion
-    }
-
-    /**
-     * Commits every preference represented by one update-dialog action as a single
-     * settings transaction. The optional skipped version belongs in that same batch:
-     * the user clicked one button, so a disk failure must preserve all prior values.
-     */
-    static SaveUpdatePreferences(autoUpdate, skipBetaVersions, skippedVersion?, replacer?) {
-        values := Map(
-            "AutoUpdate", autoUpdate ? true : false,
-            "SkipBetaVersions", skipBetaVersions ? true : false
-        )
-        if IsSet(skippedVersion) {
-            if (Type(skippedVersion) != "String" || Trim(skippedVersion) = "")
-                throw ValueError("Skipped update version must be a non-empty string")
-            values["SkippedUpdateVersion"] := skippedVersion
-        }
-
-        if IsSet(replacer)
-            Settings.SaveValues(values, replacer)
-        else
-            Settings.SaveValues(values)
-
-        if IsSet(skippedVersion)
-            this.skippedVersion := skippedVersion
-        return true
     }
 
     static TrySaveUpdatePreferences(expectedRevision, autoUpdate, skipBetaVersions, skippedVersion?) {
@@ -1263,63 +1233,63 @@ class UpdateChecker {
                 return this.updateDialog
             }
             
-        ; Create update dialog with modern styling
-        updateGui := Gui(, "PACS Assistant - Update Available")
-        updateGui.settingsRevision := Settings.revision
-        updateGui.SetFont("s10", "Segoe UI")  ; Modern font
-        
-        ; Header
-        updateGui.Add("Text", "y10 w400", "A new version of PACS Assistant is available!")
-        updateGui.Add("Text", "y+10", "Current version: " updateInfo.currentVersion)
-        updateGui.Add("Text", "y+5", "Latest version: " updateInfo.latestVersion)
-        
-        ; Release notes with better formatting
-        updateGui.Add("Text", "y+15", "What's New:")
-        updateGui.Add("Edit", "y+5 r10 w400 ReadOnly", updateInfo.releaseNotes)
-        
-        ; Auto-update checkbox
-        autoUpdateCheckbox := updateGui.Add("Checkbox", "y+10", "Automatically check for updates on launch")
-        autoUpdateCheckbox.Value := Settings.Get("AutoUpdate")
-        
-        ; Skip beta versions checkbox
-        skipBetaCheckbox := updateGui.Add("Checkbox", "y+5", "Skip beta versions")
-        skipBetaCheckbox.Value := Settings.Get("SkipBetaVersions")
-        
-        ; Persisting the two checkboxes has to happen on every way out of the dialog.
-        ; It used to live only in the Close handler, and Gui.Destroy() does not raise
-        ; Close - so every button discarded the user's choices.
-        saveChoices := (*) => this.TrySaveUpdatePreferences(
-            updateGui.settingsRevision,
-            autoUpdateCheckbox.Value,
-            skipBetaCheckbox.Value
-        )
-        saveSkippedChoices := (*) => this.TrySaveUpdatePreferences(
-            updateGui.settingsRevision,
-            autoUpdateCheckbox.Value,
-            skipBetaCheckbox.Value,
-            updateInfo.latestVersion
-        )
-        dismiss := (*) => (
-            saveChoices(),
-            this.CloseUpdateDialog(updateGui)
-        )
+            ; Create update dialog with modern styling
+            updateGui := Gui(, "PACS Assistant - Update Available")
+            updateGui.settingsRevision := Settings.revision
+            updateGui.SetFont("s10", "Segoe UI")  ; Modern font
 
-        ; Buttons
-        updateGui.Add("GroupBox", "y+15 w400 h50")
-        updateGui.Add("Button", "xp+10 yp+15 w120", "Update Now").OnEvent("Click", (*) => (
-            saveChoices() && this.PerformUpdate(updateInfo, updateGui)
-        ))
-        updateGui.Add("Button", "x+10 w120", "Remind Me Later").OnEvent("Click", (*) => (
-            saveChoices() && (
-                this.lastRemindTime := DllCall("GetTickCount64", "UInt64"),
+            ; Header
+            updateGui.Add("Text", "y10 w400", "A new version of PACS Assistant is available!")
+            updateGui.Add("Text", "y+10", "Current version: " updateInfo.currentVersion)
+            updateGui.Add("Text", "y+5", "Latest version: " updateInfo.latestVersion)
+
+            ; Release notes with better formatting
+            updateGui.Add("Text", "y+15", "What's New:")
+            updateGui.Add("Edit", "y+5 r10 w400 ReadOnly", updateInfo.releaseNotes)
+
+            ; Auto-update checkbox
+            autoUpdateCheckbox := updateGui.Add("Checkbox", "y+10", "Automatically check for updates on launch")
+            autoUpdateCheckbox.Value := Settings.Get("AutoUpdate")
+
+            ; Skip beta versions checkbox
+            skipBetaCheckbox := updateGui.Add("Checkbox", "y+5", "Skip beta versions")
+            skipBetaCheckbox.Value := Settings.Get("SkipBetaVersions")
+
+            ; Persisting the two checkboxes has to happen on every way out of the dialog.
+            ; It used to live only in the Close handler, and Gui.Destroy() does not raise
+            ; Close - so every button discarded the user's choices.
+            saveChoices := (*) => this.TrySaveUpdatePreferences(
+                updateGui.settingsRevision,
+                autoUpdateCheckbox.Value,
+                skipBetaCheckbox.Value
+            )
+            saveSkippedChoices := (*) => this.TrySaveUpdatePreferences(
+                updateGui.settingsRevision,
+                autoUpdateCheckbox.Value,
+                skipBetaCheckbox.Value,
+                updateInfo.latestVersion
+            )
+            dismiss := (*) => (
+                saveChoices(),
                 this.CloseUpdateDialog(updateGui)
             )
-        ))
-        updateGui.Add("Button", "x+10 w120", "Skip This Version").OnEvent("Click", (*) => (
-            saveSkippedChoices() && this.CloseUpdateDialog(updateGui)
-        ))
 
-        updateGui.OnEvent("Close", dismiss)
+            ; Buttons
+            updateGui.Add("GroupBox", "y+15 w400 h50")
+            updateGui.Add("Button", "xp+10 yp+15 w120", "Update Now").OnEvent("Click", (*) => (
+                saveChoices() && this.PerformUpdate(updateInfo, updateGui)
+            ))
+            updateGui.Add("Button", "x+10 w120", "Remind Me Later").OnEvent("Click", (*) => (
+                saveChoices() && (
+                    this.lastRemindTime := DllCall("GetTickCount64", "UInt64"),
+                    this.CloseUpdateDialog(updateGui)
+                )
+            ))
+            updateGui.Add("Button", "x+10 w120", "Skip This Version").OnEvent("Click", (*) => (
+                saveSkippedChoices() && this.CloseUpdateDialog(updateGui)
+            ))
+
+            updateGui.OnEvent("Close", dismiss)
 
             this.updateDialog := updateGui
             updateGui.Show()

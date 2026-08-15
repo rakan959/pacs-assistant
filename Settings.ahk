@@ -301,61 +301,61 @@ class Settings {
         }
         try {
             settingsGui := Gui(, "PACS Assistant - Settings")
-        settingsGui.settingsRevision := this.revision
-        settingsGui.SetFont("s10", "Segoe UI")
-        checkboxes := Map()
-        tab := settingsGui.Add(
-            "Tab3",
-            "x20 y15 w360 h330",
-            ["General", "PowerScribe", "Notifications"]
-        )
+            settingsGui.settingsRevision := this.revision
+            settingsGui.SetFont("s10", "Segoe UI")
+            checkboxes := Map()
+            tab := settingsGui.Add(
+                "Tab3",
+                "x20 y15 w360 h330",
+                ["General", "PowerScribe", "Notifications"]
+            )
 
-        tab.UseTab(1)
-        settingsGui.Add("GroupBox", "x35 y55 w330 h75", "Updates")
-        checkboxes["AutoUpdate"] := settingsGui.Add("Checkbox", "x50 y78", "Automatically check for updates")
-        checkboxes["SkipBetaVersions"] := settingsGui.Add("Checkbox", "x50 y103", "Skip beta versions")
-        settingsGui.Add("GroupBox", "x35 y140 w330 h175", "PACS and wet reads")
-        checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x50 y165", "Auto refresh PACS")
-        settingsGui.Add("Text", "x50 y195", "Refresh interval (seconds):")
-        refreshIntervalEdit := settingsGui.Add("Edit", "x50 y218 w75 Number", this.Get("RefreshInterval"))
-        checkboxes["AutoConvertWetReadLineEndings"] := settingsGui.Add("Checkbox", "x50 y258", "Convert clipboard line endings")
+            tab.UseTab(1)
+            settingsGui.Add("GroupBox", "x35 y55 w330 h75", "Updates")
+            checkboxes["AutoUpdate"] := settingsGui.Add("Checkbox", "x50 y78", "Automatically check for updates")
+            checkboxes["SkipBetaVersions"] := settingsGui.Add("Checkbox", "x50 y103", "Skip beta versions")
+            settingsGui.Add("GroupBox", "x35 y140 w330 h175", "PACS and wet reads")
+            checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x50 y165", "Auto refresh PACS")
+            settingsGui.Add("Text", "x50 y195", "Refresh interval (seconds):")
+            refreshIntervalEdit := settingsGui.Add("Edit", "x50 y218 w75 Number", this.Get("RefreshInterval"))
+            checkboxes["AutoConvertWetReadLineEndings"] := settingsGui.Add("Checkbox", "x50 y258", "Convert clipboard line endings")
 
-        tab.UseTab(2)
-        settingsGui.Add("GroupBox", "x35 y55 w330 h140", "PowerScribe login")
-        checkboxes["SwapMicrophoneOnLogin"] := settingsGui.Add("Checkbox", "x50 y82", "Set microphone on login")
-        settingsGui.Add("Text", "x50 y115", "Microphone (blank = leave unchanged):")
-        micNameEdit := settingsGui.Add("Edit", "x50 y140 w300", this.Get("MicrophoneName"))
+            tab.UseTab(2)
+            settingsGui.Add("GroupBox", "x35 y55 w330 h140", "PowerScribe login")
+            checkboxes["SwapMicrophoneOnLogin"] := settingsGui.Add("Checkbox", "x50 y82", "Set microphone on login")
+            settingsGui.Add("Text", "x50 y115", "Microphone (blank = leave unchanged):")
+            micNameEdit := settingsGui.Add("Edit", "x50 y140 w300", this.Get("MicrophoneName"))
 
-        tab.UseTab(3)
-        settingsGui.Add("GroupBox", "x35 y55 w330 h260", "New-study notifications")
-        checkboxes["AudioAlertNewCase"] := settingsGui.Add("Checkbox", "x50 y80", "Play sound on new case")
-        checkboxes["MessageBoxNewCase"] := settingsGui.Add("Checkbox", "x50 y106", "Show Windows notification on new case")
-        settingsGui.Add("Text", "x50 y140", "Alert sound:")
-        soundDropDown := settingsGui.Add("DropDownList", "x50 y163 w300", this.alertSounds)
-        soundDropDown.Value := this.FindSoundIndex(this.Get("AlertSound"))
-        settingsGui.Add("Text", "x50 y200", "Custom sound file:")
-        customSoundEdit := settingsGui.Add("Edit", "x50 y223 w225 ReadOnly", this.Get("CustomSoundFile"))
-        settingsGui.Add("Button", "x285 y221 w65", "Browse")
-            .OnEvent("Click", (*) => this.BrowseSound(customSoundEdit))
-        settingsGui.Add("Button", "x50 y263 w65", "Test")
-            .OnEvent("Click", (*) => this.TestSound(soundDropDown.Text, customSoundEdit.Text))
+            tab.UseTab(3)
+            settingsGui.Add("GroupBox", "x35 y55 w330 h260", "New-study notifications")
+            checkboxes["AudioAlertNewCase"] := settingsGui.Add("Checkbox", "x50 y80", "Play sound on new case")
+            checkboxes["MessageBoxNewCase"] := settingsGui.Add("Checkbox", "x50 y106", "Show Windows notification on new case")
+            settingsGui.Add("Text", "x50 y140", "Alert sound:")
+            soundDropDown := settingsGui.Add("DropDownList", "x50 y163 w300", this.alertSounds)
+            soundDropDown.Value := this.FindSoundIndex(this.Get("AlertSound"))
+            settingsGui.Add("Text", "x50 y200", "Custom sound file:")
+            customSoundEdit := settingsGui.Add("Edit", "x50 y223 w225 ReadOnly", this.Get("CustomSoundFile"))
+            settingsGui.Add("Button", "x285 y221 w65", "Browse")
+                .OnEvent("Click", (*) => this.BrowseSound(customSoundEdit))
+            settingsGui.Add("Button", "x50 y263 w65", "Test")
+                .OnEvent("Click", (*) => this.TestSound(soundDropDown.Text, customSoundEdit.Text))
 
-        for setting, checkbox in checkboxes {
-            checkbox.Value := this.Get(setting)
-        }
+            for setting, checkbox in checkboxes {
+                checkbox.Value := this.Get(setting)
+            }
 
-        tab.UseTab()
-        controls := {
-            checkboxes: checkboxes,
-            refreshInterval: refreshIntervalEdit,
-            micName: micNameEdit,
-            soundDropDown: soundDropDown,
-            customSound: customSoundEdit
-        }
-        settingsGui.Add("Button", "x110 y365 w80 Default", "Save")
-            .OnEvent("Click", (*) => this.SaveSettings(controls, settingsGui))
-        settingsGui.Add("Button", "x210 y365 w80", "Cancel")
-            .OnEvent("Click", (*) => settingsGui.Destroy())
+            tab.UseTab()
+            controls := {
+                checkboxes: checkboxes,
+                refreshInterval: refreshIntervalEdit,
+                micName: micNameEdit,
+                soundDropDown: soundDropDown,
+                customSound: customSoundEdit
+            }
+            settingsGui.Add("Button", "x110 y365 w80 Default", "Save")
+                .OnEvent("Click", (*) => this.SaveSettings(controls, settingsGui))
+            settingsGui.Add("Button", "x210 y365 w80", "Cancel")
+                .OnEvent("Click", (*) => settingsGui.Destroy())
 
             settingsGui.Show("w" this.dialogLogicalWidth " h" this.dialogLogicalHeight)
             return settingsGui

@@ -80,29 +80,29 @@ class MicrophoneManagerTest {
         fixture := MicrophoneFixture(["PowerMic III"])
         root := fixture.root
 
-        Assert.True(MicrophoneManager.IsExpectedMicrophoneCombo(root, fixture.combo))
-        Assert.False(MicrophoneManager.IsExpectedMicrophoneCombo(
+        Assert.True(MicrophoneManager.InspectMicrophoneCombo(root, fixture.combo))
+        Assert.False(MicrophoneManager.InspectMicrophoneCombo(
             root,
             FakeMicrophoneCombo(99, 100, MicrophoneManager.comboAutomationId)
         ))
-        Assert.False(MicrophoneManager.IsExpectedMicrophoneCombo(
+        Assert.False(MicrophoneManager.InspectMicrophoneCombo(
             root,
             FakeMicrophoneCombo(42, 200, MicrophoneManager.comboAutomationId)
         ))
-        Assert.False(MicrophoneManager.IsExpectedMicrophoneCombo(
+        Assert.False(MicrophoneManager.InspectMicrophoneCombo(
             root,
             FakeMicrophoneCombo(42, 100, "otherCombo")
         ))
-        Assert.False(MicrophoneManager.IsExpectedMicrophoneCombo(
+        Assert.False(MicrophoneManager.InspectMicrophoneCombo(
             root,
             FakeMicrophoneCombo(42, 100, MicrophoneManager.comboAutomationId, false)
         ))
         noExpand := FakeMicrophoneCombo(42, 100, MicrophoneManager.comboAutomationId)
         noExpand.IsExpandCollapsePatternAvailable := false
-        Assert.False(MicrophoneManager.IsExpectedMicrophoneCombo(root, noExpand))
+        Assert.False(MicrophoneManager.InspectMicrophoneCombo(root, noExpand))
         wrongType := FakeMicrophoneCombo(42, 100, MicrophoneManager.comboAutomationId)
         wrongType.Type := UIA.Type.Edit
-        Assert.False(MicrophoneManager.IsExpectedMicrophoneCombo(root, wrongType))
+        Assert.False(MicrophoneManager.InspectMicrophoneCombo(root, wrongType))
     }
 
     MicrophoneComboMustBeUniqueWithinTheExactWindow() {

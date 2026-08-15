@@ -20,7 +20,7 @@ class UpdateCheckerTest {
         "TestSkippedCachedVersionCannotReopen",
         "TestManualCompletionDefersDialogDuringClinicalCommand",
         "TestUpdateDialogRequiresPresentationLease",
-        "TestAsyncRequestDisconnectBreaksCallbackOwnership",
+        "TestAsyncRequestCancelBreaksCallbackOwnership",
         "TestStaleCallbackContextNeverFallsBackToReusedHandle",
         "TestNativeCallbackMasksThirtyTwoBitParameters",
         "TestMetadataResponsesAreStreamBoundedBeforeParsing",
@@ -44,7 +44,6 @@ class UpdateCheckerTest {
         "TestUpdaterUsesPrivateTemporaryScript",
         "TestCleanupDoesNotOwnGenericScript",
         "TestUpdateDialogPreferencesCommitTogether",
-        "TestUpdateDialogPreferenceFailurePreservesEveryValue",
         "TestStaleUpdateDialogCannotOverwriteNewerSettings",
         "TestSkippedVersionPersistsAcrossReload"
     ]
@@ -368,32 +367,17 @@ class UpdateCheckerTest {
     }
 
     TestUpdateDialogPreferencesCommitTogether() {
-        UpdateChecker.SaveUpdatePreferences(false, false, "v2.3.0")
+        Assert.True(UpdateChecker.TrySaveUpdatePreferences(
+            Settings.revision,
+            false,
+            false,
+            "v2.3.0"
+        ))
 
         Assert.False(Settings.Get("AutoUpdate"))
         Assert.False(Settings.Get("SkipBetaVersions"))
         Assert.Equal("v2.3.0", Settings.Get("SkippedUpdateVersion"))
         Assert.Equal("v2.3.0", UpdateChecker.skippedVersion)
-    }
-
-    TestUpdateDialogPreferenceFailurePreservesEveryValue() {
-        before := FileRead(Settings.settingsFile)
-
-        Assert.Throws(
-            () => UpdateChecker.SaveUpdatePreferences(
-                false,
-                false,
-                "v2.3.0",
-                FailUpdatePreferenceReplace
-            ),
-            "simulated update preference replace failure"
-        )
-
-        Assert.Equal(before, FileRead(Settings.settingsFile))
-        Assert.True(Settings.Get("AutoUpdate"))
-        Assert.True(Settings.Get("SkipBetaVersions"))
-        Assert.Equal("", Settings.Get("SkippedUpdateVersion"))
-        Assert.Equal("", UpdateChecker.skippedVersion)
     }
 
     TestStaleUpdateDialogCannotOverwriteNewerSettings() {
@@ -412,7 +396,12 @@ class UpdateCheckerTest {
     }
 
     TestSkippedVersionPersistsAcrossReload() {
-        UpdateChecker.SaveUpdatePreferences(true, true, "v2.2.0")
+        Assert.True(UpdateChecker.TrySaveUpdatePreferences(
+            Settings.revision,
+            true,
+            true,
+            "v2.2.0"
+        ))
         UpdateChecker.skippedVersion := ""
 
         UpdateChecker.LoadSkippedVersion()
@@ -570,7 +559,7 @@ class UpdateCheckerTest {
         Assert.Equal(1, this.manualNotifications.Length)
     }
 
-    TestAsyncRequestDisconnectBreaksCallbackOwnership() {
+    TestAsyncRequestCancelBreaksCallbackOwnership() {
         operation := WinHttpTextRequest(
             "https://api.github.com/test",
             (*) => 0,
@@ -578,7 +567,7 @@ class UpdateCheckerTest {
             UpdateChecker.maxMetadataSizeBytes
         )
 
-        operation.Disconnect()
+        operation.Cancel()
 
         Assert.Equal(0, operation.request)
         Assert.Equal(0, operation.onComplete)
@@ -630,7 +619,7 @@ class UpdateCheckerTest {
             "exceeded its byte limit"
         )
         Assert.Equal(4, operation.totalBytes)
-        operation.Disconnect()
+        operation.Cancel()
     }
 
     TestSettingsChangeCancelsInFlightAutomaticCheck() {
@@ -835,10 +824,6 @@ class CountingDownloadTransport {
     Download(*) {
         this.downloadCalls++
     }
-}
-
-FailUpdatePreferenceReplace(*) {
-    throw Error("simulated update preference replace failure")
 }
 
 UpdateReleaseJson(version, prerelease := false) {

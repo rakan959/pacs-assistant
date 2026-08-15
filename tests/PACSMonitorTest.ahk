@@ -196,12 +196,12 @@ class PACSMonitorTest {
         wrongProcess := FakePACSTargetElement(UIA.Type.Button, 99, "Refresh", "refreshButton", true)
         wrongWindow := FakePACSTargetElement(UIA.Type.Button, 42, "Refresh", "refreshButton", true, 200)
 
-        Assert.True(PACSMonitor.IsExpectedRefreshButton(root, valid))
-        Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongType))
-        Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongMeaning))
-        Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongRefreshMeaning))
-        Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongProcess))
-        Assert.False(PACSMonitor.IsExpectedRefreshButton(root, wrongWindow))
+        Assert.True(PACSMonitor.InspectRefreshButton(root, valid))
+        Assert.False(PACSMonitor.InspectRefreshButton(root, wrongType))
+        Assert.False(PACSMonitor.InspectRefreshButton(root, wrongMeaning))
+        Assert.False(PACSMonitor.InspectRefreshButton(root, wrongRefreshMeaning))
+        Assert.False(PACSMonitor.InspectRefreshButton(root, wrongProcess))
+        Assert.False(PACSMonitor.InspectRefreshButton(root, wrongWindow))
     }
 
     TestRefreshButtonMustBeUniqueWithinThePortal() {

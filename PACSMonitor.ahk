@@ -167,16 +167,6 @@ class PACSMonitor {
         return false
     }
 
-    /**
-     * A positional path is only a locator hint, never proof of target identity.
-     * Require an exact approved AutomationId and an actionable same-window button
-     * before a caller is allowed to click it.
-     */
-    static IsExpectedRefreshButton(root, candidate) {
-        try return this.InspectRefreshButton(root, candidate)
-        return false
-    }
-
     static InspectRefreshButton(root, candidate) {
         if !root || !candidate
             throw Error("Refresh-button identity is unavailable")
