@@ -953,6 +953,7 @@ class KeybindGUI {
         }
 
         modGui := this.NewProfileDialog("PACS Assistant - Modality Attendings")
+        modGui.profileRevision := ProfileManager.GetProfileRevision(modGui.profileName)
         modGui.Add("Text",, "Attending to assign per modality for '" modGui.profileName "'.")
         modGui.Add("Text", "y+5", "Leave a modality blank to keep PowerScribe's default attending.")
 
@@ -971,6 +972,16 @@ class KeybindGUI {
         if !this.DialogProfileIsCurrent(modGui)
             return false
         profileName := modGui.profileName
+        if (!HasProp(modGui, "profileRevision")
+            || modGui.profileRevision != ProfileManager.GetProfileRevision(profileName)) {
+            try modGui.Destroy()
+            MsgBox(
+                "Attending assignments changed while this dialog was open. Reopen it before saving.",
+                "Attending Assignments Changed",
+                "Icon!"
+            )
+            return false
+        }
         candidate := ProfileManager.CloneProfile(ProfileManager.profiles[profileName])
         for modality, edit in edits {
             candidate.modalityAttendings[modality] := Trim(edit.Value)

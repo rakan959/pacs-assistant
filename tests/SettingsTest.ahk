@@ -16,6 +16,7 @@ class SettingsTest {
         "TestFailedBatchPreservesOriginalFile",
         "TestBatchPreservesUnmanagedSettings",
         "TestSavingSettingsNotifiesListeners",
+        "TestStaleSettingsDialogCannotOverwriteNewerSave",
         "TestSavingSettingsReportsListenerFailures",
         "TestChangeListenersAllRun",
         "TestChangeListenerFailureDoesNotBlockLaterListeners"
@@ -24,6 +25,7 @@ class SettingsTest {
     Setup() {
         this.originalFile := Settings.settingsFile
         this.originalListeners := Settings.changeListeners
+        this.originalRevision := Settings.revision
         this.tempFile := A_Temp "\settings_test_" A_TickCount ".ini"
         Settings.settingsFile := this.tempFile
         Settings.changeListeners := []
@@ -197,6 +199,33 @@ class SettingsTest {
         Assert.Equal(45, Settings.Get("RefreshInterval"))
     }
 
+    TestStaleSettingsDialogCannotOverwriteNewerSave() {
+        staleControls := this.SettingsControls(true, 90)
+        newerControls := this.SettingsControls(false, 45)
+        staleDialog := FakeSettingsDialog()
+        newerDialog := FakeSettingsDialog()
+
+        Assert.True(Settings.SaveSettings(newerControls, newerDialog))
+        Assert.False(Settings.SaveSettings(staleControls, staleDialog))
+
+        Assert.False(Settings.Get("AutoUpdate"))
+        Assert.Equal(45, Settings.Get("RefreshInterval"))
+        Assert.True(staleDialog.destroyed)
+    }
+
+    SettingsControls(autoUpdate, interval) {
+        return {
+            checkboxes: Map(
+                "AutoUpdate", {Value: autoUpdate},
+                "SwapMicrophoneOnLogin", {Value: false}
+            ),
+            refreshInterval: {Value: interval},
+            micName: {Value: ""},
+            soundDropDown: {Text: "Ding"},
+            customSound: {Text: ""}
+        }
+    }
+
     TestSavingSettingsReportsListenerFailures() {
         Settings.AddChangeListener(ThrowSettingsListener)
         controls := {
@@ -256,6 +285,7 @@ class SettingsTest {
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalFile
         Settings.changeListeners := this.originalListeners
+        Settings.revision := this.originalRevision
     }
 }
 
@@ -270,6 +300,7 @@ FailSettingsReplace(*) {
 class FakeSettingsDialog {
     __New() {
         this.destroyed := false
+        this.settingsRevision := Settings.revision
     }
 
     Destroy() {

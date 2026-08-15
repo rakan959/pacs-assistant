@@ -3,6 +3,7 @@
 class Settings {
     static settingsFile := A_ScriptDir "\settings.ini"
     static changeListeners := []
+    static revision := 0
     static minRefreshIntervalSeconds := 10
     ; One day is a deliberate product bound as well as protection from AutoHotkey's
     ; DWORD-backed timer period wrapping after seconds are multiplied by 1000.
@@ -153,6 +154,7 @@ class Settings {
     ; observe a partially written settings form.
     static Set(settingName, value) {
         this.WriteSetting(this.settingsFile, settingName, value)
+        this.revision++
     }
 
     static NewTemporarySettingsPath() {
@@ -187,6 +189,7 @@ class Settings {
         } finally {
             try FileDelete(temporaryPath)
         }
+        this.revision++
     }
 
     static AddChangeListener(listener) {
@@ -217,6 +220,7 @@ class Settings {
     static ShowDialog() {
         ; Create GUI with proper margins
         settingsGui := Gui("+AlwaysOnTop +MinSize320", "PACS Assistant - Settings")
+        settingsGui.settingsRevision := this.revision
         settingsGui.SetFont("s10", "Segoe UI")
         
         ; Constants for layout
@@ -410,6 +414,17 @@ class Settings {
     
     ; Save settings from GUI
     static SaveSettings(controls, settingsGui, liveRefreshFailureNotifier?) {
+        if (!HasProp(settingsGui, "settingsRevision")
+            || settingsGui.settingsRevision != this.revision) {
+            try settingsGui.Destroy()
+            MsgBox(
+                "Settings changed while this dialog was open. Reopen it before saving.",
+                "Settings Changed",
+                "Icon!"
+            )
+            return false
+        }
+
         ; Validate refresh interval
         try interval := Integer(controls.refreshInterval.Value)
         catch {

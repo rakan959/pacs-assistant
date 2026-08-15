@@ -10,6 +10,7 @@ class ProfileManager {
     static profilesPath := A_ScriptDir "\profiles"
     static loadErrors := []
     static saveSequence := 0
+    static profileRevisions := Map()
     static missingValue := "{PACS-ASSISTANT-MISSING-INI-VALUE}"
 
     static __New() {
@@ -49,6 +50,7 @@ class ProfileManager {
         ; Always refresh the in-memory profiles from disk
         previousProfile := this.currentProfile
         this.profiles := Map()
+        this.profileRevisions := Map()
         this.loadErrors := []
 
         if DirExist(this.profilesPath) {
@@ -58,6 +60,7 @@ class ProfileManager {
                 profileName := SubStr(A_LoopFileName, 1, -4)
                 try {
                     this.profiles[profileName] := this.LoadProfile(A_LoopFilePath)
+                    this.profileRevisions[profileName] := 0
                 } catch as err {
                     this.loadErrors.Push({path: A_LoopFilePath, message: err.Message})
                 }
@@ -163,7 +166,13 @@ class ProfileManager {
             throw err
         }
 
+        this.profileRevisions[name] := this.GetProfileRevision(name) + 1
+
         return true
+    }
+
+    static GetProfileRevision(name) {
+        return this.profileRevisions.Has(name) ? this.profileRevisions[name] : 0
     }
 
     static WriteProfile(path, profile) {
@@ -391,6 +400,8 @@ class ProfileManager {
         }
 
         this.profiles.Delete(name)
+        if this.profileRevisions.Has(name)
+            this.profileRevisions.Delete(name)
         if wasDefault
             this.defaultProfile := ""
         return true
@@ -430,6 +441,8 @@ class ProfileManager {
                 IniWrite(newName, this.configPath, "Settings", "DefaultProfile")
             } catch {
                 try FileDelete(newPath)
+                if this.profileRevisions.Has(newName)
+                    this.profileRevisions.Delete(newName)
                 return false
             }
         }
@@ -440,11 +453,15 @@ class ProfileManager {
             if defaultChanged
                 try IniWrite(oldName, this.configPath, "Settings", "DefaultProfile")
             try FileDelete(newPath)
+            if this.profileRevisions.Has(newName)
+                this.profileRevisions.Delete(newName)
             return false
         }
 
         this.profiles[newName] := profile
         this.profiles.Delete(oldName)
+        if this.profileRevisions.Has(oldName)
+            this.profileRevisions.Delete(oldName)
         if defaultChanged
             this.defaultProfile := newName
         if (this.currentProfile = oldName)
@@ -475,8 +492,12 @@ class ProfileManager {
         }
 
         profile := this.profiles[oldName]
+        revision := this.GetProfileRevision(oldName)
         this.profiles.Delete(oldName)
         this.profiles[newName] := profile
+        if this.profileRevisions.Has(oldName)
+            this.profileRevisions.Delete(oldName)
+        this.profileRevisions[newName] := revision + 1
         if defaultChanged
             this.defaultProfile := newName
         if (this.currentProfile = oldName)

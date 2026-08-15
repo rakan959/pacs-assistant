@@ -39,10 +39,12 @@ class ProfileManagerTest {
 
         this.originalConfig := ProfileManager.configPath
         this.originalProfiles := ProfileManager.profilesPath
+        this.originalRevisions := ProfileManager.profileRevisions
 
         ProfileManager.configPath := this.tempRoot "\config.ini"
         ProfileManager.profilesPath := this.profilesDir
         ProfileManager.profiles := Map()
+        ProfileManager.profileRevisions := Map()
         ProfileManager.currentProfile := ""
         ProfileManager.defaultProfile := ""
         ProfileManager.loadErrors := []
@@ -411,6 +413,7 @@ class ProfileManagerTest {
         ProfileManager.configPath := this.originalConfig
         ProfileManager.profilesPath := this.originalProfiles
         ProfileManager.profiles := Map()
+        ProfileManager.profileRevisions := this.originalRevisions
         ProfileManager.currentProfile := ""
         ProfileManager.defaultProfile := ""
         ProfileManager.loadErrors := []

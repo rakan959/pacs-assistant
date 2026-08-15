@@ -17,6 +17,7 @@ class KeybindGUITest {
         "TestRejectedScopeChangeRestoresPriorScope",
         "TestFailedModalitySavePreservesLiveProfile",
         "TestStaleModalityDialogCannotWriteAnotherProfile",
+        "TestOlderModalityDialogCannotOverwriteNewerSave",
         "TestStaleRenameDialogCannotRenameAnotherProfile",
         "TestFailedCustomDeletePreservesLiveProfile"
     ]
@@ -288,6 +289,50 @@ class KeybindGUITest {
         Assert.True(capturedDestroyed)
     }
 
+    TestOlderModalityDialogCannotOverwriteNewerSave() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalRevisions := ProfileManager.profileRevisions
+        originalProfilesPath := ProfileManager.profilesPath
+        tempRoot := A_Temp "\pacs_same_profile_stale_" A_TickCount
+        profile := ProfileManager.NewProfile()
+        profile.modalityAttendings["Neuro"] := "Old Attending"
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.profileRevisions := Map()
+            ProfileManager.currentProfile := "Test"
+            ProfileManager.SaveProfile("Test", profile)
+            revision := ProfileManager.GetProfileRevision("Test")
+            staleDialog := FakeProfileDialog("Test", revision)
+            newerDialog := FakeProfileDialog("Test", revision)
+
+            this.gui.SaveModalityAttendings(
+                Map("Neuro", {Value: "New Attending"}),
+                newerDialog
+            )
+            this.gui.SaveModalityAttendings(
+                Map("Neuro", {Value: "Stale Attending"}),
+                staleDialog
+            )
+
+            captured := ProfileManager.profiles["Test"].modalityAttendings["Neuro"]
+            capturedDestroyed := staleDialog.destroyed
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profileRevisions := originalRevisions
+            ProfileManager.profilesPath := originalProfilesPath
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.Equal("New Attending", captured)
+        Assert.True(capturedDestroyed)
+    }
+
     TestStaleRenameDialogCannotRenameAnotherProfile() {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
@@ -419,9 +464,12 @@ class FakeCaptureHook {
 }
 
 class FakeProfileDialog {
-    __New(profileName := "Test") {
+    __New(profileName := "Test", profileRevision?) {
         this.destroyed := false
         this.profileName := profileName
+        this.profileRevision := IsSet(profileRevision)
+            ? profileRevision
+            : ProfileManager.GetProfileRevision(profileName)
     }
 
     Destroy() {
