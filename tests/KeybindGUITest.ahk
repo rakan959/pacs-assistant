@@ -16,6 +16,8 @@ class KeybindGUITest {
         "TestProfileSwitchPreparationStopsActiveCapture",
         "TestProfileSwitchAbortsWhenCaptureCannotStop",
         "TestCaptureStartFailureWarnsWhenRuntimeCannotBeRestored",
+        "TestCancelCaptureWarnsWhenPriorRuntimeCannotBeRestored",
+        "TestModifierRestartFailureWarnsWhenPriorRuntimeCannotBeRestored",
         "TestCaptureFailureRestoresBindingAndHookState",
         "TestStaleKeyCaptureCannotReinsertRemovedFunction",
         "TestRejectedCapturedKeyRestoresPriorBinding",
@@ -41,6 +43,12 @@ class KeybindGUITest {
         ; Build an instance without running the constructor, which would check GitHub
         ; for updates and load profiles
         this.gui := {base: KeybindGUI.Prototype, gui: ""}
+        this.originalCaptureRuntimeProfile := KeybindGUI.captureRuntimeProfile
+        KeybindGUI.captureRuntimeProfile := 0
+    }
+
+    Teardown() {
+        KeybindGUI.captureRuntimeProfile := this.originalCaptureRuntimeProfile
     }
 
     TestSelectedFunctionPrefersBuiltIn() {
@@ -243,6 +251,125 @@ class KeybindGUITest {
         Assert.Equal(1, gui.restoreCalls)
         Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
         Assert.True(InStr(notifications.message, "simulated capture restore failure") > 0)
+    }
+
+    TestCancelCaptureWarnsWhenPriorRuntimeCannotBeRestored() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalFunctions := HotkeyManager.hotkeyFunctions
+        originalActive := HotkeyManager.activeHotkeys
+        originalAdditional := HotkeyManager.additionalActiveHotkeys
+        originalListening := KeybindGUI.isListening
+        originalControl := KeybindGUI.listeningControl
+        originalHook := KeybindGUI.activeInputHook
+        profile := ProfileManager.NewProfile()
+        prompt := FakeProfileDialog("Test")
+        notifications := CapturingNotificationDriver()
+        gui := {
+            base: CaptureCancelRestoreFailingKeybindGUI.Prototype,
+            restoreCalls: 0,
+            notificationDriver: notifications
+        }
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            HotkeyManager.hotkeyFunctions := Map()
+            HotkeyManager.activeHotkeys := Map()
+            HotkeyManager.additionalActiveHotkeys := Map()
+            KeybindGUI.isListening := false
+            KeybindGUI.listeningControl := ""
+            KeybindGUI.activeInputHook := 0
+
+            Assert.True(gui.BeginListening("Sign Report", {}, prompt))
+            result := gui.CancelKeybindPrompt(prompt)
+            capturedListening := KeybindGUI.isListening
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            HotkeyManager.hotkeyFunctions := originalFunctions
+            HotkeyManager.activeHotkeys := originalActive
+            HotkeyManager.additionalActiveHotkeys := originalAdditional
+            KeybindGUI.isListening := originalListening
+            KeybindGUI.listeningControl := originalControl
+            KeybindGUI.activeInputHook := originalHook
+        }
+
+        Assert.False(result)
+        Assert.False(capturedListening)
+        Assert.True(prompt.destroyed)
+        Assert.Equal(1, gui.restoreCalls)
+        Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
+        Assert.True(InStr(notifications.message, "simulated cancel restore failure") > 0)
+    }
+
+    TestModifierRestartFailureWarnsWhenPriorRuntimeCannotBeRestored() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalFunctions := HotkeyManager.hotkeyFunctions
+        originalActive := HotkeyManager.activeHotkeys
+        originalAdditional := HotkeyManager.additionalActiveHotkeys
+        originalListening := KeybindGUI.isListening
+        originalControl := KeybindGUI.listeningControl
+        originalHook := KeybindGUI.activeInputHook
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := ""
+        profile.scopes["Sign Report"] := "Any"
+        listView := FunctionalListView("Sign Report", "Unassigned", "Any window")
+        prompt := FakeProfileDialog("Test")
+        notifications := CapturingNotificationDriver()
+        gui := {
+            base: ModifierRestartRestoreFailingKeybindGUI.Prototype,
+            startCalls: 0,
+            restoreCalls: 0,
+            notificationDriver: notifications
+        }
+        threw := false
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            HotkeyManager.hotkeyFunctions := Map()
+            HotkeyManager.activeHotkeys := Map()
+            HotkeyManager.additionalActiveHotkeys := Map()
+            KeybindGUI.isListening := false
+            KeybindGUI.listeningControl := ""
+            KeybindGUI.activeInputHook := 0
+            Assert.True(gui.CaptureFunctionDialogState(
+                prompt,
+                "Sign Report",
+                listView,
+                1
+            ))
+            Assert.True(gui.BeginListening("Sign Report", listView, prompt))
+
+            try gui.OnInputEnd(
+                "Sign Report",
+                listView,
+                prompt,
+                FakeCaptureHook("LShift")
+            )
+            catch
+                threw := true
+            capturedListening := KeybindGUI.isListening
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            HotkeyManager.hotkeyFunctions := originalFunctions
+            HotkeyManager.activeHotkeys := originalActive
+            HotkeyManager.additionalActiveHotkeys := originalAdditional
+            KeybindGUI.isListening := originalListening
+            KeybindGUI.listeningControl := originalControl
+            KeybindGUI.activeInputHook := originalHook
+        }
+
+        Assert.True(threw)
+        Assert.False(capturedListening)
+        Assert.True(prompt.destroyed)
+        Assert.Equal(2, gui.startCalls)
+        Assert.Equal(1, gui.restoreCalls)
+        Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
+        Assert.True(InStr(notifications.message, "simulated modifier restore failure") > 0)
     }
 
     TestCaptureFailureRestoresBindingAndHookState() {
@@ -1175,6 +1302,31 @@ class CaptureStartRestoreFailingKeybindGUI extends KeybindGUI {
     RestoreRuntimeProfile(profile, &errorText) {
         this.restoreCalls++
         errorText := "simulated capture restore failure"
+        return false
+    }
+}
+
+class CaptureCancelRestoreFailingKeybindGUI extends KeybindGUI {
+    StartInputHook(*) {
+    }
+
+    RestoreRuntimeProfile(profile, &errorText) {
+        this.restoreCalls++
+        errorText := "simulated cancel restore failure"
+        return false
+    }
+}
+
+class ModifierRestartRestoreFailingKeybindGUI extends KeybindGUI {
+    StartInputHook(*) {
+        this.startCalls++
+        if (this.startCalls > 1)
+            throw Error("simulated modifier hook restart failure")
+    }
+
+    RestoreRuntimeProfile(profile, &errorText) {
+        this.restoreCalls++
+        errorText := "simulated modifier restore failure"
         return false
     }
 }

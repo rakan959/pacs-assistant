@@ -11,6 +11,7 @@ class KeybindGUI {
     static isListening := false
     static listeningControl := ""
     static activeInputHook := 0
+    static captureRuntimeProfile := 0
     ; The V option would pass the selected key through to the foreground application.
     ; Capture is intentionally suppressing: the key is configuration data only.
     static inputHookOptions := ""
@@ -104,6 +105,7 @@ class KeybindGUI {
         ; Tear the hook down explicitly before its owner disappears, then suspend the
         ; old profile's runtime bindings while no profile is selected.
         this.StopListening()
+        KeybindGUI.captureRuntimeProfile := 0
         HotkeyManager.DisableAllHotkeys()
     }
 
@@ -231,12 +233,13 @@ class KeybindGUI {
             )
             return false
         }
-        try dialog.Destroy()
-        MsgBox(
+        this.RestoreCapturedRuntimeAndNotify(
+            ProfileManager.profiles[dialog.profileName],
             "The selected function changed while this dialog was open. Reopen it before applying changes.",
             "Function Changed",
-            "Icon!"
+            true
         )
+        try dialog.Destroy()
         return false
     }
 
@@ -430,6 +433,7 @@ class KeybindGUI {
         originalProfile := ProfileManager.CloneProfile(
             ProfileManager.profiles[ProfileManager.currentProfile]
         )
+        KeybindGUI.captureRuntimeProfile := originalProfile
 
         KeybindGUI.isListening := true
         KeybindGUI.listeningControl := control
@@ -454,7 +458,7 @@ class KeybindGUI {
                     "Icon!"
                 )
             } else {
-                this.RestoreRuntimeAndNotify(
+                this.RestoreCapturedRuntimeAndNotify(
                     originalProfile,
                     "Input capture failed to start. No keybind was changed.",
                     "Capture Recovery Failed",
@@ -565,7 +569,7 @@ class KeybindGUI {
                 ; The failed candidate has already been reported. Restore the prior
                 ; runtime set quietly when possible, but surface uncertainty when
                 ; native teardown/re-registration cannot prove that restoration.
-                this.RestoreRuntimeAndNotify(
+                this.RestoreCapturedRuntimeAndNotify(
                     currentProfile,
                     "The new keybind was rejected and the previous profile value was retained.",
                     "Keybind Recovery Failed",
@@ -573,6 +577,7 @@ class KeybindGUI {
                 )
                 return false
             }
+            KeybindGUI.captureRuntimeProfile := 0
             return true
         } catch as err {
             if bindingChanged {
@@ -587,7 +592,7 @@ class KeybindGUI {
             try promptGui.Destroy()
             ; Preserve the original control/apply exception, but never hide an
             ; uncertain live shortcut state behind the restored profile value.
-            try this.RestoreRuntimeAndNotify(
+            try this.RestoreCapturedRuntimeAndNotify(
                 currentProfile,
                 "The keybind change failed and the previous profile value was retained.",
                 "Keybind Recovery Failed",
@@ -634,8 +639,17 @@ class KeybindGUI {
 
     CancelKeybindPrompt(promptGui) {
         this.StopListening()
+        fallbackProfile := ProfileManager.CloneProfile(
+            ProfileManager.profiles[ProfileManager.currentProfile]
+        )
+        restored := this.RestoreCapturedRuntimeAndNotify(
+            fallbackProfile,
+            "Key capture was cancelled. No keybind was changed.",
+            "Capture Recovery Failed",
+            false
+        )
         try promptGui.Destroy()
-        this.ApplyBinds()
+        return restored
     }
 
     SaveCurrentProfile() {
@@ -756,6 +770,19 @@ class KeybindGUI {
         if (notifyOnSuccess || !restored)
             this.NotifyUser(message, title, "Icon!")
         return restored
+    }
+
+    RestoreCapturedRuntimeAndNotify(fallbackProfile, message, title, notifyOnSuccess := true) {
+        originalProfile := IsObject(KeybindGUI.captureRuntimeProfile)
+            ? KeybindGUI.captureRuntimeProfile
+            : fallbackProfile
+        try return this.RestoreRuntimeAndNotify(
+            originalProfile,
+            message,
+            title,
+            notifyOnSuccess
+        )
+        finally KeybindGUI.captureRuntimeProfile := 0
     }
 
     CaptureFunctionRemovalState(listView) {
