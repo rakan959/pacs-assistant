@@ -9,6 +9,10 @@ TestTempPath(prefix, extension := "") {
         . sequence extension
 }
 
+SetTestSetting(settingName, value) {
+    return Settings.SaveValues(Map(settingName, value))
+}
+
 class TestRunner {
     static tests := []
     static successes := 0

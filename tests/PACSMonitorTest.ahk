@@ -171,14 +171,14 @@ class PACSMonitorTest {
     }
 
     TestDisabledAlertsDoNotConsumeFutureStudyNotification() {
-        Settings.Set("AudioAlertNewCase", false)
-        Settings.Set("MessageBoxNewCase", false)
+        SetTestSetting("AudioAlertNewCase", false)
+        SetTestSetting("MessageBoxNewCase", false)
         rows := [{Name: "CT CHEST 12345678"}]
 
         PACSMonitor.ProcessRows(rows)
         unseenWhileDisabled := !PACSMonitor.HasAccession("12345678")
 
-        Settings.Set("MessageBoxNewCase", true)
+        SetTestSetting("MessageBoxNewCase", true)
         PACSMonitor.ProcessRows(rows)
 
         Assert.True(unseenWhileDisabled)
@@ -375,7 +375,7 @@ class PACSMonitorTest {
         try {
             PACSMonitor.driver := driver
             PACSMonitor.knownAccessions := Map()
-            Settings.Set("MessageBoxNewCase", true)
+            SetTestSetting("MessageBoxNewCase", true)
             PACSMonitor.RefreshAndCheck()
             marked := PACSMonitor.HasAccession("12345678")
         } finally {
@@ -462,8 +462,8 @@ class PACSMonitorTest {
     }
 
     TestMonitoringUsesInjectedTimer() {
-        Settings.Set("AutoRefreshPACS", true)
-        Settings.Set("RefreshInterval", 10)
+        SetTestSetting("AutoRefreshPACS", true)
+        SetTestSetting("RefreshInterval", 10)
         timerDriver := PACSMonitor.timerDriver
         portalDriver := PACSMonitor.driver
 
@@ -479,9 +479,9 @@ class PACSMonitorTest {
     }
     
     TestOnSettingsChangedRespectsAutoRefresh() {
-        Settings.Set("AutoRefreshPACS", true)
+        SetTestSetting("AutoRefreshPACS", true)
         PACSMonitor.StartMonitoring()
-        Settings.Set("AutoRefreshPACS", false)
+        SetTestSetting("AutoRefreshPACS", false)
         PACSMonitor.OnSettingsChanged()
         Assert.Equal(0, PACSMonitor.refreshTimer)
     }
@@ -511,8 +511,8 @@ class PACSMonitorTest {
     }
 
     TestNewStudyNotificationUsesTextThenTitle() {
-        Settings.Set("MessageBoxNewCase", true)
-        Settings.Set("AudioAlertNewCase", false)
+        SetTestSetting("MessageBoxNewCase", true)
+        SetTestSetting("AudioAlertNewCase", false)
 
         PACSMonitor.AlertNewCases([{studyType: "CT HEAD", accession: "12345678"}])
 
@@ -522,8 +522,8 @@ class PACSMonitorTest {
     }
 
     TestFailedAlertDoesNotConsumeAccession() {
-        Settings.Set("MessageBoxNewCase", true)
-        Settings.Set("AudioAlertNewCase", false)
+        SetTestSetting("MessageBoxNewCase", true)
+        SetTestSetting("AudioAlertNewCase", false)
         PACSMonitor.notifier := FailPACSNotification
 
         Assert.Throws(

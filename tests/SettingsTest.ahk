@@ -5,7 +5,7 @@
 class SettingsTest {
     static Tests := [
         "TestDefaultSettingsLoaded",
-        "TestSetAndGetValues",
+        "TestSaveAndGetValues",
         "TestMutationGuardRejectsSettingsWrite",
         "TestDialogGuardRejectsSettingsWindowBeforeCreation",
         "TestPresentationLeaseRejectsSettingsWindowBeforeCreation",
@@ -73,20 +73,20 @@ class SettingsTest {
         Assert.Equal("", Settings.Get("MicrophoneName"))
     }
     
-    TestSetAndGetValues() {
-        Settings.Set("RefreshInterval", 45)
+    TestSaveAndGetValues() {
+        SetTestSetting("RefreshInterval", 45)
         Assert.Equal(45, Settings.Get("RefreshInterval"))
         
-        Settings.Set("AutoUpdate", false)
+        SetTestSetting("AutoUpdate", false)
         Assert.False(Settings.Get("AutoUpdate"))
 
-        Settings.Set("AutoConvertWetReadLineEndings", false)
+        SetTestSetting("AutoConvertWetReadLineEndings", false)
         Assert.False(Settings.Get("AutoConvertWetReadLineEndings"))
 
-        Settings.Set("RestrictHotkeysByActiveWindow", false)
+        SetTestSetting("RestrictHotkeysByActiveWindow", false)
         Assert.False(Settings.Get("RestrictHotkeysByActiveWindow"))
         
-        Settings.Set("AlertSound", "Asterisk")
+        SetTestSetting("AlertSound", "Asterisk")
         Assert.Equal("Asterisk", Settings.Get("AlertSound"))
     }
 
@@ -94,7 +94,7 @@ class SettingsTest {
         Settings.mutationGuard := (*) => false
 
         Assert.Throws(
-            (*) => Settings.Set("AutoUpdate", false),
+            (*) => SetTestSetting("AutoUpdate", false),
             "Settings cannot be changed"
         )
         Assert.True(Settings.Get("AutoUpdate"))
@@ -225,7 +225,7 @@ class SettingsTest {
     }
 
     TestFailedBatchPreservesOriginalFile() {
-        Settings.Set("AutoUpdate", true)
+        SetTestSetting("AutoUpdate", true)
         IniWrite("keep me", Settings.settingsFile, "Extension", "UnknownKey")
         before := FileRead(Settings.settingsFile)
         values := Map("AutoUpdate", false, "RefreshInterval", 45)
@@ -258,7 +258,7 @@ class SettingsTest {
     }
 
     TestBatchPreservesUnmanagedSettings() {
-        Settings.Set("SkippedUpdateVersion", "v9.9.9")
+        SetTestSetting("SkippedUpdateVersion", "v9.9.9")
         IniWrite("keep me", Settings.settingsFile, "Extension", "UnknownKey")
 
         Settings.SaveValues(Map("AutoUpdate", false, "RefreshInterval", 45))
@@ -310,7 +310,7 @@ class SettingsTest {
         controls := this.SettingsControls(true, 90)
         controls.micName := ReentrantSettingsValueControl(
             "PowerMic",
-            (*) => Settings.Set("SkippedUpdateVersion", "v9.9.9")
+            (*) => SetTestSetting("SkippedUpdateVersion", "v9.9.9")
         )
         dialog := FakeSettingsDialog()
 
@@ -428,7 +428,7 @@ FailSettingsReplace(*) {
 }
 
 ReentrantSettingsReplace(*) {
-    Settings.Set("SkippedUpdateVersion", "v9.9.9")
+    SetTestSetting("SkippedUpdateVersion", "v9.9.9")
 }
 
 class FakeSettingsPresentationLease {

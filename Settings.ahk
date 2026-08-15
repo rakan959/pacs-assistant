@@ -187,16 +187,6 @@ class Settings {
             IniWrite(value, path, "Settings", settingName)
     }
 
-    ; Save one setting value. Multi-value GUI changes use SaveValues so callers never
-    ; observe a partially written settings form.
-    static Set(settingName, value) {
-        this.BeginWriteTransaction()
-        try {
-            this.WriteSetting(this.settingsFile, settingName, value)
-            this.revision++
-        } finally this.EndWriteTransaction()
-    }
-
     static NewTemporarySettingsPath() {
         stem := this.settingsFile ".tmp-" DllCall("GetCurrentProcessId") "-"
             . DllCall("GetTickCount64", "UInt64")

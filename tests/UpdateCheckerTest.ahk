@@ -382,7 +382,7 @@ class UpdateCheckerTest {
 
     TestStaleUpdateDialogCannotOverwriteNewerSettings() {
         capturedRevision := Settings.revision
-        Settings.Set("AutoUpdate", false)
+        SetTestSetting("AutoUpdate", false)
 
         result := UpdateChecker.TrySaveUpdatePreferences(
             capturedRevision,
@@ -411,17 +411,17 @@ class UpdateCheckerTest {
     }
     
     TestAutoCheckTimerRespectsSettings() {
-        Settings.Set("AutoUpdate", true)
+        SetTestSetting("AutoUpdate", true)
         UpdateChecker.StartAutoCheck()
         Assert.True(UpdateChecker.updateTimer != 0)
         
-        Settings.Set("AutoUpdate", false)
+        SetTestSetting("AutoUpdate", false)
         UpdateChecker.StartAutoCheck()
         Assert.Equal(0, UpdateChecker.updateTimer)
     }
     
     TestSettingsChangeRestartsTimer() {
-        Settings.Set("AutoUpdate", true)
+        SetTestSetting("AutoUpdate", true)
         UpdateChecker.StartAutoCheck()
         UpdateChecker.OnSettingsChanged()
         Assert.True(UpdateChecker.updateTimer != 0)
@@ -430,7 +430,7 @@ class UpdateCheckerTest {
     TestAutomaticCheckUsesAsyncTransport() {
         transport := FakeAsyncUpdateTransport()
         UpdateChecker.transport := transport
-        Settings.Set("SkipBetaVersions", true)
+        SetTestSetting("SkipBetaVersions", true)
 
         Assert.True(UpdateChecker.BeginAutoCheck(true))
         Assert.Equal(1, transport.asyncCalls)
@@ -457,7 +457,7 @@ class UpdateCheckerTest {
     TestAutomaticCheckNeverOpensAnActivatingDialog() {
         transport := FakeAsyncUpdateTransport()
         UpdateChecker.transport := transport
-        Settings.Set("SkipBetaVersions", true)
+        SetTestSetting("SkipBetaVersions", true)
         Assert.True(UpdateChecker.BeginAutoCheck(true))
         slot := UpdateChecker.activeRequest
 
@@ -474,7 +474,7 @@ class UpdateCheckerTest {
     TestManualCheckIsAsyncAndReportsNoUpdate() {
         transport := FakeAsyncUpdateTransport()
         UpdateChecker.transport := transport
-        Settings.Set("SkipBetaVersions", true)
+        SetTestSetting("SkipBetaVersions", true)
 
         Assert.True(UpdateChecker.ShowUpdateDialog())
         Assert.Equal(1, transport.asyncCalls)
@@ -489,7 +489,7 @@ class UpdateCheckerTest {
     TestSettingsChangeDoesNotSilentlyCancelManualCheck() {
         transport := FakeAsyncUpdateTransport()
         UpdateChecker.transport := transport
-        Settings.Set("AutoUpdate", true)
+        SetTestSetting("AutoUpdate", true)
         Assert.True(UpdateChecker.BeginManualCheck())
         slot := UpdateChecker.activeRequest
 
@@ -502,14 +502,14 @@ class UpdateCheckerTest {
     }
 
     TestCachedPrereleaseIsInvalidatedWhenBetaSkippingEnabled() {
-        Settings.Set("SkipBetaVersions", false)
+        SetTestSetting("SkipBetaVersions", false)
         UpdateChecker.pendingUpdateInfo := {
             hasUpdate: true,
             latestVersion: "v9.0.0-beta.1",
             isPrerelease: true
         }
 
-        Settings.Set("SkipBetaVersions", true)
+        SetTestSetting("SkipBetaVersions", true)
         UpdateChecker.OnSettingsChanged()
 
         Assert.Equal(0, UpdateChecker.pendingUpdateInfo)
@@ -522,7 +522,7 @@ class UpdateCheckerTest {
             isPrerelease: false
         }
 
-        Settings.Set("SkippedUpdateVersion", "v9.0.0")
+        SetTestSetting("SkippedUpdateVersion", "v9.0.0")
         UpdateChecker.OnSettingsChanged()
 
         Assert.Equal(0, UpdateChecker.pendingUpdateInfo)
@@ -625,10 +625,10 @@ class UpdateCheckerTest {
     TestSettingsChangeCancelsInFlightAutomaticCheck() {
         transport := FakeAsyncUpdateTransport()
         UpdateChecker.transport := transport
-        Settings.Set("AutoUpdate", true)
+        SetTestSetting("AutoUpdate", true)
         Assert.True(UpdateChecker.BeginAutoCheck(true))
 
-        Settings.Set("AutoUpdate", false)
+        SetTestSetting("AutoUpdate", false)
         UpdateChecker.OnSettingsChanged()
 
         Assert.True(transport.handle.cancelled)
