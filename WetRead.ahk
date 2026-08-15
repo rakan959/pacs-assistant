@@ -187,6 +187,10 @@ class StickyNoteOpener {
                     && element.WinId = root.WinId) {
                     candidates.Push(element)
                 }
+            } catch {
+                ; If an exact-name candidate cannot be inspected, uniqueness is
+                ; unknown. Do not silently discard it and click another candidate.
+                return 0
             }
         }
         return candidates.Length = 1 ? candidates[1] : 0

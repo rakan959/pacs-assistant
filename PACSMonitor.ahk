@@ -128,28 +128,31 @@ class PACSMonitor {
     }
 
     /**
-     * Locates the portal's refresh button.
-     * Every semantic match is enumerated and deduplicated. Ambiguity is a failure:
-     * clicking the first of multiple refresh-labelled controls can refresh an
-     * unrelated portal panel while the worklist remains stale.
-     * @returns the button element, or 0 if it cannot be found
+     * Resolves the portal's refresh button with explicit absence, ambiguity, and
+     * provider-error states. All buttons are enumerated in one query so a failed
+     * secondary lookup cannot make an incomplete result appear unique.
      */
-    static FindRefreshButton(root) {
+    static ResolveRefreshButton(root) {
         matches := []
-        conditions := [
-            {Type: "Button", Name: "Refresh", mm: "SubString", cs: false},
-            {Type: "Button", AutomationId: "refresh", mm: "SubString", cs: false}
-        ]
-        for condition in conditions {
-            try {
-                for candidate in root.FindElements(condition) {
-                    if (this.IsExpectedRefreshButton(root, candidate)
-                        && !this.ContainsSameElement(matches, candidate))
-                        matches.Push(candidate)
-                }
+        try {
+            elements := root.FindElements({Type: "Button"})
+            if !IsObject(elements)
+                throw Error("Refresh-button enumeration returned no collection")
+
+            for candidate in elements {
+                if (this.InspectRefreshButton(root, candidate)
+                    && !this.ContainsSameElement(matches, candidate))
+                    matches.Push(candidate)
             }
+        } catch as err {
+            return {status: "error", button: 0, error: err.Message}
         }
-        return matches.Length = 1 ? matches[1] : 0
+
+        if (matches.Length = 0)
+            return {status: "absent", button: 0, error: ""}
+        if (matches.Length > 1)
+            return {status: "ambiguous", button: 0, error: ""}
+        return {status: "found", button: matches[1], error: ""}
     }
 
     static ContainsSameElement(elements, candidate) {
@@ -170,20 +173,37 @@ class PACSMonitor {
      * caller is allowed to click it.
      */
     static IsExpectedRefreshButton(root, candidate) {
-        if !this.IsSameWindowContext(root, candidate)
+        try return this.InspectRefreshButton(root, candidate)
+        return false
+    }
+
+    static InspectRefreshButton(root, candidate) {
+        if !root || !candidate
+            throw Error("Refresh-button identity is unavailable")
+
+        rootProcess := root.ProcessId
+        rootWindow := root.WinId
+        if (rootProcess <= 0 || rootWindow <= 0)
+            throw Error("Portal root identity is unavailable")
+        if (candidate.ProcessId != rootProcess || candidate.WinId != rootWindow)
+            return false
+        if (candidate.Type != UIA.Type.Button)
             return false
 
-        try {
-            if (candidate.Type != UIA.Type.Button)
-                return false
-            label := candidate.Name " " candidate.AutomationId
-            if !InStr(StrLower(label), "refresh")
-                return false
-            return candidate.IsInvokePatternAvailable
-                || candidate.IsLegacyIAccessiblePatternAvailable
-        } catch {
+        label := candidate.Name " " candidate.AutomationId
+        if !InStr(StrLower(label), "refresh")
             return false
-        }
+        return candidate.IsInvokePatternAvailable
+            || candidate.IsLegacyIAccessiblePatternAvailable
+    }
+
+    static SameElement(first, second) {
+        if !first || !second
+            return false
+        if (ObjPtr(first) = ObjPtr(second))
+            return true
+        try return UIA.CompareElementsEx(first, second)
+        return false
     }
 
     /**
@@ -255,18 +275,20 @@ class PACSMonitor {
             return false
         }
 
-        button := this.FindRefreshButton(root)
-        if !button
+        initial := this.ResolveRefreshButton(root)
+        if (initial.status != "found")
             return false
 
         ; Click() with no arguments uses only UIA semantic patterns; it does not move
         ; focus or the mouse. A coordinate/control fallback is deliberately omitted
         ; so the background timer cannot steal focus from the user's current app.
         try {
-            if (!this.driver.SessionIsLive(session)
-                || !this.IsExpectedRefreshButton(root, button))
+            current := this.ResolveRefreshButton(root)
+            if (current.status != "found"
+                || !this.SameElement(initial.button, current.button)
+                || !this.driver.SessionIsLive(session))
                 return false
-            return !!button.Click()
+            return !!current.button.Click()
         }
         return false
     }
@@ -414,7 +436,7 @@ class PACSMonitor {
             ; Find any accession numbers
             accessions := []
             pos := 1
-            while (pos := RegExMatch(rowText, "\d{8}", &accMatch, pos)) {
+            while (pos := RegExMatch(rowText, "(?<!\d)\d{8}(?!\d)", &accMatch, pos)) {
                 accessions.Push(accMatch[0])
                 pos += StrLen(accMatch[0])
             }

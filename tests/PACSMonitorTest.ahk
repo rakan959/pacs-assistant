@@ -8,11 +8,14 @@ class PACSMonitorTest {
         "TestHasAccession",
         "TestProcessRowsFindsNewStudies",
         "TestProcessRowsPreservesLongModalityPrefix",
+        "TestProcessRowsRequiresAnExactEightDigitAccession",
         "TestRepeatedAccessionAlertsOnce",
         "TestInterruptedScanDoesNotConsumeUnalertedAccessions",
         "TestMonitoringUsesTestMode",
         "TestRefreshButtonRequiresSemanticIdentity",
         "TestRefreshButtonMustBeUniqueWithinThePortal",
+        "TestRefreshButtonEnumerationErrorFailsClosed",
+        "TestDuplicateRefreshAppearingBeforeClickDoesNotInvoke",
         "TestRefreshAndScanUseOneCapturedPortalSession",
         "TestAmbiguousPortalWindowsAreReportedAsScanFailure",
         "TestStudyListFallbackRequiresExpectedTypeAndProcess",
@@ -79,6 +82,18 @@ class PACSMonitorTest {
         Assert.Equal("MRI BRAIN WITHOUT CONTRAST", PACSMonitor.testLastNewStudies[1].studyType)
         Assert.Equal("CTA HEAD AND NECK", PACSMonitor.testLastNewStudies[2].studyType)
     }
+
+    TestProcessRowsRequiresAnExactEightDigitAccession() {
+        PACSMonitor.ProcessRows([
+            {Name: "CT HEAD 1234567"},
+            {Name: "CT HEAD 123456789"},
+            {Name: "CT HEAD 87654321"}
+        ], true)
+
+        Assert.Equal(1, PACSMonitor.testLastNewStudies.Length)
+        Assert.Equal("87654321", PACSMonitor.testLastNewStudies[1].accession)
+        Assert.False(PACSMonitor.HasAccession("12345678"))
+    }
     
     ; An accession can appear in more than one row of a single refresh. It must be
     ; reported once, not once per row.
@@ -121,7 +136,49 @@ class PACSMonitorTest {
         second := FakePACSTargetElement(UIA.Type.Button, 42, "Refresh panel", "refreshSecondary", true)
         root := FakePACSRefreshRoot(42, 100, [first, second])
 
-        Assert.Equal(0, PACSMonitor.FindRefreshButton(root))
+        result := PACSMonitor.ResolveRefreshButton(root)
+        Assert.Equal("ambiguous", result.status)
+        Assert.Equal(0, result.button)
+    }
+
+    TestRefreshButtonEnumerationErrorFailsClosed() {
+        result := PACSMonitor.ResolveRefreshButton(
+            ThrowingPACSRefreshRoot(42, 100)
+        )
+
+        Assert.Equal("error", result.status)
+        Assert.Equal(0, result.button)
+    }
+
+    TestDuplicateRefreshAppearingBeforeClickDoesNotInvoke() {
+        originalDriver := PACSMonitor.driver
+        session := {
+            hwnd: 100,
+            target: "ahk_id 100",
+            processId: 42,
+            title: "Explorer Portal",
+            exe: "msedge.exe"
+        }
+        saved := FakePACSActionButton(42, 100, "Refresh", "refreshPrimary")
+        duplicate := FakePACSActionButton(42, 100, "Refresh panel", "refreshSecondary")
+        root := ChangingPACSRefreshRoot(
+            42,
+            100,
+            [saved],
+            [saved, duplicate]
+        )
+
+        try {
+            PACSMonitor.driver := FixedPortalSessionDriver(session)
+            result := PACSMonitor.ClickRefresh(root, session)
+        } finally {
+            PACSMonitor.driver := originalDriver
+        }
+
+        Assert.False(result)
+        Assert.Equal(2, root.findCalls)
+        Assert.Equal(0, saved.clickCalls)
+        Assert.Equal(0, duplicate.clickCalls)
     }
 
     TestRefreshAndScanUseOneCapturedPortalSession() {
@@ -357,6 +414,32 @@ class FakePACSRefreshRoot extends FakePACSTargetElement {
     }
 }
 
+class ThrowingPACSRefreshRoot extends FakePACSTargetElement {
+    __New(processId, windowId) {
+        super.__New(UIA.Type.Window, processId, "", "", false, windowId)
+    }
+
+    FindElements(*) {
+        throw Error("simulated UIA enumeration failure")
+    }
+}
+
+class ChangingPACSRefreshRoot extends FakePACSTargetElement {
+    __New(processId, windowId, firstCandidates, laterCandidates) {
+        super.__New(UIA.Type.Window, processId, "", "", false, windowId)
+        this.firstCandidates := firstCandidates
+        this.laterCandidates := laterCandidates
+        this.findCalls := 0
+    }
+
+    FindElements(*) {
+        this.findCalls++
+        return this.findCalls = 1
+            ? this.firstCandidates.Clone()
+            : this.laterCandidates.Clone()
+    }
+}
+
 class FakePACSActionButton extends FakePACSTargetElement {
     __New(processId, windowId, name, automationId) {
         super.__New(UIA.Type.Button, processId, name, automationId, true, windowId)
@@ -429,6 +512,17 @@ class PinnedPortalMonitorDriver {
     }
 
     WaitForRefresh() {
+    }
+}
+
+class FixedPortalSessionDriver {
+    __New(session) {
+        this.session := session
+    }
+
+    SessionIsLive(session) {
+        return session.hwnd = this.session.hwnd
+            && session.processId = this.session.processId
     }
 }
 

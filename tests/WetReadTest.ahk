@@ -22,6 +22,7 @@ class WetReadTest {
         "StickyRootMustBelongToPacsProcess",
         "StickyOpenerRejectsSameProcessWrongWindowButton",
         "StickyOpenerRejectsAmbiguousSameWindowButtons",
+        "StickyOpenerRejectsUnreadableCandidateAlongsideValidButton",
         "StickyOpenerRejectsTitleChangeBeforeInvoke",
         "StickyOpenerRejectsDuplicateAppearingBeforeInvoke",
         "StickyOpenerRejectsUnactivatedStickyWindow",
@@ -271,6 +272,22 @@ class WetReadTest {
         first := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
         second := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
         pacsRoot := FakeStickyTargetRoot(42, [first, second], 100)
+        driver := FakeStickyNoteWindowDriver(pacsRoot)
+
+        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
+        Assert.Equal(0, driver.invokeCalls)
+    }
+
+    StickyOpenerRejectsUnreadableCandidateAlongsideValidButton() {
+        valid := FakeStickyTargetElement(
+            UIA.Type.Button,
+            42,
+            false,
+            100,
+            "scn_sticky_notes"
+        )
+        unreadable := UnreadableStickyTargetElement(42, 100)
+        pacsRoot := FakeStickyTargetRoot(42, [valid, unreadable], 100)
         driver := FakeStickyNoteWindowDriver(pacsRoot)
 
         Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
@@ -718,6 +735,21 @@ class FakeStickyTargetElement {
         this.IsValuePatternAvailable := readable
         this.IsLegacyIAccessiblePatternAvailable := false
         this.NativeWindowHandle := 0
+    }
+}
+
+class UnreadableStickyTargetElement {
+    __New(processId, windowId) {
+        this.ProcessId := processId
+        this.WinId := windowId
+        this.Name := "scn_sticky_notes"
+        this.IsEnabled := true
+    }
+
+    Type {
+        get {
+            throw Error("simulated unreadable UIA property")
+        }
     }
 }
 
