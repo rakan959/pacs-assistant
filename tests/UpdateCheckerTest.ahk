@@ -13,6 +13,7 @@ class UpdateCheckerTest {
         "TestSettingsChangeRestartsTimer",
         "TestVersionComesFromAppVersion",
         "TestJsonParserHandlesEscapesAndUnicode",
+        "TestJsonParserRejectsUppercaseTokensAndEscapes",
         "TestReleaseParserKeepsAssetMetadataTogether",
         "TestReleaseParserAcceptsArrayResponse",
         "TestDownloadUrlMustBelongToThisRepository",
@@ -138,6 +139,11 @@ class UpdateCheckerTest {
     TestJsonParserHandlesEscapesAndUnicode() {
         parsed := JsonParser.Parse('{"text":"line 1\nquote: \"ok\"; slash: \\n; smile: \u263A; emoji: \uD83D\uDE00"}')
         Assert.Equal("line 1`nquote: `"ok`"; slash: \n; smile: " Chr(0x263A) "; emoji: " Chr(0x1F600), parsed["text"])
+    }
+
+    TestJsonParserRejectsUppercaseTokensAndEscapes() {
+        for invalid in ["TRUE", "False", "NULL", '"\N"', '"\U263A"']
+            Assert.Throws(() => JsonParser.Parse(invalid), "", "Invalid JSON was accepted: " invalid)
     }
 
     TestReleaseParserKeepsAssetMetadataTogether() {
