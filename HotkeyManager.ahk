@@ -21,8 +21,8 @@ class HotkeyManager {
     ; and leave the previous one registered and unreachable.
     static scopePredicates := Map(
         "PACS", (*) => WinActive("ahk_exe mp.exe"),
-        "PowerScribe", (*) => WinActive("PowerScribe"),
-        "PACS or PowerScribe", (*) => WinActive("ahk_exe mp.exe") || WinActive("PowerScribe")
+        "PowerScribe", (*) => HotkeyManager.PowerScribeIsActive(),
+        "PACS or PowerScribe", (*) => WinActive("ahk_exe mp.exe") || HotkeyManager.PowerScribeIsActive()
     )
 
     static __New() {
@@ -39,6 +39,13 @@ class HotkeyManager {
     ; Build a scope name from the two "only when ... is active" checkboxes
     static ScopeFromFlags(requirePACS, requirePowerScribe) {
         return HotkeyContract.ScopeFromFlags(requirePACS, requirePowerScribe)
+    }
+
+    static PowerScribeIsActive(activeWindowMatcher := 0) {
+        selector := AppControl.PowerScribeProcessTarget()
+        return activeWindowMatcher
+            ? activeWindowMatcher.Call(selector)
+            : WinActive(selector)
     }
 
     ; Inverse of ScopeFromFlags

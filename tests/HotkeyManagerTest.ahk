@@ -16,6 +16,7 @@ class HotkeyManagerTest {
         "TestScopeFromFlagsMatrix",
         "TestHotkeyIdentityMatchesAutoHotkeySemantics",
         "TestScopePredicatesAreStable",
+        "TestPowerScribeScopeUsesExecutableSelector",
         "TestDuplicateHotkeyIsRejectedWithoutReplacingOwner",
         "TestEquivalentModifierOrderIsRejected",
         "TestMissingCallbackReassignmentPreservesExistingRegistration",
@@ -139,6 +140,18 @@ class HotkeyManagerTest {
             Assert.True(HotkeyManager.scopePredicates[scope] == HotkeyManager.scopePredicates[scope],
                 "Predicate for '" scope "' is not a stable object")
         }
+    }
+
+    TestPowerScribeScopeUsesExecutableSelector() {
+        selectors := []
+
+        active := HotkeyManager.PowerScribeIsActive(
+            (selector) => (selectors.Push(selector), true)
+        )
+
+        Assert.True(active)
+        Assert.Equal(1, selectors.Length)
+        Assert.Equal("ahk_exe " AppControl.powerScribeExecutable, selectors[1])
     }
 
     TestDuplicateHotkeyIsRejectedWithoutReplacingOwner() {

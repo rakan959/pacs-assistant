@@ -251,7 +251,11 @@ class AppControl {
     }
 
     static PacsGracefulCloseTarget() {
-        return this.powerScribeReportingTitle " ahk_exe " this.powerScribeExecutable
+        return this.powerScribeReportingTitle " " this.PowerScribeProcessTarget()
+    }
+
+    static PowerScribeProcessTarget() {
+        return "ahk_exe " this.powerScribeExecutable
     }
 
     static StopTargetSpecs(specs) {

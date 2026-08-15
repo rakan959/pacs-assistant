@@ -15,12 +15,16 @@ class PACSCommands {
         "Sign Report", (*) => sendPs("{F12}"),
         "Open/Force Restart PACS", (*) => restartPACS(),
         "Paste Wet Read", (*) => wetRead(),
-        "Toggle PowerScribe Window", (*) => toggleWindow("PowerScribe"),
+        "Toggle PowerScribe Window", (*) => toggleWindow(PACSCommands.PowerScribeToggleTarget()),
         "Toggle EPIC Window", (*) => toggleWindow("Hyperspace"),
         "Next Series", (*) => AppControl.SendKeysToWindow("Vue PACS Client ahk_exe mp.exe", "{Right}"),
         "Previous Series", (*) => AppControl.SendKeysToWindow("Vue PACS Client ahk_exe mp.exe", "{Left}"),
         "Set PowerScribe Microphone", (*) => MicrophoneManager.ApplyNow()
     )
+
+    static PowerScribeToggleTarget() {
+        return PowerScribe.windowTitle
+    }
 
     static CreateCustomKeybind(keys, targetWindow := "") {
         ; Create a function that stores its configuration

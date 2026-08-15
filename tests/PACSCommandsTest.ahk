@@ -9,7 +9,8 @@ class PACSCommandsTest {
         "TestCreateCustomKeybindStoresConfig",
         "TestModalityClassification",
         "TestModalityNamesCoverEveryRule",
-        "TestLooksLikeReport"
+        "TestLooksLikeReport",
+        "TestPowerScribeToggleUsesExactTarget"
     ]
 
     TestBuiltInCommandsExist() {
@@ -90,5 +91,9 @@ class PACSCommandsTest {
         Assert.False(PowerScribe.LooksLikeReport(""))
         Assert.False(PowerScribe.LooksLikeReport("Smith, John"))
         Assert.False(PowerScribe.LooksLikeReport("Search"))
+    }
+
+    TestPowerScribeToggleUsesExactTarget() {
+        Assert.Equal(PowerScribe.windowTitle, PACSCommands.PowerScribeToggleTarget())
     }
 }
