@@ -108,7 +108,7 @@ class NativeAttendingControlDriver {
  * every workflow's implementation in one file.
  */
 class PowerScribe {
-    static windowTitle := "PowerScribe 360 | Reporting ahk_exe Nuance.PowerScribe360.exe"
+    static windowTitle := "PowerScribe 360 | Reporting ahk_exe " AppControl.powerScribeExecutable
     static attendingControlDriver := NativeAttendingControlDriver()
 
     ; Positional path to the report text. Brittle - kept only as a last resort behind

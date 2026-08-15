@@ -33,6 +33,7 @@ class ClinicalAutomationTest {
         "WindowOwnershipUncertaintyCancelsStop",
         "SharedHostWindowStopDoesNotTerminateOwner",
         "RestartStopsPowerScribeByExactProcessName",
+        "RestartTargetsUseExactClinicalIdentities",
         "PacsLauncherRejectsNonShortcutMatch",
         "PacsLauncherAcceptsInstalledShortcut",
         "ReportSelectionUsesOnlyReportShapedText",
@@ -384,6 +385,27 @@ class ClinicalAutomationTest {
         Assert.Equal(0, result.failedTargets.Length)
         Assert.Equal(1, driver.stoppedTargets.Length)
         Assert.Equal(expected, driver.stoppedTargets[1])
+    }
+
+    RestartTargetsUseExactClinicalIdentities() {
+        specs := AppControl.PacsRestartTargetSpecs()
+        foundPowerScribe := false
+
+        for spec in specs {
+            if (HasProp(spec, "windowOnly") && spec.windowOnly) {
+                Assert.True(InStr(spec.target, " ahk_exe ") > 0)
+                continue
+            }
+            Assert.True(RegExMatch(spec.target, "i)^[^\\/:*?`"<>|]+\.exe$") > 0)
+            if (spec.target = AppControl.powerScribeExecutable)
+                foundPowerScribe := true
+        }
+
+        Assert.True(foundPowerScribe)
+        Assert.Equal(
+            "PowerScribe 360 | Reporting ahk_exe " AppControl.powerScribeExecutable,
+            PowerScribe.windowTitle
+        )
     }
 
     PacsLauncherRejectsNonShortcutMatch() {

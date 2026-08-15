@@ -90,6 +90,7 @@ class AppControl {
     static savePromptPattern := "i)(save|unsaved)"
     static activationTimeoutSeconds := 2
     static maxMatchingProcesses := 32
+    static powerScribeExecutable := "Nuance.PowerScribe360.exe"
     static windowDriver := NativeWindowDriver()
     static lifecycleDriver := NativeAppLifecycleDriver()
 
@@ -234,9 +235,6 @@ class AppControl {
 
     static PacsRestartTargetSpecs() {
         return [
-            {target: "Command - "},
-            {target: "WinDbg:"},
-            {target: "Vue PACS"},
             {
                 target: "Explorer Portal ahk_exe msedge.exe",
                 label: "Explorer Portal",
@@ -245,8 +243,7 @@ class AppControl {
             ; closeWithSavePrompt handles the report dialog first. The hard-stop
             ; fallback must address the known executable because the window can
             ; disappear while its background process remains alive.
-            {target: "Nuance.PowerScribe360.exe", label: "PowerScribe"},
-            {target: "Hyperspace"},
+            {target: this.powerScribeExecutable, label: "PowerScribe"},
             {target: "mp.exe"},
             {target: "NativeBridge.exe"}
         ]
