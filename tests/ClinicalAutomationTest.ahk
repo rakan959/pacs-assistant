@@ -29,6 +29,7 @@ class ClinicalAutomationTest {
         "NativeLookupErrorsAreNotAbsence",
         "RestartLookupUncertaintyCancelsStop",
         "WindowOwnershipUncertaintyCancelsStop",
+        "SharedHostWindowStopDoesNotTerminateOwner",
         "PacsLauncherRejectsNonShortcutMatch",
         "PacsLauncherAcceptsInstalledShortcut",
         "ReportSelectionUsesOnlyReportShapedText",
@@ -331,6 +332,22 @@ class ClinicalAutomationTest {
         Assert.Equal(0, driver.killCalls)
     }
 
+    SharedHostWindowStopDoesNotTerminateOwner() {
+        driver := SharedHostWindowLifecycleDriver()
+        AppControl.lifecycleDriver := driver
+
+        result := AppControl.StopTarget(
+            "Explorer Portal ahk_exe msedge.exe",
+            true
+        )
+
+        Assert.True(result.found)
+        Assert.True(result.stopped)
+        Assert.Equal(0, driver.processLookupCalls)
+        Assert.Equal(1, driver.killCalls)
+        Assert.Equal(0, driver.stopProcessCalls)
+    }
+
     PacsLauncherRejectsNonShortcutMatch() {
         root := A_Temp "\pacs_launch_" A_TickCount "_" Random(1000, 9999)
         DirCreate(root)
@@ -576,5 +593,42 @@ class UncertainRecheckLifecycleDriver {
 
     ProcessExists(pid) {
         return false
+    }
+}
+
+class SharedHostWindowLifecycleDriver {
+    __New() {
+        this.windowAvailable := true
+        this.processLookupCalls := 0
+        this.killCalls := 0
+        this.stopProcessCalls := 0
+    }
+
+    FindProcess(*) {
+        this.processLookupCalls++
+        return 4242
+    }
+
+    FindWindow(*) {
+        return this.windowAvailable ? 31337 : 0
+    }
+
+    GetWindowProcessId(*) {
+        return 4242
+    }
+
+    ProcessExists(*) {
+        return true
+    }
+
+    KillWindow(*) {
+        this.killCalls++
+        this.windowAvailable := false
+        return true
+    }
+
+    StopProcess(*) {
+        this.stopProcessCalls++
+        return true
     }
 }

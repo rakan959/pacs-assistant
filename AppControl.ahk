@@ -125,52 +125,64 @@ class AppControl {
      * @returns {found, stopped}; stopped is false on lookup uncertainty or when a
      * target survives termination, allowing restartPACS to fail closed.
      */
-    static StopTarget(target) {
+    static StopTarget(target, windowOnly := false) {
         driver := this.lifecycleDriver
 
         foundProcess := false
         stoppedProcesses := 0
-        loop {
-            try pid := driver.FindProcess(target)
-            catch as err
-                return {found: foundProcess, stopped: false, error: err.Message}
-            if !pid
-                break
+        if !windowOnly {
+            loop {
+                try pid := driver.FindProcess(target)
+                catch as err
+                    return {found: foundProcess, stopped: false, error: err.Message}
+                if !pid
+                    break
 
-            foundProcess := true
-            if (stoppedProcesses >= this.maxMatchingProcesses) {
-                return {
-                    found: true,
-                    stopped: false,
-                    error: "Too many matching processes remained after bounded termination"
+                foundProcess := true
+                if (stoppedProcesses >= this.maxMatchingProcesses) {
+                    return {
+                        found: true,
+                        stopped: false,
+                        error: "Too many matching processes remained after bounded termination"
+                    }
                 }
-            }
 
-            try stopped := driver.StopProcess(pid)
-            catch as err {
-                ; A process may exit between discovery and termination. Verify the
-                ; postcondition before reporting that race as a restart failure.
-                try alreadyStopped := !driver.ProcessExists(pid)
-                catch
-                    alreadyStopped := false
-                if !alreadyStopped
-                    return {found: true, stopped: false, error: err.Message}
+                try stopped := driver.StopProcess(pid)
+                catch as err {
+                    ; A process may exit between discovery and termination. Verify the
+                    ; postcondition before reporting that race as a restart failure.
+                    try alreadyStopped := !driver.ProcessExists(pid)
+                    catch
+                        alreadyStopped := false
+                    if !alreadyStopped
+                        return {found: true, stopped: false, error: err.Message}
+                    stoppedProcesses++
+                    continue
+                }
+                if !stopped
+                    return {found: true, stopped: false}
                 stoppedProcesses++
-                continue
             }
-            if !stopped
-                return {found: true, stopped: false}
-            stoppedProcesses++
-        }
 
-        if foundProcess
-            return {found: true, stopped: true}
+            if foundProcess
+                return {found: true, stopped: true}
+        }
 
         try hwnd := driver.FindWindow(target)
         catch as err
             return {found: false, stopped: false, error: err.Message}
         if !hwnd
             return {found: false, stopped: true}
+
+        ; Shared-host windows (currently Explorer Portal in Edge) must be closed and
+        ; verified by HWND only. Escalating a surviving owner would terminate every
+        ; unrelated window hosted by that browser process.
+        if windowOnly {
+            try windowStopped := driver.KillWindow(hwnd)
+            catch as err
+                return {found: true, stopped: false, error: err.Message}
+            return {found: true, stopped: windowStopped ? true : false}
+        }
 
         ; Capture ownership before killing the window: afterwards the handle may be
         ; invalid even though its process is still alive.
@@ -325,21 +337,29 @@ restartPACS() {
             anyClosed := true
     }
 
-    for target in [
-        "Command - ",
-        "WinDbg:",
-        "Vue PACS",
-        "Explorer Portal",
-        "PowerScribe",
-        "Hyperspace",
-        "mp.exe",
-        "NativeBridge.exe"
+    for spec in [
+        {target: "Command - "},
+        {target: "WinDbg:"},
+        {target: "Vue PACS"},
+        {
+            target: "Explorer Portal ahk_exe msedge.exe",
+            label: "Explorer Portal",
+            windowOnly: true
+        },
+        {target: "PowerScribe"},
+        {target: "Hyperspace"},
+        {target: "mp.exe"},
+        {target: "NativeBridge.exe"}
     ] {
-        result := AppControl.StopTarget(target)
+        target := spec.target
+        result := AppControl.StopTarget(
+            target,
+            HasProp(spec, "windowOnly") && spec.windowOnly
+        )
         if result.found
             anyClosed := true
         if !result.stopped
-            failedTargets.Push(target)
+            failedTargets.Push(HasProp(spec, "label") ? spec.label : target)
     }
 
     if failedTargets.Length {
