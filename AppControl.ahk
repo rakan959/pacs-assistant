@@ -176,12 +176,32 @@ class AppControl {
 
         ; Shared-host windows (currently Explorer Portal in Edge) must be closed and
         ; verified by HWND only. Escalating a surviving owner would terminate every
-        ; unrelated window hosted by that browser process.
+        ; unrelated window hosted by that browser process. Keep resolving the exact
+        ; title/executable until every matching window is gone, bounded against a
+        ; respawning or dishonest window provider.
         if windowOnly {
-            try windowStopped := driver.KillWindow(hwnd)
-            catch as err
-                return {found: true, stopped: false, error: err.Message}
-            return {found: true, stopped: windowStopped ? true : false}
+            stoppedWindows := 0
+            loop {
+                if (stoppedWindows >= this.maxMatchingProcesses) {
+                    return {
+                        found: true,
+                        stopped: false,
+                        error: "Too many matching windows remained after bounded termination"
+                    }
+                }
+                try windowStopped := driver.KillWindow(hwnd)
+                catch as err
+                    return {found: true, stopped: false, error: err.Message}
+                if !windowStopped
+                    return {found: true, stopped: false}
+                stoppedWindows++
+
+                try hwnd := driver.FindWindow(target)
+                catch as err
+                    return {found: true, stopped: false, error: err.Message}
+                if !hwnd
+                    return {found: true, stopped: true}
+            }
         }
 
         ; Capture ownership before killing the window: afterwards the handle may be

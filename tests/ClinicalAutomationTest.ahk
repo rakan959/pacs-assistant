@@ -346,7 +346,7 @@ class ClinicalAutomationTest {
         Assert.True(result.found)
         Assert.True(result.stopped)
         Assert.Equal(0, driver.processLookupCalls)
-        Assert.Equal(1, driver.killCalls)
+        Assert.Equal(2, driver.killCalls)
         Assert.Equal(0, driver.stopProcessCalls)
     }
 
@@ -601,7 +601,7 @@ class UncertainRecheckLifecycleDriver {
 
 class SharedHostWindowLifecycleDriver {
     __New() {
-        this.windowAvailable := true
+        this.windows := [31337, 41414]
         this.processLookupCalls := 0
         this.killCalls := 0
         this.stopProcessCalls := 0
@@ -613,7 +613,7 @@ class SharedHostWindowLifecycleDriver {
     }
 
     FindWindow(*) {
-        return this.windowAvailable ? 31337 : 0
+        return this.windows.Length ? this.windows[1] : 0
     }
 
     GetWindowProcessId(*) {
@@ -626,7 +626,7 @@ class SharedHostWindowLifecycleDriver {
 
     KillWindow(*) {
         this.killCalls++
-        this.windowAvailable := false
+        this.windows.RemoveAt(1)
         return true
     }
 
