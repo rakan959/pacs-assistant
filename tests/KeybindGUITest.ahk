@@ -29,6 +29,7 @@ class KeybindGUITest {
         "TestFailedModalitySavePreservesLiveProfile",
         "TestStaleModalityDialogCannotWriteAnotherProfile",
         "TestOlderModalityDialogCannotOverwriteNewerSave",
+        "TestDirtyKeybindMutationInvalidatesModalityDialog",
         "TestStaleRenameDialogCannotRenameAnotherProfile",
         "TestDestroyedRenameDialogCannotMutateProfile",
         "TestRenameDialogCannotMutateSameNameReplacement",
@@ -61,15 +62,18 @@ class KeybindGUITest {
         this.originalCaptureRuntimeProfile := KeybindGUI.captureRuntimeProfile
         this.originalCaptureTransactionActive := KeybindGUI.captureTransactionActive
         this.originalCaptureOwnerGui := KeybindGUI.captureOwnerGui
+        this.originalProfileMutationRevisions := KeybindGUI.profileMutationRevisions
         KeybindGUI.captureRuntimeProfile := 0
         KeybindGUI.captureTransactionActive := false
         KeybindGUI.captureOwnerGui := 0
+        KeybindGUI.profileMutationRevisions := Map()
     }
 
     Teardown() {
         KeybindGUI.captureRuntimeProfile := this.originalCaptureRuntimeProfile
         KeybindGUI.captureTransactionActive := this.originalCaptureTransactionActive
         KeybindGUI.captureOwnerGui := this.originalCaptureOwnerGui
+        KeybindGUI.profileMutationRevisions := this.originalProfileMutationRevisions
     }
 
     TestSelectedFunctionPrefersBuiltIn() {
@@ -918,6 +922,57 @@ class KeybindGUITest {
 
         Assert.Equal("New Attending", captured)
         Assert.True(capturedDestroyed)
+    }
+
+    TestDirtyKeybindMutationInvalidatesModalityDialog() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalRevisions := ProfileManager.profileRevisions
+        originalProfilesPath := ProfileManager.profilesPath
+        tempRoot := A_Temp "\pacs_dirty_modality_dialog_" A_TickCount
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        profile.modalityAttendings["Neuro"] := "Old Attending"
+
+        try {
+            try DirDelete(tempRoot, true)
+            DirCreate(tempRoot)
+            ProfileManager.profilesPath := tempRoot
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.profileRevisions := Map()
+            ProfileManager.currentProfile := "Test"
+            ProfileManager.SaveProfile("Test", profile)
+            dialog := FakeProfileDialog("Test")
+
+            profile.scopes["Sign Report"] := "PACS"
+            this.gui.MarkProfileDirty("Test")
+            result := this.gui.SaveModalityAttendings(
+                Map("Neuro", {Value: "New Attending"}),
+                dialog
+            )
+
+            stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath("Test"))
+            storedScope := stored.scopes["Sign Report"]
+            storedAttending := stored.modalityAttendings["Neuro"]
+            memoryScope := profile.scopes["Sign Report"]
+            memoryAttending := profile.modalityAttendings["Neuro"]
+            dirty := this.gui.IsProfileDirty("Test")
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.profileRevisions := originalRevisions
+            ProfileManager.profilesPath := originalProfilesPath
+            try DirDelete(tempRoot, true)
+        }
+
+        Assert.False(result)
+        Assert.Equal("Any", storedScope)
+        Assert.Equal("Old Attending", storedAttending)
+        Assert.Equal("PACS", memoryScope)
+        Assert.Equal("Old Attending", memoryAttending)
+        Assert.True(dirty)
+        Assert.True(dialog.destroyed)
     }
 
     TestStaleRenameDialogCannotRenameAnotherProfile() {
@@ -2236,6 +2291,7 @@ class FakeProfileDialog {
         this.profileRevision := IsSet(profileRevision)
             ? profileRevision
             : ProfileManager.GetProfileRevision(profileName)
+        this.profileMutationRevision := KeybindGUI.GetProfileMutationRevision(profileName)
     }
 
     Destroy() {

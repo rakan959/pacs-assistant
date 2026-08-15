@@ -14,6 +14,7 @@ class KeybindGUI {
     static captureRuntimeProfile := 0
     static captureTransactionActive := false
     static captureOwnerGui := 0
+    static profileMutationRevisions := Map()
     ; The V option would pass the selected key through to the foreground application.
     ; Capture is intentionally suppressing: the key is configuration data only.
     static inputHookOptions := ""
@@ -778,11 +779,25 @@ class KeybindGUI {
         return this.dirtyProfiles
     }
 
+    static GetProfileMutationRevision(profileName) {
+        return this.profileMutationRevisions.Has(profileName)
+            ? this.profileMutationRevisions[profileName]
+            : 0
+    }
+
+    static AdvanceProfileMutationRevision(profileName) {
+        nextRevision := this.GetProfileMutationRevision(profileName) + 1
+        this.profileMutationRevisions[profileName] := nextRevision
+        return nextRevision
+    }
+
     MarkProfileDirty(profileName := "") {
         if (profileName = "")
             profileName := ProfileManager.currentProfile
-        if (profileName != "")
+        if (profileName != "") {
             this.EnsureDirtyProfiles()[profileName] := true
+            KeybindGUI.AdvanceProfileMutationRevision(profileName)
+        }
     }
 
     ClearProfileDirty(profileName) {
@@ -1791,6 +1806,9 @@ class KeybindGUI {
 
         modGui := this.NewProfileDialog("PACS Assistant - Modality Attendings")
         modGui.profileRevision := ProfileManager.GetProfileRevision(modGui.profileName)
+        modGui.profileMutationRevision := KeybindGUI.GetProfileMutationRevision(
+            modGui.profileName
+        )
         modGui.Add("Text",, "Attending to assign per modality for '" modGui.profileName "'.")
         modGui.Add("Text", "y+5", "Leave a modality blank to keep PowerScribe's default attending.")
 
@@ -1812,11 +1830,13 @@ class KeybindGUI {
             return false
         profileName := modGui.profileName
         if (!HasProp(modGui, "profileRevision")
-            || modGui.profileRevision != ProfileManager.GetProfileRevision(profileName)) {
+            || modGui.profileRevision != ProfileManager.GetProfileRevision(profileName)
+            || !HasProp(modGui, "profileMutationRevision")
+            || modGui.profileMutationRevision != KeybindGUI.GetProfileMutationRevision(profileName)) {
             try modGui.Destroy()
             MsgBox(
-                "Attending assignments changed while this dialog was open. Reopen it before saving.",
-                "Attending Assignments Changed",
+                "The profile changed while attending assignments were open. Reopen the dialog before saving.",
+                "Profile Changed",
                 "Icon!"
             )
             return false
