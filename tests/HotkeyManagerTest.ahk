@@ -14,7 +14,9 @@ class HotkeyManagerTest {
         "TestUnknownScopeFallsBackToAny",
         "TestScopeFlagsRoundTrip",
         "TestScopeFromFlagsMatrix",
-        "TestScopePredicatesAreStable"
+        "TestScopePredicatesAreStable",
+        "TestDuplicateHotkeyIsRejectedWithoutReplacingOwner",
+        "TestInvalidReassignmentPreservesExistingRegistration"
     ]
 
     Setup() {
@@ -117,6 +119,23 @@ class HotkeyManagerTest {
             Assert.True(HotkeyManager.scopePredicates[scope] == HotkeyManager.scopePredicates[scope],
                 "Predicate for '" scope "' is not a stable object")
         }
+    }
+
+    TestDuplicateHotkeyIsRejectedWithoutReplacingOwner() {
+        Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^a"))
+
+        Assert.False(HotkeyManager.RegisterHotkey("ActionTwo", "^A"))
+        Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
+        Assert.False(HotkeyManager.activeHotkeys.Has("ActionTwo"))
+        Assert.True(InStr(HotkeyManager.lastError, "ActionOne") > 0)
+    }
+
+    TestInvalidReassignmentPreservesExistingRegistration() {
+        Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^a"))
+
+        Assert.False(HotkeyManager.Register("ActionOne", "^b", 0))
+        Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
+        Assert.Equal("^a", HotkeyManager.activeHotkeys["ActionOne"].hotkey)
     }
 
     Teardown() {

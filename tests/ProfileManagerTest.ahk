@@ -21,7 +21,8 @@ class ProfileManagerTest {
         "TestSaveRejectsUnsafeIniKeys",
         "TestFailedRenamePreservesOriginalProfile",
         "TestMalformedProfileDoesNotBlockValidProfiles",
-        "TestDefaultProfileMustExist"
+        "TestDefaultProfileMustExist",
+        "TestDuplicateBindingsAreRejected"
     ]
 
     Setup() {
@@ -265,6 +266,18 @@ class ProfileManagerTest {
         Assert.False(ProfileManager.SetDefaultProfile("Missing"))
         Assert.Equal("", ProfileManager.defaultProfile)
         Assert.False(FileExist(ProfileManager.configPath))
+    }
+
+    TestDuplicateBindingsAreRejected() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        profile.binds["Draft Report"] := "^S"
+
+        Assert.Throws(
+            () => ProfileManager.SaveProfile("Duplicates", profile),
+            "duplicate hotkey"
+        )
+        Assert.False(FileExist(ProfileManager.profilesPath "\Duplicates.ini"))
     }
 
     Teardown() {

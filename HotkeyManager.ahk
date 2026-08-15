@@ -88,17 +88,26 @@ class HotkeyManager {
     static Register(funcName, hotkeyStr, callback, scope := "Any") {
         this.lastError := ""
 
-        ; Drop any previous registration first, in the context it was made under
-        this.Unregister(funcName)
-
         ; Skip registration if the hotkey is unassigned
-        if (hotkeyStr = "")
+        if (hotkeyStr = "") {
+            this.Unregister(funcName)
             return true
+        }
 
         if !callback {
             this.lastError := "no command is defined for it"
             return false
         }
+
+        owner := this.FindBindingOwner(hotkeyStr, funcName)
+        if owner {
+            this.lastError := "the hotkey is already registered to '" owner "'"
+            return false
+        }
+
+        ; Validation above is non-destructive: an invalid reassignment must not turn
+        ; off the function's currently working registration.
+        this.Unregister(funcName)
 
         scope := this.NormalizeScope(scope)
         try {
@@ -116,6 +125,19 @@ class HotkeyManager {
         } finally {
             this.ExitScope()
         }
+    }
+
+    static HotkeyIdentity(hotkeyStr) {
+        return StrLower(Trim(hotkeyStr))
+    }
+
+    static FindBindingOwner(hotkeyStr, exceptFuncName := "") {
+        identity := this.HotkeyIdentity(hotkeyStr)
+        for funcName, entry in this.activeHotkeys {
+            if (funcName != exceptFuncName && this.HotkeyIdentity(entry.hotkey) = identity)
+                return funcName
+        }
+        return ""
     }
 
     ; Turn off a single registration, re-entering the context it was created in.

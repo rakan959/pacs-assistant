@@ -107,6 +107,7 @@ class ProfileManager {
                 profile.modalityAttendings[modality] := IniRead(path, "ModalityAttendings", modality, "")
             }
         }
+        this.ValidateProfile(profile)
         return profile
     }
 
@@ -178,8 +179,16 @@ class ProfileManager {
                 throw TypeError("Profile is missing Map property: " property)
         }
 
-        for funcName, _ in profile.binds
+        bindingOwners := Map()
+        for funcName, bind in profile.binds {
             this.RequireSafeIniKey(funcName, "function")
+            identity := StrLower(Trim(bind))
+            if (identity != "") {
+                if bindingOwners.Has(identity)
+                    throw ValueError("Profile contains duplicate hotkey '" bind "' for '" bindingOwners[identity] "' and '" funcName "'")
+                bindingOwners[identity] := funcName
+            }
+        }
         for funcName, _ in profile.customFuncs
             this.RequireSafeIniKey(funcName, "function")
         for funcName, _ in profile.scopes
@@ -189,8 +198,14 @@ class ProfileManager {
     }
 
     static RequireSafeIniKey(name, kind) {
-        if (Type(name) != "String" || name = "" || RegExMatch(name, "[\x00-\x1F|=\[\]]"))
+        if !this.IsSafeIniKey(name)
             throw ValueError("Profile contains an unsafe " kind " name")
+    }
+
+    static IsSafeIniKey(name) {
+        return Type(name) = "String"
+            && name != ""
+            && !RegExMatch(name, "[\x00-\x1F|=\[\]]")
     }
 
     static IsValidProfileName(name) {

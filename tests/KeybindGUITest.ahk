@@ -6,7 +6,8 @@ class KeybindGUITest {
     static Tests := [
         "TestSelectedFunctionPrefersBuiltIn",
         "TestSelectedFunctionSurvivesMissingCustomList",
-        "TestPrettifyHotkey"
+        "TestPrettifyHotkey",
+        "TestCustomFunctionNameChecksUnboundFunctions"
     ]
 
     Setup() {
@@ -37,5 +38,13 @@ class KeybindGUITest {
         Assert.Equal("Ctrl + Alt + D", this.gui.PrettifyHotkey("^!d"))
         Assert.Equal("Ctrl + Shift + V", this.gui.PrettifyHotkey("^+v"))
         Assert.Equal("Win + E", this.gui.PrettifyHotkey("#e"))
+    }
+
+    TestCustomFunctionNameChecksUnboundFunctions() {
+        profile := ProfileManager.NewProfile()
+        profile.customFuncs["Custom: Existing"] := PACSCommands.CreateCustomKeybind("HELLO")
+
+        Assert.False(this.gui.CustomFunctionNameAvailable(profile, "Custom: Existing"))
+        Assert.True(this.gui.CustomFunctionNameAvailable(profile, "Custom: New"))
     }
 }

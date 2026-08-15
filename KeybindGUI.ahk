@@ -553,6 +553,7 @@ class KeybindGUI {
     }
 
     AddCustomKeybind(name, keys, window, listView, customGui) {
+        name := Trim(name)
         if (name = "") {
             MsgBox("Please enter a name for the keybind.", "Error", "Icon!")
             return
@@ -564,19 +565,24 @@ class KeybindGUI {
         
         ; Create unique function name
         funcName := "Custom: " name
+        if !ProfileManager.IsSafeIniKey(funcName) {
+            MsgBox("The keybind name cannot contain |, =, square brackets, or line breaks.", "Invalid Keybind Name", "Icon!")
+            return
+        }
         
         ; Check if name already exists in current profile
-        if ProfileManager.profiles[ProfileManager.currentProfile].binds.Has(funcName) {
+        currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
+        if !this.CustomFunctionNameAvailable(currentProfile, funcName) {
             MsgBox("A keybind with this name already exists in this profile.", "Error", "Icon!")
             return
         }
         
         ; Create the custom function
-        ProfileManager.profiles[ProfileManager.currentProfile].customFuncs[funcName] := PACSCommands.CreateCustomKeybind(keys, window)
+        currentProfile.customFuncs[funcName] := PACSCommands.CreateCustomKeybind(keys, window)
 
         ; Add to profile with empty binding, active in any window until scoped
-        ProfileManager.profiles[ProfileManager.currentProfile].binds[funcName] := ""
-        ProfileManager.profiles[ProfileManager.currentProfile].scopes[funcName] := "Any"
+        currentProfile.binds[funcName] := ""
+        currentProfile.scopes[funcName] := "Any"
 
         ; Add to ListView (removed type)
         listView.Add(, funcName, "Unassigned", this.ScopeLabel(funcName))
@@ -586,6 +592,10 @@ class KeybindGUI {
         
         ; Prompt user to set the keybind
         this.PromptKeybind(funcName, listView)
+    }
+
+    CustomFunctionNameAvailable(profile, funcName) {
+        return !profile.binds.Has(funcName) && !profile.customFuncs.Has(funcName)
     }
 
     AddFunction(funcName, listView, selectorGui) {
