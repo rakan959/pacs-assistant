@@ -65,6 +65,10 @@ Main() {
     DirCreate(TempDir)
     DirCreate(TempDir "\profiles")
     SetWorkingDir(TempDir)
+    originalConfigPath := ProfileManager.configPath
+    originalProfilesPath := ProfileManager.profilesPath
+    ProfileManager.configPath := TempDir "\config.ini"
+    ProfileManager.profilesPath := TempDir "\profiles"
 
     ; A profile with a built-in bind, a scoped bind and a custom function.
     ; F13/F14 do not exist on a normal keyboard, so applying these binds cannot
@@ -131,6 +135,8 @@ Main() {
     HotkeyManager.DisableAllHotkeys()
     try kb.gui.Destroy()
 
+    ProfileManager.configPath := originalConfigPath
+    ProfileManager.profilesPath := originalProfilesPath
     SetWorkingDir(A_ScriptDir)
     try DirDelete(TempDir, true)
     try FileDelete(A_ScriptDir "\settings.ini")

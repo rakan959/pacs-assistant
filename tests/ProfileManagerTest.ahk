@@ -14,7 +14,14 @@ class ProfileManagerTest {
         "TestScopeDefaultsToAnyWhenAbsent",
         "TestLegacyScopeMigration",
         "TestLegacyProfileWithoutScopesSection",
-        "TestModalityAttendingPersistence"
+        "TestModalityAttendingPersistence",
+        "TestDefaultPathsAreAnchored",
+        "TestProfileNameValidation",
+        "TestCreateProfileRejectsUnsafeAndDuplicateNames",
+        "TestSaveRejectsUnsafeIniKeys",
+        "TestFailedRenamePreservesOriginalProfile",
+        "TestMalformedProfileDoesNotBlockValidProfiles",
+        "TestDefaultProfileMustExist"
     ]
 
     Setup() {
@@ -30,6 +37,7 @@ class ProfileManagerTest {
         ProfileManager.profiles := Map()
         ProfileManager.currentProfile := ""
         ProfileManager.defaultProfile := ""
+        ProfileManager.loadErrors := []
     }
 
     TestProfileSaveAndLoad() {
@@ -189,6 +197,76 @@ class ProfileManagerTest {
         Assert.False(stored.modalityAttendings.Has("Body"), "Unconfigured modality must not be invented on load")
     }
 
+    TestDefaultPathsAreAnchored() {
+        Assert.Equal(A_ScriptDir "\config.ini", this.originalConfig)
+        Assert.Equal(A_ScriptDir "\profiles", this.originalProfiles)
+    }
+
+    TestProfileNameValidation() {
+        Assert.True(ProfileManager.IsValidProfileName("Night Shift"))
+        for name in ["", "..", "../escape", "folder\escape", "bad:name", "CON", "name.", "name "] {
+            Assert.False(ProfileManager.IsValidProfileName(name), "Expected unsafe name to be rejected: " name)
+        }
+    }
+
+    TestCreateProfileRejectsUnsafeAndDuplicateNames() {
+        Assert.False(ProfileManager.CreateProfile("../escape"))
+        Assert.Equal(0, ProfileManager.profiles.Count)
+
+        Assert.True(ProfileManager.CreateProfile("Reading Room"))
+        original := ProfileManager.profiles["Reading Room"]
+        Assert.False(ProfileManager.CreateProfile("Reading Room"))
+        Assert.True(ProfileManager.profiles["Reading Room"] = original)
+        Assert.True(FileExist(ProfileManager.profilesPath "\Reading Room.ini") != "")
+    }
+
+    TestSaveRejectsUnsafeIniKeys() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Custom: Bad|Name"] := "^b"
+
+        Assert.Throws(
+            () => ProfileManager.SaveProfile("UnsafeKey", profile),
+            "unsafe function name"
+        )
+        Assert.False(FileExist(ProfileManager.profilesPath "\UnsafeKey.ini"))
+    }
+
+    TestFailedRenamePreservesOriginalProfile() {
+        original := ProfileManager.NewProfile()
+        original.binds["Toggle Dictation"] := "^d"
+        ProfileManager.profiles["Original"] := original
+        ProfileManager.SaveProfile("Original", original)
+
+        ; A directory at the destination path makes the final atomic replacement fail.
+        DirCreate(ProfileManager.profilesPath "\Blocked.ini")
+
+        Assert.False(ProfileManager.RenameProfile("Original", "Blocked"))
+        Assert.True(ProfileManager.profiles.Has("Original"))
+        Assert.False(ProfileManager.profiles.Has("Blocked"))
+        Assert.True(FileExist(ProfileManager.profilesPath "\Original.ini") != "")
+        reloaded := ProfileManager.LoadProfile(ProfileManager.profilesPath "\Original.ini")
+        Assert.Equal("^d", reloaded.binds["Toggle Dictation"])
+    }
+
+    TestMalformedProfileDoesNotBlockValidProfiles() {
+        good := ProfileManager.NewProfile()
+        good.binds["Sign Report"] := "^s"
+        ProfileManager.SaveProfile("Good", good)
+        FileAppend("this is not an INI profile", ProfileManager.profilesPath "\Malformed.ini")
+
+        ProfileManager.LoadProfiles()
+
+        Assert.True(ProfileManager.profiles.Has("Good"))
+        Assert.False(ProfileManager.profiles.Has("Malformed"))
+        Assert.Equal(1, ProfileManager.loadErrors.Length)
+    }
+
+    TestDefaultProfileMustExist() {
+        Assert.False(ProfileManager.SetDefaultProfile("Missing"))
+        Assert.Equal("", ProfileManager.defaultProfile)
+        Assert.False(FileExist(ProfileManager.configPath))
+    }
+
     Teardown() {
         try {
             DirDelete(this.tempRoot, true)
@@ -198,5 +276,6 @@ class ProfileManagerTest {
         ProfileManager.profiles := Map()
         ProfileManager.currentProfile := ""
         ProfileManager.defaultProfile := ""
+        ProfileManager.loadErrors := []
     }
 }

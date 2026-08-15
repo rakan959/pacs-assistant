@@ -7,8 +7,11 @@ class ProfileManager {
     static currentProfile := ""
     static defaultProfile := ""
     static availableFunctions := Map()  ; Now only stores built-in functions
-    static configPath := "config.ini"
-    static profilesPath := "profiles"
+    static configPath := A_ScriptDir "\config.ini"
+    static profilesPath := A_ScriptDir "\profiles"
+    static loadErrors := []
+    static saveSequence := 0
+    static missingValue := "{PACS-ASSISTANT-MISSING-INI-VALUE}"
 
     static __New() {
         ; Initialize available functions from PACSCommands
@@ -32,66 +35,110 @@ class ProfileManager {
 
     static LoadProfiles() {
         ; Always refresh the in-memory profiles from disk
+        previousProfile := this.currentProfile
         this.profiles := Map()
-        try {
+        this.loadErrors := []
+
+        if DirExist(this.profilesPath) {
             Loop Files this.profilesPath "\*.ini" {
                 profileName := StrReplace(A_LoopFileName, ".ini")
-                this.profiles[profileName] := this.LoadProfile(A_LoopFilePath)
-            }
-            ; Set current profile to default if it exists and is valid
-            if (this.defaultProfile != "" && this.profiles.Has(this.defaultProfile)) {
-                this.currentProfile := this.defaultProfile
+                try {
+                    this.profiles[profileName] := this.LoadProfile(A_LoopFilePath)
+                } catch as err {
+                    this.loadErrors.Push({path: A_LoopFilePath, message: err.Message})
+                }
             }
         }
+
+        ; Prefer the configured default, otherwise preserve the current selection if
+        ; it still exists. Never leave currentProfile pointing at a skipped file.
+        if (this.defaultProfile != "" && this.profiles.Has(this.defaultProfile))
+            this.currentProfile := this.defaultProfile
+        else if (previousProfile != "" && this.profiles.Has(previousProfile))
+            this.currentProfile := previousProfile
+        else
+            this.currentProfile := ""
     }
 
     static LoadProfile(path) {
         profile := this.NewProfile()
-        try {
-            IniRead(path)
-            ; Read the ordered list of functions
-            functionList := StrSplit(IniRead(path, "Functions", "Order", ""), "|")
-            for funcName in functionList {
-                if (funcName != "") {
-                    profile.binds[funcName] := IniRead(path, "Keybinds", funcName, "")
-                    ; Profiles written before scopes existed have no [Scopes] section;
-                    ; those binds default to firing in any window, as they always did.
-                    ; [KeybindScopes] is the older per-bind format and is migrated.
-                    profile.scopes[funcName] := IniRead(path, "Scopes", funcName, "")
-                    if (profile.scopes[funcName] = "") {
-                        legacy := IniRead(path, "KeybindScopes", funcName, "")
-                        profile.scopes[funcName] := this.MigrateLegacyScope(legacy)
-                    }
-                    ; If it's a custom function, load its configuration
-                    if (InStr(funcName, "Custom: ") = 1) {
-                        keys := IniRead(path, "CustomFunctions", funcName "_keys", "")
-                        window := IniRead(path, "CustomFunctions", funcName "_window", "")
-                        if (keys != "") {
-                            profile.customFuncs[funcName] := PACSCommands.CreateCustomKeybind(keys, window)
-                        }
+        IniRead(path)
+
+        ; Every profile version has written [Functions] Order, including a newly
+        ; created empty profile. Its absence distinguishes a malformed .ini from an
+        ; intentionally empty profile.
+        functionOrder := IniRead(path, "Functions", "Order", this.missingValue)
+        if (functionOrder = this.missingValue)
+            throw Error("Profile is missing [Functions] Order")
+
+        ; Read the ordered list of functions
+        functionList := StrSplit(functionOrder, "|")
+        for funcName in functionList {
+            if (funcName != "") {
+                this.RequireSafeIniKey(funcName, "function")
+                profile.binds[funcName] := IniRead(path, "Keybinds", funcName, "")
+                ; Profiles written before scopes existed have no [Scopes] section;
+                ; those binds default to firing in any window, as they always did.
+                ; [KeybindScopes] is the older per-bind format and is migrated.
+                profile.scopes[funcName] := IniRead(path, "Scopes", funcName, "")
+                if (profile.scopes[funcName] = "") {
+                    legacy := IniRead(path, "KeybindScopes", funcName, "")
+                    profile.scopes[funcName] := this.MigrateLegacyScope(legacy)
+                }
+                ; If it's a custom function, load its configuration
+                if (InStr(funcName, "Custom: ") = 1) {
+                    keys := IniRead(path, "CustomFunctions", funcName "_keys", "")
+                    window := IniRead(path, "CustomFunctions", funcName "_window", "")
+                    if (keys != "") {
+                        profile.customFuncs[funcName] := PACSCommands.CreateCustomKeybind(keys, window)
                     }
                 }
             }
+        }
 
-            ; Modality -> attending assignments. Only the modalities named in Order are
-            ; treated as configured; a modality absent from Order falls back to its
-            ; built-in default, while one listed with a blank value means "leave
-            ; PowerScribe's default attending alone".
-            modalityList := StrSplit(IniRead(path, "ModalityAttendings", "Order", ""), "|")
-            for modality in modalityList {
-                if (modality != "") {
-                    profile.modalityAttendings[modality] := IniRead(path, "ModalityAttendings", modality, "")
-                }
+        ; Modality -> attending assignments. Only the modalities named in Order are
+        ; treated as configured; a modality absent from Order falls back to its
+        ; built-in default, while one listed with a blank value means "leave
+        ; PowerScribe's default attending alone".
+        modalityList := StrSplit(IniRead(path, "ModalityAttendings", "Order", ""), "|")
+        for modality in modalityList {
+            if (modality != "") {
+                this.RequireSafeIniKey(modality, "modality")
+                profile.modalityAttendings[modality] := IniRead(path, "ModalityAttendings", modality, "")
             }
         }
         return profile
     }
 
     static SaveProfile(name, profile) {
+        if !this.IsValidProfileName(name)
+            throw ValueError("Invalid profile name")
+        this.ValidateProfile(profile)
+
         if !DirExist(this.profilesPath)
             DirCreate(this.profilesPath)
 
-        path := this.profilesPath "/" name ".ini"
+        path := this.ProfilePath(name)
+        this.saveSequence++
+        temporaryPath := path ".tmp-" DllCall("GetCurrentProcessId") "-" this.saveSequence
+
+        try {
+            this.WriteProfile(temporaryPath, profile)
+            FileMove(temporaryPath, path, true)
+        } catch as err {
+            try FileDelete(temporaryPath)
+            throw err
+        }
+
+        return true
+    }
+
+    static WriteProfile(path, profile) {
+        ; The caller always provides a fresh temporary path. Writing a complete new
+        ; file avoids stale INI keys and lets the final same-directory move replace
+        ; the prior profile atomically.
+        if FileExist(path)
+            FileDelete(path)
 
         ; Save the ordered list of functions
         functionList := ""
@@ -122,6 +169,59 @@ class ProfileManager {
         IniWrite(modalityList, path, "ModalityAttendings", "Order")
         for modality, attending in profile.modalityAttendings {
             IniWrite(attending, path, "ModalityAttendings", modality)
+        }
+    }
+
+    static ValidateProfile(profile) {
+        for property in ["binds", "customFuncs", "scopes", "modalityAttendings"] {
+            if !HasProp(profile, property) || !(profile.%property% is Map)
+                throw TypeError("Profile is missing Map property: " property)
+        }
+
+        for funcName, _ in profile.binds
+            this.RequireSafeIniKey(funcName, "function")
+        for funcName, _ in profile.customFuncs
+            this.RequireSafeIniKey(funcName, "function")
+        for funcName, _ in profile.scopes
+            this.RequireSafeIniKey(funcName, "function")
+        for modality, _ in profile.modalityAttendings
+            this.RequireSafeIniKey(modality, "modality")
+    }
+
+    static RequireSafeIniKey(name, kind) {
+        if (Type(name) != "String" || name = "" || RegExMatch(name, "[\x00-\x1F|=\[\]]"))
+            throw ValueError("Profile contains an unsafe " kind " name")
+    }
+
+    static IsValidProfileName(name) {
+        if (Type(name) != "String" || name = "" || name != Trim(name))
+            return false
+        if (name = "." || name = ".." || RegExMatch(name, "[\x00-\x1F<>:`"/\\|?*]"))
+            return false
+        if RegExMatch(name, "[ .]$")
+            return false
+        return !RegExMatch(name, "i)^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$")
+    }
+
+    static ProfilePath(name) {
+        if !this.IsValidProfileName(name)
+            throw ValueError("Invalid profile name")
+        return this.profilesPath "\" name ".ini"
+    }
+
+    static CreateProfile(name) {
+        if !this.IsValidProfileName(name) || this.profiles.Has(name)
+            return false
+
+        try {
+            if FileExist(this.ProfilePath(name))
+                return false
+            profile := this.NewProfile()
+            this.SaveProfile(name, profile)
+            this.profiles[name] := profile
+            return true
+        } catch {
+            return false
         }
     }
 
@@ -187,12 +287,12 @@ class ProfileManager {
     }
 
     static SetDefaultProfile(name) {
-        if !DirExist(this.profilesPath)
-            DirCreate(this.profilesPath)
+        if !this.IsValidProfileName(name) || !this.profiles.Has(name)
+            return false
 
-        this.defaultProfile := name
         try {
             IniWrite(name, this.configPath, "Settings", "DefaultProfile")
+            this.defaultProfile := name
             return true
         } catch {
             return false
@@ -200,12 +300,12 @@ class ProfileManager {
     }
 
     static DeleteProfile(name) {
-        if (this.profiles.Count <= 1) {
+        if (this.profiles.Count <= 1 || !this.profiles.Has(name) || !this.IsValidProfileName(name)) {
             return false  ; Don't allow deleting the last profile
         }
 
         try {
-            FileDelete(this.profilesPath "/" name ".ini")
+            FileDelete(this.ProfilePath(name))
             this.profiles.Delete(name)
 
             ; If we deleted the default profile, clear it
@@ -223,33 +323,52 @@ class ProfileManager {
         if (oldName = newName)
             return true
 
-        if (newName = "" || this.profiles.Has(newName))
+        if (!this.IsValidProfileName(oldName)
+            || !this.IsValidProfileName(newName)
+            || !this.profiles.Has(oldName)
+            || this.profiles.Has(newName))
             return false
 
+        oldPath := this.ProfilePath(oldName)
+        newPath := this.ProfilePath(newName)
+        if FileExist(newPath)
+            return false
+
+        profile := this.profiles[oldName]
         try {
-            profile := this.profiles[oldName]
-
-            ; Delete old profile
-            FileDelete(this.profilesPath "/" oldName ".ini")
-            this.profiles.Delete(oldName)
-
-            ; Create new profile
-            this.profiles[newName] := profile
+            ; Persist the replacement before touching the original. SaveProfile's
+            ; temporary-file move guarantees a failed save cannot truncate it.
             this.SaveProfile(newName, profile)
-
-            ; Update default profile if needed
-            if (this.defaultProfile = oldName) {
-                this.SetDefaultProfile(newName)
-            }
-
-            ; Update current profile if needed
-            if (this.currentProfile = oldName) {
-                this.currentProfile := newName
-            }
-
-            return true
         } catch {
             return false
         }
+
+        defaultChanged := this.defaultProfile = oldName
+        if defaultChanged {
+            try {
+                IniWrite(newName, this.configPath, "Settings", "DefaultProfile")
+            } catch {
+                try FileDelete(newPath)
+                return false
+            }
+        }
+
+        try {
+            FileDelete(oldPath)
+        } catch {
+            if defaultChanged
+                try IniWrite(oldName, this.configPath, "Settings", "DefaultProfile")
+            try FileDelete(newPath)
+            return false
+        }
+
+        this.profiles[newName] := profile
+        this.profiles.Delete(oldName)
+        if defaultChanged
+            this.defaultProfile := newName
+        if (this.currentProfile = oldName)
+            this.currentProfile := newName
+
+        return true
     }
 }

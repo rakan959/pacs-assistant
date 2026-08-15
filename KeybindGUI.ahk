@@ -18,6 +18,13 @@ class KeybindGUI {
         ; GitHub request every launch for a dialog that had already been offered.
 
         ProfileManager.LoadProfiles()
+        if (ProfileManager.loadErrors.Length > 0) {
+            MsgBox(
+                ProfileManager.loadErrors.Length " profile file(s) could not be loaded. The original files were left unchanged.",
+                "Profile Load Error",
+                "Icon!"
+            )
+        }
         if ProfileManager.profiles.Count = 0 {
             this.PromptNewProfile()
         } else if (ProfileManager.defaultProfile != "" && ProfileManager.profiles.Has(ProfileManager.defaultProfile)) {
@@ -124,12 +131,13 @@ class KeybindGUI {
     }
 
     CreateProfile(name, inputGui) {
-        if name != "" {
-            ProfileManager.profiles[name] := ProfileManager.NewProfile()
-            ProfileManager.SaveProfile(name, ProfileManager.profiles[name])
+        name := Trim(name)
+        if ProfileManager.CreateProfile(name) {
             ProfileManager.currentProfile := name
             inputGui.Destroy()
             this.CreateMainGUI()
+        } else {
+            MsgBox("Enter a unique profile name without file-system characters or reserved Windows device names.", "Invalid Profile Name", "Icon!")
         }
     }
 
@@ -298,12 +306,18 @@ class KeybindGUI {
     }
 
     SaveCurrentProfile() {
-        ProfileManager.SaveProfile(
-            ProfileManager.currentProfile,
-            ProfileManager.profiles[ProfileManager.currentProfile]
-        )
+        try {
+            ProfileManager.SaveProfile(
+                ProfileManager.currentProfile,
+                ProfileManager.profiles[ProfileManager.currentProfile]
+            )
+        } catch as err {
+            MsgBox("The profile could not be saved. The previous file was left unchanged.`n`n" err.Message, "Save Failed", "Icon!")
+            return false
+        }
         MsgBox("Profile saved successfully!", "Success")
         this.ApplyBinds()
+        return true
     }
 
     ApplyBinds() {
@@ -391,6 +405,7 @@ class KeybindGUI {
     }
 
     RenameProfile(oldName, newName, renameGui, parentGui := 0) {
+        newName := Trim(newName)
         if (newName = "") {
             MsgBox("Profile name cannot be empty.", "Error", "Icon!")
             return
@@ -715,10 +730,15 @@ class KeybindGUI {
             ProfileManager.SetModalityAttending(modality, Trim(edit.Value))
         }
 
-        ProfileManager.SaveProfile(
-            ProfileManager.currentProfile,
-            ProfileManager.profiles[ProfileManager.currentProfile]
-        )
+        try {
+            ProfileManager.SaveProfile(
+                ProfileManager.currentProfile,
+                ProfileManager.profiles[ProfileManager.currentProfile]
+            )
+        } catch as err {
+            MsgBox("The attending assignments could not be saved. The previous file was left unchanged.`n`n" err.Message, "Save Failed", "Icon!")
+            return
+        }
         modGui.Destroy()
     }
-} 
+}
