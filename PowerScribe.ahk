@@ -336,7 +336,10 @@ class PowerScribe {
                 try {
                     if !this.InspectExpectedReportControl(root, el)
                         return ""
-                    text := UIAValue.Read(el)
+                    readResult := UIAValue.TryRead(el)
+                    if !readResult.supported
+                        return ""
+                    text := readResult.value
                 } catch {
                     return ""
                 }
@@ -351,8 +354,12 @@ class PowerScribe {
         fallbackText := ""
         try {
             fallbackElement := root.ElementFromPath(this.reportPath)
-            if this.IsExpectedReportControl(root, fallbackElement)
-                fallbackText := UIAValue.Read(fallbackElement)
+            if this.IsExpectedReportControl(root, fallbackElement) {
+                fallbackResult := UIAValue.TryRead(fallbackElement)
+                if !fallbackResult.supported
+                    return ""
+                fallbackText := fallbackResult.value
+            }
         }
 
         if !this.sessionDriver.IsLive(session)

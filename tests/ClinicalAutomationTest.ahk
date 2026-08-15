@@ -58,7 +58,8 @@ class ClinicalAutomationTest {
         "ReportSelectionRejectsMultipleReportCandidates",
         "ReportSelectionRejectsUnrelatedFallbackText",
         "ReportCaptureFailsClosedOnEnumerationError",
-        "ReportCaptureFailsClosedOnUnreadableSibling"
+        "ReportCaptureFailsClosedOnUnreadableSibling",
+        "ReportCaptureFailsClosedOnUnsupportedSibling"
     ]
 
     Setup() {
@@ -834,6 +835,21 @@ class ClinicalAutomationTest {
         Assert.Equal("", PowerScribe.ReadReportText(session))
     }
 
+    ReportCaptureFailsClosedOnUnsupportedSibling() {
+        session := {hwnd: 802, target: "ahk_id 802", processId: 42}
+        valid := FakePowerScribeReportElement(
+            802,
+            42,
+            "EXAMINATION: CT CHEST`nFINDINGS: Current report."
+        )
+        PowerScribe.sessionDriver := FixedReportRootSessionDriver(
+            session,
+            UncertainReportRoot(802, 42, [valid, UnsupportedPowerScribeReportElement(802, 42)])
+        )
+
+        Assert.Equal("", PowerScribe.ReadReportText(session))
+    }
+
     Teardown() {
         AppControl.windowDriver := this.originalDriver
         if this.originalLifecycleDriver
@@ -1119,6 +1135,18 @@ class FakePowerScribeReportElement {
             case UIA.Property.IsValuePatternAvailable: return true
             case UIA.Property.IsLegacyIAccessiblePatternAvailable: return false
         }
+        return ""
+    }
+}
+
+class UnsupportedPowerScribeReportElement {
+    __New(hwnd, processId) {
+        this.WinId := hwnd
+        this.ProcessId := processId
+        this.Type := UIA.Type.Document
+    }
+
+    GetPropertyValue(*) {
         return ""
     }
 }
