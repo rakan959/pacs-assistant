@@ -426,14 +426,18 @@ class KeybindGUI {
     }
 
     CloseProfileSelector(selectorGui) {
-        try selectorGui.Destroy()
-        if this.HasMainWindow()
-            return
-        if (ProfileManager.currentProfile != "" && ProfileManager.profiles.Has(ProfileManager.currentProfile)) {
-            this.CreateMainGUI()
-            return
-        }
-        this.RequestExit()
+        if !this.BeginProfileMutationTransaction("close the profile selector")
+            return false
+        try {
+            try selectorGui.Destroy()
+            if this.HasMainWindow()
+                return true
+            if (ProfileManager.currentProfile != "" && ProfileManager.profiles.Has(ProfileManager.currentProfile)) {
+                this.CreateMainGUI()
+                return true
+            }
+        } finally this.EndProfileMutationTransaction()
+        return this.RequestExit()
     }
 
     OpenNewProfilePrompt(selectorGui) {
@@ -503,7 +507,19 @@ class KeybindGUI {
 
         if !this.BeginProfileMutationTransaction("change the default profile")
             return false
+        selectorDisabled := false
         try {
+            try {
+                selectorGui.Opt("+Disabled")
+                selectorDisabled := true
+            } catch {
+                this.NotifyUser(
+                    "The profile selector could not be locked for this change. Reopen it and try again.",
+                    "Profile Update Failed",
+                    "Icon!"
+                )
+                return false
+            }
             if (ProfileManager.SetDefaultProfile(name)) {
                 selectorGui.Destroy()
                 this.ShowProfileSelector()  ; Refresh the selector to show updated default
@@ -515,7 +531,11 @@ class KeybindGUI {
                 "Icon!"
             )
             return false
-        } finally this.EndProfileMutationTransaction()
+        } finally {
+            if selectorDisabled
+                try selectorGui.Opt("-Disabled")
+            this.EndProfileMutationTransaction()
+        }
     }
 
     DeleteProfile(name, selectorGui) {

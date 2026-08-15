@@ -66,7 +66,8 @@ class KeybindGUITest {
         "TestSavedProfileFailsWhenRuntimeCannotBeVerified",
         "TestConcurrentMutationDuringSaveRemainsDirtyAndRestoresNewRuntime",
         "TestClinicalCommandCannotInterruptProfileApply",
-        "TestStaleProfileDeleteCannotDeleteRecreatedProfile"
+        "TestStaleProfileDeleteCannotDeleteRecreatedProfile",
+        "TestProfileSelectorCloseCannotInterruptDefaultProfileTransaction"
     ]
 
     Setup() {
@@ -516,6 +517,49 @@ class KeybindGUITest {
         Assert.Equal(0, gui.exitCalls)
         Assert.Equal(2, gui.notifications.Length)
         Assert.True(InStr(gui.notifications[1].message, "Paste Wet Read") > 0)
+    }
+
+    TestProfileSelectorCloseCannotInterruptDefaultProfileTransaction() {
+        originalProfiles := ProfileManager.profiles
+        originalCurrent := ProfileManager.currentProfile
+        originalDefault := ProfileManager.defaultProfile
+        originalStorageDriver := ProfileManager.storageDriver
+        profile := ProfileManager.NewProfile()
+        selector := ReentrantSelectorDialog()
+        gui := {
+            base: ProfileSelectorTransactionGUI.Prototype,
+            mainWindowCalls: 0,
+            selectorCalls: 0,
+            notifications: []
+        }
+        gui.notificationDriver := ArrayNotificationDriver(gui.notifications)
+        driver := ReentrantDefaultProfileStorageDriver(
+            (*) => gui.CloseProfileSelector(selector),
+            selector
+        )
+
+        try {
+            ProfileManager.profiles := Map("Night", profile)
+            ProfileManager.currentProfile := "Night"
+            ProfileManager.defaultProfile := ""
+            ProfileManager.storageDriver := driver
+            result := gui.SetDefaultProfile("Night", selector)
+            capturedDefault := ProfileManager.defaultProfile
+        } finally {
+            ProfileManager.profiles := originalProfiles
+            ProfileManager.currentProfile := originalCurrent
+            ProfileManager.defaultProfile := originalDefault
+            ProfileManager.storageDriver := originalStorageDriver
+        }
+
+        Assert.True(result)
+        Assert.True(driver.closeAttempted)
+        Assert.False(driver.closeResult)
+        Assert.True(driver.observedDisabled)
+        Assert.Equal(1, selector.destroyCalls)
+        Assert.Equal(0, gui.mainWindowCalls)
+        Assert.Equal(1, gui.selectorCalls)
+        Assert.Equal("Night", capturedDefault)
     }
 
     TestTrayExitUsesTheSameClinicalAndCaptureGate() {
@@ -3098,6 +3142,57 @@ class FakeProfileDialog {
 
     Destroy() {
         this.destroyed := true
+    }
+}
+
+class ReentrantSelectorDialog extends FakeProfileDialog {
+    __New() {
+        super.__New()
+        this.destroyCalls := 0
+        this.disabled := false
+    }
+
+    Destroy() {
+        this.destroyCalls++
+        super.Destroy()
+    }
+
+    Opt(option) {
+        if (option = "+Disabled")
+            this.disabled := true
+        else if (option = "-Disabled")
+            this.disabled := false
+    }
+}
+
+class ReentrantDefaultProfileStorageDriver {
+    __New(callback, selector) {
+        this.callback := callback
+        this.selector := selector
+        this.closeAttempted := false
+        this.closeResult := true
+        this.observedDisabled := false
+    }
+
+    WriteIni(*) {
+        this.closeAttempted := true
+        this.observedDisabled := this.selector.disabled
+        this.closeResult := this.callback.Call()
+    }
+}
+
+class ProfileSelectorTransactionGUI extends KeybindGUI {
+    HasMainWindow() {
+        return false
+    }
+
+    CreateMainGUI(*) {
+        this.mainWindowCalls++
+    }
+
+    ShowProfileSelector() {
+        this.selectorCalls++
+        return true
     }
 }
 
