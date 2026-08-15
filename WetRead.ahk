@@ -604,210 +604,210 @@ checkAttending(reportText, powerScribeSession := 0) {
 }
 
 AttendingFailureMessage(reportText, routingError := 0) {
-	if (reportText = "") {
-		message := "Could not read the report from PowerScribe, so the attending was not assigned"
-		if routingError {
-			detail := IsObject(routingError) && HasProp(routingError, "Message")
-				? routingError.Message
-				: String(routingError)
-			message .= ": " detail
-		}
-		return message ". Set it manually."
-	}
+    if (reportText = "") {
+        message := "Could not read the report from PowerScribe, so the attending was not assigned"
+        if routingError {
+            detail := IsObject(routingError) && HasProp(routingError, "Message")
+                ? routingError.Message
+                : String(routingError)
+            message .= ": " detail
+        }
+        return message ". Set it manually."
+    }
 
-	if routingError {
-		detail := IsObject(routingError) && HasProp(routingError, "Message")
-			? routingError.Message
-			: String(routingError)
-		return "The report was read, but the attending could not be assigned: " detail ". Set it manually."
-	}
+    if routingError {
+        detail := IsObject(routingError) && HasProp(routingError, "Message")
+            ? routingError.Message
+            : String(routingError)
+        return "The report was read, but the attending could not be assigned: " detail ". Set it manually."
+    }
 
-	return "The report was read, but no attending was assigned. Set it manually."
+    return "The report was read, but no attending was assigned. Set it manually."
 }
 
 RunPinnedWetReadWorkflow(
-	clipText,
-	pasteMode,
-	openSticky,
-	captureReport,
-	routeAttending,
-	pasteAction,
-	notifier := 0
+    clipText,
+    pasteMode,
+    openSticky,
+    captureReport,
+    routeAttending,
+    pasteAction,
+    notifier := 0
 ) {
-	; Establish the study-specific PACS target first. Later PowerScribe focus changes
-	; must never decide which Sticky Notes window receives the text.
-	attendingRouted := false
-	attendingError := 0
-	haystack := ""
-	try {
-		stickySession := 0
-		try {
-			stickySession := openSticky.Call()
-		} catch as err {
-			attendingError := err
-			message := "A new Sticky Notes window for the active Vue PACS study could not be verified. Nothing was pasted: " err.Message
-			if notifier
-				notifier.Call(message, "Sticky Note Target Not Verified", "Icon!")
-			else
-				MsgBox(message, "Sticky Note Target Not Verified", "Icon!")
-			return false
-		}
-		if !stickySession {
-			message := "A new Sticky Notes window for the active Vue PACS study could not be verified. Nothing was pasted."
-			if notifier
-				notifier.Call(message, "Sticky Note Target Not Verified", "Icon!")
-			else
-				MsgBox(message, "Sticky Note Target Not Verified", "Icon!")
-			return false
-		}
+    ; Establish the study-specific PACS target first. Later PowerScribe focus changes
+    ; must never decide which Sticky Notes window receives the text.
+    attendingRouted := false
+    attendingError := 0
+    haystack := ""
+    try {
+        stickySession := 0
+        try {
+            stickySession := openSticky.Call()
+        } catch as err {
+            attendingError := err
+            message := "A new Sticky Notes window for the active Vue PACS study could not be verified. Nothing was pasted: " err.Message
+            if notifier
+                notifier.Call(message, "Sticky Note Target Not Verified", "Icon!")
+            else
+                MsgBox(message, "Sticky Note Target Not Verified", "Icon!")
+            return false
+        }
+        if !stickySession {
+            message := "A new Sticky Notes window for the active Vue PACS study could not be verified. Nothing was pasted."
+            if notifier
+                notifier.Call(message, "Sticky Note Target Not Verified", "Icon!")
+            else
+                MsgBox(message, "Sticky Note Target Not Verified", "Icon!")
+            return false
+        }
 
-		reportCapture := 0
-		try reportCapture := captureReport.Call()
-		catch as err
-			attendingError := err
-		if !attendingError {
-			if (!IsObject(reportCapture)
-				|| !HasProp(reportCapture, "text")
-				|| !HasProp(reportCapture, "session")
-				|| Type(reportCapture.text) != "String") {
-				attendingError := Error("PowerScribe returned an invalid report capture")
-			} else
-				haystack := reportCapture.text
-		}
+        reportCapture := 0
+        try reportCapture := captureReport.Call()
+        catch as err
+            attendingError := err
+        if !attendingError {
+            if (!IsObject(reportCapture)
+                || !HasProp(reportCapture, "text")
+                || !HasProp(reportCapture, "session")
+                || Type(reportCapture.text) != "String") {
+                attendingError := Error("PowerScribe returned an invalid report capture")
+            } else
+                haystack := reportCapture.text
+        }
 
-		if (haystack != "") {
-			try {
-				routeAttending.Call(haystack, reportCapture.session)
-				attendingRouted := true
-			} catch as err
-				attendingError := err
-		}
+        if (haystack != "") {
+            try {
+                routeAttending.Call(haystack, reportCapture.session)
+                attendingRouted := true
+            } catch as err
+                attendingError := err
+        }
 
-		return pasteAction.Call(clipText, pasteMode, stickySession)
-	} finally {
-		if !attendingRouted {
-			message := AttendingFailureMessage(haystack, attendingError)
-			if notifier
-				notifier.Call(message, "Attending Not Assigned", "Icon!")
-			else
-				MsgBox(message, "Attending Not Assigned", "Icon!")
-		}
-	}
+        return pasteAction.Call(clipText, pasteMode, stickySession)
+    } finally {
+        if !attendingRouted {
+            message := AttendingFailureMessage(haystack, attendingError)
+            if notifier
+                notifier.Call(message, "Attending Not Assigned", "Icon!")
+            else
+                MsgBox(message, "Attending Not Assigned", "Icon!")
+        }
+    }
 }
 
 wetRead() {
-	; Use clipboard contents; bail out if empty to avoid blank notes
-	clipText := A_Clipboard
-	if (clipText = "") {
-		MsgBox("No text in clipboard to paste as wet read.")
-		return
-	}
+    ; Use clipboard contents; bail out if empty to avoid blank notes
+    clipText := A_Clipboard
+    if (clipText = "") {
+        MsgBox("No text in clipboard to paste as wet read.")
+        return
+    }
 
-	; Choose paste strategy before any window focus changes
-	pasteMode := PromptWetReadMode()
-	if (pasteMode = "cancel") {
-		return
-	}
+    ; Choose paste strategy before any window focus changes
+    pasteMode := PromptWetReadMode()
+    if (pasteMode = "cancel") {
+        return
+    }
 
-	return RunPinnedWetReadWorkflow(
-		clipText,
-		pasteMode,
-		(*) => StickyNoteOpener().Open({title: "Vue PACS", exe: "mp.exe"}),
-		(*) => PowerScribe.CaptureReport(),
-		(reportText, session) => checkAttending(reportText, session),
-		PerformWetReadPaste
-	)
+    return RunPinnedWetReadWorkflow(
+        clipText,
+        pasteMode,
+        (*) => StickyNoteOpener().Open({title: "Vue PACS", exe: "mp.exe"}),
+        (*) => PowerScribe.CaptureReport(),
+        (reportText, session) => checkAttending(reportText, session),
+        PerformWetReadPaste
+    )
 }
 
 PerformWetReadPaste(clipText, pasteMode, stickySession) {
-	; Reacquire the exact new window pinned before PowerScribe routing. Never resolve
-	; Sticky Notes again by title or accept a reused/pre-existing study window.
-	if (!IsObject(stickySession)
-		|| !HasProp(stickySession, "driver")
-		|| !stickySession.driver.ActivateSticky(stickySession)) {
-		MsgBox("The pinned Sticky Notes window is no longer the verified target. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-		return
-	}
-	sticky := stickySession.driver.GetRoot(stickySession.stickyHwnd)
-	if (!sticky
-		|| !NativeWetReadDriver.IsExpectedStickyRoot(stickySession.pacsRoot, sticky)) {
-		MsgBox("The pinned Sticky Notes UI target could not be reacquired. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-		return
-	}
-	try {
-		if (sticky.WinId != stickySession.stickyHwnd) {
-			MsgBox("The pinned Sticky Notes UI target changed. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-			return
-		}
-	} catch {
-		MsgBox("The pinned Sticky Notes UI target could not be verified. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-		return
-	}
-	try wetReadDriver := NativeWetReadDriver.ForRoot(sticky)
-	catch {
-		MsgBox("Sticky Notes window identity could not be pinned. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-		return
-	}
-	; Get note input field
-	noteField := ""
-	try noteField := sticky.ElementFromPath("YY0/")
-	if (!noteField) {
-		; Try another attempt after slight delay
-		Sleep(200)
-		try noteField := sticky.ElementFromPath("YY0/")
-	}
-	if (!noteField) {
-		MsgBox("Could not locate Sticky Notes text field.")
-		return
-	}
-	if !NativeWetReadDriver.IsExpectedNoteField(sticky, noteField) {
-		MsgBox("Sticky Notes returned an unexpected text target. Nothing was pasted; verify the window and try again.", "Sticky Note Target Not Verified", "Icon!")
-		return
-	}
+    ; Reacquire the exact new window pinned before PowerScribe routing. Never resolve
+    ; Sticky Notes again by title or accept a reused/pre-existing study window.
+    if (!IsObject(stickySession)
+        || !HasProp(stickySession, "driver")
+        || !stickySession.driver.ActivateSticky(stickySession)) {
+        MsgBox("The pinned Sticky Notes window is no longer the verified target. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
+        return
+    }
+    sticky := stickySession.driver.GetRoot(stickySession.stickyHwnd)
+    if (!sticky
+        || !NativeWetReadDriver.IsExpectedStickyRoot(stickySession.pacsRoot, sticky)) {
+        MsgBox("The pinned Sticky Notes UI target could not be reacquired. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
+        return
+    }
+    try {
+        if (sticky.WinId != stickySession.stickyHwnd) {
+            MsgBox("The pinned Sticky Notes UI target changed. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
+            return
+        }
+    } catch {
+        MsgBox("The pinned Sticky Notes UI target could not be verified. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
+        return
+    }
+    try wetReadDriver := NativeWetReadDriver.ForRoot(sticky)
+    catch {
+        MsgBox("Sticky Notes window identity could not be pinned. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
+        return
+    }
+    ; Get note input field
+    noteField := ""
+    try noteField := sticky.ElementFromPath("YY0/")
+    if (!noteField) {
+        ; Try another attempt after slight delay
+        Sleep(200)
+        try noteField := sticky.ElementFromPath("YY0/")
+    }
+    if (!noteField) {
+        MsgBox("Could not locate Sticky Notes text field.")
+        return
+    }
+    if !NativeWetReadDriver.IsExpectedNoteField(sticky, noteField) {
+        MsgBox("Sticky Notes returned an unexpected text target. Nothing was pasted; verify the window and try again.", "Sticky Note Target Not Verified", "Icon!")
+        return
+    }
 
-	; Optionally normalize line endings to CRLF for sticky note field
-	if (Settings.Get("AutoConvertWetReadLineEndings")) {
-		clipText := RegExReplace(clipText, "(\r)?\n", "`r`n")
-	}
+    ; Optionally normalize line endings to CRLF for sticky note field
+    if (Settings.Get("AutoConvertWetReadLineEndings")) {
+        clipText := RegExReplace(clipText, "(\r)?\n", "`r`n")
+    }
 
-	result := WetReadPasteEngine.Paste(
-		noteField,
-		clipText,
-		pasteMode,
-		wetReadDriver
-	)
+    result := WetReadPasteEngine.Paste(
+        noteField,
+        clipText,
+        pasteMode,
+        wetReadDriver
+    )
 
-	if result.unsupported {
-		method := pasteMode = "uia" ? "UIA Value" : "ControlSetText"
-		MsgBox("This Sticky Notes field does not expose a verified target for the " method " method. Run the wet read again and choose another paste method.", "Paste Method Unavailable", "Icon!")
-	} else if !result.success {
-		if (result.reason = "value-changed") {
-			MsgBox("The Sticky Notes value changed while PACS Assistant was verifying the wet read. No retry or rollback was attempted, so a newer edit was not overwritten. Keep the window open and verify the note manually.", "Sticky Note Changed", "Icon!")
-		} else if (result.reason = "precondition-changed") {
-			MsgBox("Sticky Notes changed before PACS Assistant wrote anything. No paste or rollback was attempted, so the newer note was not overwritten. Keep the window open and verify it manually.", "Sticky Note Changed", "Icon!")
-		} else if (result.reason = "read" || result.reason = "precondition-read") {
-			MsgBox("PACS Assistant could not verify the current Sticky Notes value, so no paste or rollback was attempted. Keep the window open and verify it manually.", "Sticky Note Not Verified", "Icon!")
-		} else if !result.restored {
-			MsgBox("The wet read failed and PACS Assistant could not restore the previous sticky note. Keep the window open and verify the note manually.", "Sticky Note Restore Failed", "Icon!")
-		} else {
-			MsgBox("The wet read was not pasted. The sticky note still matches its original value; verify it before closing the window.", "Paste Failed", "Icon!")
-		}
-	}
+    if result.unsupported {
+        method := pasteMode = "uia" ? "UIA Value" : "ControlSetText"
+        MsgBox("This Sticky Notes field does not expose a verified target for the " method " method. Run the wet read again and choose another paste method.", "Paste Method Unavailable", "Icon!")
+    } else if !result.success {
+        if (result.reason = "value-changed") {
+            MsgBox("The Sticky Notes value changed while PACS Assistant was verifying the wet read. No retry or rollback was attempted, so a newer edit was not overwritten. Keep the window open and verify the note manually.", "Sticky Note Changed", "Icon!")
+        } else if (result.reason = "precondition-changed") {
+            MsgBox("Sticky Notes changed before PACS Assistant wrote anything. No paste or rollback was attempted, so the newer note was not overwritten. Keep the window open and verify it manually.", "Sticky Note Changed", "Icon!")
+        } else if (result.reason = "read" || result.reason = "precondition-read") {
+            MsgBox("PACS Assistant could not verify the current Sticky Notes value, so no paste or rollback was attempted. Keep the window open and verify it manually.", "Sticky Note Not Verified", "Icon!")
+        } else if !result.restored {
+            MsgBox("The wet read failed and PACS Assistant could not restore the previous sticky note. Keep the window open and verify the note manually.", "Sticky Note Restore Failed", "Icon!")
+        } else {
+            MsgBox("The wet read was not pasted. The sticky note still matches its original value; verify it before closing the window.", "Paste Failed", "Icon!")
+        }
+    }
 
-	Return
+    Return
 }
 
 PromptWetReadMode() {
-	modeGui := Gui("+AlwaysOnTop", "Wet Read Paste Mode")
-	modeGui.Add("Text",, "Select paste method for this run:")
+    modeGui := Gui("+AlwaysOnTop", "Wet Read Paste Mode")
+    modeGui.Add("Text",, "Select paste method for this run:")
 
-	; Closing the window must never choose a mutation method implicitly.
-	choice := "cancel"
+    ; Closing the window must never choose a mutation method implicitly.
+    choice := "cancel"
 
-	modeGui.Add("Button", "w200", "UIA Value pattern").OnEvent("Click", (*) => (choice := "uia", modeGui.Destroy()))
-	modeGui.Add("Button", "w200", "ControlSetText").OnEvent("Click", (*) => (choice := "control", modeGui.Destroy()))
-	modeGui.Add("Button", "w200", "Cancel").OnEvent("Click", (*) => (choice := "cancel", modeGui.Destroy()))
-	modeGui.Show()
-	WinWaitClose(modeGui.Hwnd)
-	return choice
+    modeGui.Add("Button", "w200", "UIA Value pattern").OnEvent("Click", (*) => (choice := "uia", modeGui.Destroy()))
+    modeGui.Add("Button", "w200", "ControlSetText").OnEvent("Click", (*) => (choice := "control", modeGui.Destroy()))
+    modeGui.Add("Button", "w200", "Cancel").OnEvent("Click", (*) => (choice := "cancel", modeGui.Destroy()))
+    modeGui.Show()
+    WinWaitClose(modeGui.Hwnd)
+    return choice
 }
