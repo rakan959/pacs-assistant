@@ -91,11 +91,19 @@ class KeybindGUI {
     OpenProfileSelector() {
         ; A selector has no active profile. Suspend the old profile before exposing any
         ; operation which can rename or delete it.
-        HotkeyManager.DisableAllHotkeys()
+        this.PrepareForProfileSwitch()
         if this.HasMainWindow()
             this.gui.Destroy()
         this.gui := ""
         return this.ShowProfileSelector()
+    }
+
+    PrepareForProfileSwitch() {
+        ; Destroying an owned key-capture dialog does not guarantee InputHook.Stop().
+        ; Tear the hook down explicitly before its owner disappears, then suspend the
+        ; old profile's runtime bindings while no profile is selected.
+        this.StopListening()
+        HotkeyManager.DisableAllHotkeys()
     }
 
     HasMainWindow() {

@@ -11,6 +11,7 @@ class KeybindGUITest {
         "TestProfileBindingOwnerUsesRuntimeIdentity",
         "TestCaptureSuppressesInputToTheForegroundWindow",
         "TestCapturedHotkeyUsesTerminationModifierSnapshot",
+        "TestProfileSwitchPreparationStopsActiveCapture",
         "TestCaptureFailureRestoresBindingAndHookState",
         "TestRejectedCapturedKeyRestoresPriorBinding",
         "TestRejectedScopeChangeRestoresPriorScope",
@@ -77,6 +78,32 @@ class KeybindGUITest {
         hook := FakeCaptureHook("S", "<^>!")
 
         Assert.Equal("^!S", this.gui.CapturedHotkey(hook))
+    }
+
+    TestProfileSwitchPreparationStopsActiveCapture() {
+        originalListening := KeybindGUI.isListening
+        originalControl := KeybindGUI.listeningControl
+        originalHook := KeybindGUI.activeInputHook
+        hook := FakeCaptureHook("F13")
+        KeybindGUI.isListening := true
+        KeybindGUI.listeningControl := {}
+        KeybindGUI.activeInputHook := hook
+
+        try {
+            this.gui.PrepareForProfileSwitch()
+            capturedListening := KeybindGUI.isListening
+            capturedHook := KeybindGUI.activeInputHook
+            capturedStopped := hook.stopped
+        } finally {
+            this.gui.StopListening()
+            KeybindGUI.isListening := originalListening
+            KeybindGUI.listeningControl := originalControl
+            KeybindGUI.activeInputHook := originalHook
+        }
+
+        Assert.False(capturedListening)
+        Assert.Equal(0, capturedHook)
+        Assert.True(capturedStopped)
     }
 
     TestCaptureFailureRestoresBindingAndHookState() {
