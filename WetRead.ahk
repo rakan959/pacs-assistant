@@ -83,22 +83,72 @@ class NativeStickyNoteWindowDriver {
     }
 
     WaitForActiveSticky(processId, timeoutSeconds) {
-        selector := "Sticky Notes ahk_pid " processId
-        try {
-            if !WinWaitActive(selector, , timeoutSeconds)
-                return 0
-            hwnd := WinActive(selector)
-            if (hwnd <= 0 || !(WinGetTitle("ahk_id " hwnd) == "Sticky Notes"))
-                return 0
-            return hwnd
-        } catch {
-            return 0
+        deadline := DllCall("GetTickCount64", "UInt64") + timeoutSeconds * 1000
+        while (DllCall("GetTickCount64", "UInt64") < deadline) {
+            try {
+                hwnd := WinActive("A")
+                if (hwnd > 0
+                    && WinGetPID("ahk_id " hwnd) = processId
+                    && WinGetTitle("ahk_id " hwnd) == "Sticky Notes")
+                    return hwnd
+            }
+            Sleep(25)
         }
+        return 0
     }
 
     GetOwner(hwnd) {
         try return DllCall("GetWindow", "ptr", hwnd, "uint", 4, "ptr")
         return 0
+    }
+
+    FindExactStickyWindows(processId) {
+        matches := []
+        try windows := WinGetList("ahk_pid " processId)
+        catch
+            return 0
+        for hwnd in windows {
+            try {
+                if (WinGetPID("ahk_id " hwnd) = processId
+                    && WinGetTitle("ahk_id " hwnd) == "Sticky Notes")
+                    matches.Push(hwnd)
+            } catch {
+                return 0
+            }
+        }
+        return matches
+    }
+
+    IsExpectedStickySession(session) {
+        if (!IsObject(session)
+            || !HasProp(session, "pacsHwnd")
+            || !HasProp(session, "stickyHwnd")
+            || !HasProp(session, "processId"))
+            return false
+        windows := this.FindExactStickyWindows(session.processId)
+        if !IsObject(windows)
+            return false
+        found := false
+        for hwnd in windows {
+            if (hwnd = session.stickyHwnd) {
+                found := true
+                break
+            }
+        }
+        return found && this.GetOwner(session.stickyHwnd) = session.pacsHwnd
+    }
+
+    ActivateSticky(session) {
+        if !this.IsExpectedStickySession(session)
+            return false
+        try {
+            WinActivate("ahk_id " session.stickyHwnd)
+            if (WinWaitActive("ahk_id " session.stickyHwnd, , 2) != session.stickyHwnd)
+                return false
+        } catch {
+            return false
+        }
+        return this.IsExpectedStickySession(session)
     }
 }
 
@@ -130,8 +180,13 @@ class StickyNoteOpener {
         button := this.FindUniqueStickyButton(liveRoot)
         if (!button
             || !driver.IsExpectedPacsSession(pacsTarget, pacsHwnd, liveRoot.ProcessId)
-            || !driver.IsActive(pacsHwnd)
-            || !driver.InvokeStickyButton(button))
+            || !driver.IsActive(pacsHwnd))
+            return 0
+
+        preexistingSticky := driver.FindExactStickyWindows(liveRoot.ProcessId)
+        if !IsObject(preexistingSticky)
+            return 0
+        if !driver.InvokeStickyButton(button)
             return 0
 
         ; A pre-existing, inactive Sticky Notes window cannot satisfy this wait.
@@ -139,8 +194,12 @@ class StickyNoteOpener {
         stickyHwnd := driver.WaitForActiveSticky(liveRoot.ProcessId, 2)
         if (stickyHwnd <= 0 || stickyHwnd = pacsHwnd)
             return 0
+        for priorHwnd in preexistingSticky {
+            if (stickyHwnd = priorHwnd)
+                return 0
+        }
         owner := driver.GetOwner(stickyHwnd)
-        if (owner && owner != pacsHwnd)
+        if (owner != pacsHwnd)
             return 0
 
         stickyRoot := driver.GetRoot(stickyHwnd)
@@ -157,7 +216,9 @@ class StickyNoteOpener {
             pacsHwnd: pacsHwnd,
             pacsRoot: liveRoot,
             stickyHwnd: stickyHwnd,
-            stickyRoot: stickyRoot
+            stickyRoot: stickyRoot,
+            processId: liveRoot.ProcessId,
+            driver: driver
         }
     }
 
@@ -291,7 +352,7 @@ class NativeWetReadDriver {
         try {
             for typeName in ["Document", "Edit"] {
                 for candidate in root.FindElements({Type: typeName}) {
-                    if !this.HasExpectedNoteCapabilities(root, candidate)
+                    if !this.InspectExpectedNoteCapabilities(root, candidate)
                         continue
                     eligibleCount++
                     if (eligibleCount > 1)
@@ -310,23 +371,25 @@ class NativeWetReadDriver {
         if !root || !field
             return false
 
-        try {
-            rootProcess := root.ProcessId
-            if (rootProcess <= 0 || field.ProcessId != rootProcess)
-                return false
-            rootWindow := root.WinId
-            if (rootWindow <= 0 || field.WinId != rootWindow)
-                return false
-            if (field.Type != UIA.Type.Document && field.Type != UIA.Type.Edit)
-                return false
-            if !field.IsEnabled
-                return false
-            return field.IsValuePatternAvailable
-                || field.IsLegacyIAccessiblePatternAvailable
-                || field.NativeWindowHandle
-        } catch {
+        try return this.InspectExpectedNoteCapabilities(root, field)
+        catch
             return false
-        }
+    }
+
+    static InspectExpectedNoteCapabilities(root, field) {
+        rootProcess := root.ProcessId
+        if (rootProcess <= 0 || field.ProcessId != rootProcess)
+            return false
+        rootWindow := root.WinId
+        if (rootWindow <= 0 || field.WinId != rootWindow)
+            return false
+        if (field.Type != UIA.Type.Document && field.Type != UIA.Type.Edit)
+            return false
+        if !field.IsEnabled
+            return false
+        return field.IsValuePatternAvailable
+            || field.IsLegacyIAccessiblePatternAvailable
+            || field.NativeWindowHandle
     }
 
     static ElementsMatch(left, right, comparator := 0) {
@@ -384,7 +447,8 @@ class NativeWetReadDriver {
     }
 
     SetClipboard(value) {
-        A_Clipboard := value
+        this.SetPrivateClipboardText(value)
+        return this.ClipboardSequence()
     }
 
     WaitForClipboard(timeoutSeconds) {
@@ -393,6 +457,67 @@ class NativeWetReadDriver {
 
     RestoreClipboard(value) {
         A_Clipboard := value
+    }
+
+    ClipboardSequence() {
+        return DllCall("GetClipboardSequenceNumber", "UInt")
+    }
+
+    SetPrivateClipboardText(value) {
+        if !DllCall("OpenClipboard", "Ptr", 0)
+            throw OSError(A_LastError, "OpenClipboard")
+        try {
+            if !DllCall("EmptyClipboard")
+                throw OSError(A_LastError, "EmptyClipboard")
+
+            ; Publish the opt-out formats in the same open/close transaction as the
+            ; text, so clipboard history/cloud/monitoring never observes the staged
+            ; clinical text without its exclusion contract.
+            this.SetClipboardDwordFormat("ExcludeClipboardContentFromMonitorProcessing", 1)
+            this.SetClipboardDwordFormat("CanIncludeInClipboardHistory", 0)
+            this.SetClipboardDwordFormat("CanUploadToCloudClipboard", 0)
+            this.SetClipboardUnicodeText(value)
+        } finally {
+            DllCall("CloseClipboard")
+        }
+    }
+
+    SetClipboardDwordFormat(name, value) {
+        format := DllCall("RegisterClipboardFormat", "Str", name, "UInt")
+        if !format
+            throw OSError(A_LastError, "RegisterClipboardFormat")
+        this.SetClipboardMemory(format, 4, (buffer) => NumPut("UInt", value, buffer))
+    }
+
+    SetClipboardUnicodeText(value) {
+        byteCount := (StrLen(value) + 1) * 2
+        this.SetClipboardMemory(
+            13,
+            byteCount,
+            (buffer) => StrPut(value, buffer, "UTF-16")
+        )
+    }
+
+    SetClipboardMemory(format, byteCount, writer) {
+        ; GMEM_MOVEABLE | GMEM_ZEROINIT is required by SetClipboardData.
+        memory := DllCall("GlobalAlloc", "UInt", 0x42, "UPtr", byteCount, "Ptr")
+        if !memory
+            throw OSError(A_LastError, "GlobalAlloc")
+        transferred := false
+        try {
+            buffer := DllCall("GlobalLock", "Ptr", memory, "Ptr")
+            if !buffer
+                throw OSError(A_LastError, "GlobalLock")
+            try writer.Call(buffer)
+            finally DllCall("GlobalUnlock", "Ptr", memory)
+
+            if !DllCall("SetClipboardData", "UInt", format, "Ptr", memory, "Ptr")
+                throw OSError(A_LastError, "SetClipboardData")
+            transferred := true
+        } finally {
+            if !transferred
+                DllCall("GlobalFree", "Ptr", memory)
+        }
     }
 
     PasteClipboard(field) {
@@ -432,8 +557,8 @@ class NativeWetReadDriver {
     }
 
     WaitForValue(field, expected, timeoutMs) {
-        started := A_TickCount
-        while (A_TickCount - started < timeoutMs) {
+        started := this.NowMilliseconds()
+        while (this.NowMilliseconds() - started < timeoutMs) {
             current := ""
             try current := this.Read(field)
             if (current == expected)
@@ -441,6 +566,10 @@ class NativeWetReadDriver {
             Sleep(100)
         }
         return false
+    }
+
+    NowMilliseconds() {
+        return DllCall("GetTickCount64", "UInt64")
     }
 }
 
@@ -487,21 +616,32 @@ class WetReadPasteEngine {
     static PasteWithClipboard(field, text, originalValue, driver, result) {
         backupCaptured := false
         fieldChanged := false
+        ownedSequence := 0
 
         try {
             clipboardBackup := driver.CaptureClipboard()
             backupCaptured := true
-            driver.SetClipboard(text)
-            if !driver.WaitForClipboard(0.5) {
+            ownedSequence := driver.SetClipboard(text)
+            if (ownedSequence <= 0 || !driver.WaitForClipboard(0.5)) {
                 result.reason := "clipboard"
                 return result
             }
 
             loop this.attempts {
+                if (driver.ClipboardSequence() != ownedSequence) {
+                    result.reason := "clipboard-changed"
+                    result.error := "The clipboard changed before the wet read could be pasted"
+                    return result
+                }
                 ; Clear can mutate before it raises. Mark the transaction dirty first
                 ; so every uncertain/partial clear takes the rollback path.
                 fieldChanged := true
                 driver.Clear(field)
+                if (driver.ClipboardSequence() != ownedSequence) {
+                    result.reason := "clipboard-changed"
+                    result.error := "The clipboard changed while the wet read was being pasted"
+                    return result
+                }
                 driver.PasteClipboard(field)
                 if driver.WaitForValue(field, text, this.verifyTimeoutMs) {
                     result.success := true
@@ -514,9 +654,12 @@ class WetReadPasteEngine {
             result.error := err.Message
         } finally {
             if (!result.success && fieldChanged)
-                result.restored := this.RestoreWithClipboard(field, originalValue, driver, result)
+                result.restored := this.RestoreDirect(field, originalValue, "uia", driver, result)
 
-            if backupCaptured {
+            ; Restore the entry we displaced only while the clipboard still holds
+            ; our exact generation. A newer user/application copy always wins.
+            if (backupCaptured && ownedSequence > 0
+                && driver.ClipboardSequence() = ownedSequence) {
                 try driver.RestoreClipboard(clipboardBackup)
                 catch as restoreError {
                     result.clipboardRestored := false
@@ -526,23 +669,6 @@ class WetReadPasteEngine {
         }
 
         return result
-    }
-
-    static RestoreWithClipboard(field, originalValue, driver, result) {
-        try {
-            driver.SetClipboard(originalValue)
-            if (originalValue != "" && !driver.WaitForClipboard(0.5)) {
-                this.AppendError(result, "Previous note could not be staged for restoration")
-                return false
-            }
-            driver.Clear(field)
-            if (originalValue != "")
-                driver.PasteClipboard(field)
-            return driver.WaitForValue(field, originalValue, this.verifyTimeoutMs)
-        } catch as err {
-            this.AppendError(result, "Previous note restore failed: " err.Message)
-            return false
-        }
     }
 
     static PasteDirect(field, text, originalValue, mode, driver, result) {
@@ -655,6 +781,48 @@ RunWetReadPasteWithAttendingOutcome(
 	}
 }
 
+RunPinnedWetReadWorkflow(
+	clipText,
+	pasteMode,
+	openSticky,
+	captureReport,
+	routeAttending,
+	pasteAction,
+	notifier := 0
+) {
+	; Establish the study-specific PACS target first. Later PowerScribe focus changes
+	; must never decide which Sticky Notes window receives the text.
+	stickySession := openSticky.Call()
+	if !stickySession {
+		message := "A new Sticky Notes window for the active Vue PACS study could not be verified. Nothing was pasted."
+		if notifier
+			notifier.Call(message, "Sticky Note Target Not Verified", "Icon!")
+		else
+			MsgBox(message, "Sticky Note Target Not Verified", "Icon!")
+		return false
+	}
+
+	attendingRouted := false
+	attendingError := 0
+	reportCapture := captureReport.Call()
+	haystack := reportCapture.text
+	if (haystack != "") {
+		try {
+			routeAttending.Call(haystack, reportCapture.session)
+			attendingRouted := true
+		} catch as err
+			attendingError := err
+	}
+
+	return RunWetReadPasteWithAttendingOutcome(
+		pasteAction.Bind(clipText, pasteMode, stickySession),
+		attendingRouted,
+		haystack,
+		attendingError,
+		notifier
+	)
+}
+
 wetRead() {
 	; Use clipboard contents; bail out if empty to avoid blank notes
 	clipText := A_Clipboard
@@ -669,45 +837,45 @@ wetRead() {
 		return
 	}
 
-	; Read current report for attending selection. A failure here must not abort the
-	; wet read - the sticky note is the point - but it does get reported at the end,
-	; because a report that silently keeps the wrong attending goes to the wrong queue.
-	attendingRouted := false
-	attendingError := 0
-	reportCapture := PowerScribe.CaptureReport()
-	haystack := reportCapture.text
-	if (haystack != "") {
-		try {
-			checkAttending(haystack, reportCapture.session)
-			attendingRouted := true
-		} catch as err
-			attendingError := err
-	}
-
-	return RunWetReadPasteWithAttendingOutcome(
-		PerformWetReadPaste.Bind(clipText, pasteMode),
-		attendingRouted,
-		haystack,
-		attendingError
+	return RunPinnedWetReadWorkflow(
+		clipText,
+		pasteMode,
+		(*) => StickyNoteOpener().Open({title: "Vue PACS", exe: "mp.exe"}),
+		(*) => PowerScribe.CaptureReport(),
+		(reportText, session) => checkAttending(reportText, session),
+		PerformWetReadPaste
 	)
 }
 
-PerformWetReadPaste(clipText, pasteMode) {
-	; Resolve a unique exact PACS title/executable, invoke a unique same-window
-	; semantic button, and capture only the Sticky Notes window that becomes active.
-	stickySession := StickyNoteOpener().Open({title: "Vue PACS", exe: "mp.exe"})
-	if !stickySession {
-		MsgBox("The active Vue PACS Sticky Notes target could not be verified. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
+PerformWetReadPaste(clipText, pasteMode, stickySession) {
+	; Reacquire the exact new window pinned before PowerScribe routing. Never resolve
+	; Sticky Notes again by title or accept a reused/pre-existing study window.
+	if (!IsObject(stickySession)
+		|| !HasProp(stickySession, "driver")
+		|| !stickySession.driver.ActivateSticky(stickySession)) {
+		MsgBox("The pinned Sticky Notes window is no longer the verified target. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
 		return
 	}
-	sticky := stickySession.stickyRoot
+	sticky := stickySession.driver.GetRoot(stickySession.stickyHwnd)
+	if (!sticky
+		|| !NativeWetReadDriver.IsExpectedStickyRoot(stickySession.pacsRoot, sticky)) {
+		MsgBox("The pinned Sticky Notes UI target could not be reacquired. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
+		return
+	}
+	try {
+		if (sticky.WinId != stickySession.stickyHwnd) {
+			MsgBox("The pinned Sticky Notes UI target changed. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
+			return
+		}
+	} catch {
+		MsgBox("The pinned Sticky Notes UI target could not be verified. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
+		return
+	}
 	try wetReadDriver := NativeWetReadDriver.ForRoot(sticky)
 	catch {
 		MsgBox("Sticky Notes window identity could not be pinned. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
 		return
 	}
-	try sticky.SetFocus()
-
 	; Get note input field
 	noteField := ""
 	try noteField := sticky.ElementFromPath("YY0/")

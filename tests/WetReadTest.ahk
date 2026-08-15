@@ -7,6 +7,8 @@ class WetReadTest {
         "ClipboardFailureDoesNotTouchTheNote",
         "FailedSendRestoresThePreviousNoteAndClipboard",
         "SuccessfulSendRestoresTheClipboard",
+        "ExternalClipboardChangeSurvivesSendTransaction",
+        "SendRollbackNeverStagesThePreviousClinicalNote",
         "UnsupportedUIADoesNotClearTheNote",
         "PostMutationUIAErrorRestoresThePreviousNote",
         "FailedUIAVerificationRestoresThePreviousNote",
@@ -26,10 +28,13 @@ class WetReadTest {
         "StickyOpenerRejectsTitleChangeBeforeInvoke",
         "StickyOpenerRejectsDuplicateAppearingBeforeInvoke",
         "StickyOpenerRejectsUnactivatedStickyWindow",
+        "StickyOpenerRejectsPreexistingReactivatedStickyWindow",
+        "StickyOpenerRejectsOwnerlessStickyWindow",
         "StickyOpenerPinsNewlyActiveExactWindow",
         "StickyDriverUsesExactValidatedWindowHandle",
         "StickyNoteTargetRequiresExpectedTypeProcessAndCapability",
         "StickyNoteTargetMustBeTheUniqueWritableField",
+        "StickyNoteTargetRejectsUnreadableWritableSibling",
         "NativeDirectWriteRefusesStaleStickyTarget",
         "NativeFocusRefusesStaleStickyTargetBeforeAnyUIAction",
         "NativeFocusDoesNotClickAFieldInvalidatedBySetFocus",
@@ -40,7 +45,8 @@ class WetReadTest {
         "NativeForwardVerificationRejectsCaseOnlyDifference",
         "NativeRollbackVerificationRejectsCaseOnlyDifference",
         "RoutingFailureReportsTheActualCause",
-        "AttendingFailureIsReportedAcrossEveryStickySetupExit"
+        "AttendingFailureIsReportedAcrossEveryStickySetupExit",
+        "StickyTargetIsPinnedBeforePowerScribeRouting"
     ]
 
     ClipboardFailureDoesNotTouchTheNote() {
@@ -79,6 +85,33 @@ class WetReadTest {
         Assert.Equal("new wet read", driver.fieldValue)
         Assert.Equal("original clipboard", driver.clipboardValue)
         Assert.True(result.clipboardRestored)
+    }
+
+    ExternalClipboardChangeSurvivesSendTransaction() {
+        driver := FakeWetReadDriver("existing note", "original clipboard")
+        driver.externalCopyOnSequenceCheck := 2
+
+        result := WetReadPasteEngine.Paste(1, "new wet read", "send", driver)
+
+        Assert.False(result.success)
+        Assert.Equal("clipboard-changed", result.reason)
+        Assert.True(result.restored)
+        Assert.Equal("existing note", driver.fieldValue)
+        Assert.Equal("new user copy", driver.clipboardValue)
+        Assert.Equal(0, driver.restoreClipboardCalls)
+    }
+
+    SendRollbackNeverStagesThePreviousClinicalNote() {
+        driver := FakeWetReadDriver("prior clinical note", "original clipboard")
+        driver.failedText := "new wet read"
+
+        result := WetReadPasteEngine.Paste(1, "new wet read", "send", driver)
+
+        Assert.False(result.success)
+        Assert.True(result.restored)
+        Assert.Equal(1, driver.stagedClipboardValues.Length)
+        Assert.Equal("new wet read", driver.stagedClipboardValues[1])
+        Assert.Equal("prior clinical note", driver.fieldValue)
     }
 
     UnsupportedUIADoesNotClearTheNote() {
@@ -204,7 +237,8 @@ class WetReadTest {
         Assert.False(result.success)
         Assert.True(result.restored)
         Assert.Equal("existing note", driver.fieldValue)
-        Assert.Equal(2, driver.clearCalls)
+        Assert.Equal(1, driver.clearCalls)
+        Assert.True(driver.uiaCalls > 0)
         Assert.Equal("original clipboard", driver.clipboardValue)
     }
 
@@ -330,6 +364,27 @@ class WetReadTest {
         Assert.Equal(1, driver.invokeCalls)
     }
 
+    StickyOpenerRejectsPreexistingReactivatedStickyWindow() {
+        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
+        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
+        stickyRoot := FakeStickyTargetRoot(42, [], 200)
+        driver := FakeStickyNoteWindowDriver(pacsRoot, stickyRoot, 200)
+        driver.preexistingStickyWindows := [200]
+
+        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
+        Assert.Equal(1, driver.invokeCalls)
+    }
+
+    StickyOpenerRejectsOwnerlessStickyWindow() {
+        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
+        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
+        stickyRoot := FakeStickyTargetRoot(42, [], 200)
+        driver := FakeStickyNoteWindowDriver(pacsRoot, stickyRoot, 200)
+        driver.stickyOwner := 0
+
+        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
+    }
+
     StickyOpenerPinsNewlyActiveExactWindow() {
         button := FakeStickyTargetElement(
             UIA.Type.Button,
@@ -381,6 +436,18 @@ class WetReadTest {
             root,
             selected,
             (left, right) => left == right
+        ))
+    }
+
+    StickyNoteTargetRejectsUnreadableWritableSibling() {
+        selected := FakeStickyTargetElement(UIA.Type.Document, 42, true)
+        unreadable := UnreadableNoteFieldElement()
+        root := FakeStickyTargetRoot(42, [selected, unreadable])
+
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(
+            root,
+            selected,
+            (left, right) => left = right
         ))
     }
 
@@ -528,6 +595,37 @@ class WetReadTest {
             }
         }
     }
+
+    StickyTargetIsPinnedBeforePowerScribeRouting() {
+        events := []
+        stickySession := {stickyHwnd: 200}
+        openSticky := (*) => (events.Push("open-sticky"), stickySession)
+        captureReport := (*) => (
+            events.Push("capture-report"),
+            {text: "EXAMINATION: CT CHEST", session: {hwnd: 300}}
+        )
+        routeAttending := (*) => events.Push("route-attending")
+        pasteAction := (text, mode, session) => (
+            events.Push("paste-pinned-sticky"),
+            session = stickySession
+        )
+
+        result := RunPinnedWetReadWorkflow(
+            "wet read",
+            "uia",
+            openSticky,
+            captureReport,
+            routeAttending,
+            pasteAction,
+            (*) => 0
+        )
+
+        Assert.True(result)
+        Assert.Equal("open-sticky", events[1])
+        Assert.Equal("capture-report", events[2])
+        Assert.Equal("route-attending", events[3])
+        Assert.Equal("paste-pinned-sticky", events[4])
+    }
 }
 
 class FakeEarlyWetReadExit {
@@ -557,6 +655,11 @@ class FakeWetReadDriver {
         this.throwOnUiaValue := ""
         this.clearCalls := 0
         this.clearFailuresRemaining := 0
+        this.sequenceNumber := 10
+        this.sequenceChecks := 0
+        this.externalCopyOnSequenceCheck := 0
+        this.restoreClipboardCalls := 0
+        this.stagedClipboardValues := []
     }
 
     Read(field) {
@@ -583,6 +686,9 @@ class FakeWetReadDriver {
 
     SetClipboard(value) {
         this.clipboardValue := value
+        this.stagedClipboardValues.Push(value)
+        this.sequenceNumber++
+        return this.sequenceNumber
     }
 
     WaitForClipboard(timeoutSeconds) {
@@ -590,9 +696,21 @@ class FakeWetReadDriver {
     }
 
     RestoreClipboard(value) {
+        this.restoreClipboardCalls++
         if this.throwOnClipboardRestore
             throw Error("simulated clipboard restore failure")
         this.clipboardValue := value
+        this.sequenceNumber++
+    }
+
+    ClipboardSequence() {
+        this.sequenceChecks++
+        if (this.externalCopyOnSequenceCheck > 0
+            && this.sequenceChecks = this.externalCopyOnSequenceCheck) {
+            this.clipboardValue := "new user copy"
+            this.sequenceNumber++
+        }
+        return this.sequenceNumber
     }
 
     PasteClipboard(field) {
@@ -753,6 +871,16 @@ class UnreadableStickyTargetElement {
     }
 }
 
+class UnreadableNoteFieldElement {
+    Type := UIA.Type.Document
+
+    ProcessId {
+        get {
+            throw Error("simulated unreadable note-field property")
+        }
+    }
+}
+
 class FakeStickyTargetRoot {
     __New(processId, children, windowId := 100) {
         this.ProcessId := processId
@@ -782,6 +910,8 @@ class FakeStickyNoteWindowDriver {
         this.invokeCalls := 0
         this.livePacsTitle := "Vue PACS"
         this.exactPacsWindowCount := 1
+        this.preexistingStickyWindows := []
+        this.stickyOwner := pacsRoot.WinId
     }
 
     CaptureActivePacs(*) {
@@ -817,7 +947,16 @@ class FakeStickyNoteWindowDriver {
     }
 
     GetOwner(*) {
-        return 0
+        return this.stickyOwner
+    }
+
+    FindExactStickyWindows(*) {
+        return this.preexistingStickyWindows.Clone()
+    }
+
+    ActivateSticky(session) {
+        return session.stickyHwnd = this.activatedStickyHwnd
+            && this.stickyOwner = session.pacsHwnd
     }
 }
 

@@ -48,6 +48,11 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 3) **Wet read workflow**
 - Copy your wet read text to clipboard.
 - Use the wet read hotkey; if prompted, pick a paste method (Ctrl+V/UIA Value/ControlSetText).
+  The workflow first pins a newly created Sticky Notes window for the active PACS
+  study; a pre-existing/reused or ownerless window is rejected.
+- Ctrl+V staging is excluded from Windows clipboard history/cloud processing. If
+  another app or the user copies something mid-operation, that newer clipboard is
+  preserved, and note rollback uses verified direct writes rather than the clipboard.
 - Enable "Convert clipboard line endings" in Settings to normalize LF→CRLF before pasting.
 
 4) **Keybind scope**
