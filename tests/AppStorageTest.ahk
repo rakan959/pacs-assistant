@@ -7,7 +7,8 @@ class AppStorageTest {
         "TestInstalledDataMigrationPreservesLegacyAndDoesNotOverwriteDestination",
         "TestCompletedMigrationDoesNotResurrectDeletedProfile",
         "TestPartialMigrationRetriesBeforeWritingMarker",
-        "TestFailedCopyCannotPublishAPartialDestination"
+        "TestFailedCopyCannotPublishAPartialDestination",
+        "TestPortableRootSkipsMigration"
     ]
 
     Setup() {
@@ -23,6 +24,19 @@ class AppStorageTest {
         FileAppend("legacy profile", this.legacyRoot "\profiles\Night.ini")
         AppStorage.dataRootOverride := this.dataRoot
         AppStorage.legacyRootOverride := this.legacyRoot
+    }
+
+    TestPortableRootSkipsMigration() {
+        ; Source runs keep data beside the script, so data and legacy roots coincide
+        ; and there is nothing to copy or mark.
+        AppStorage.dataRootOverride := this.legacyRoot
+        copies := []
+        AppStorage.copyFile := (source, destination) => copies.Push(source)
+
+        Assert.Equal(this.legacyRoot, AppStorage.Ensure())
+        Assert.Equal(0, copies.Length)
+        Assert.False(FileExist(this.legacyRoot "\" AppStorage.migrationMarkerName) != "")
+        Assert.True(DirExist(this.legacyRoot "\profiles") != "")
     }
 
     TestInstalledDataMigrationPreservesLegacyAndDoesNotOverwriteDestination() {

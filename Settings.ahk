@@ -477,11 +477,11 @@ class Settings {
         }
         if (interval < this.minRefreshIntervalSeconds) {
             MsgBox("Refresh interval must be at least " this.minRefreshIntervalSeconds " seconds.", "Invalid Setting", "Icon!")
-            return
+            return false
         }
         if (interval > this.maxRefreshIntervalSeconds) {
             MsgBox("Refresh interval cannot exceed " this.maxRefreshIntervalSeconds " seconds (one day).", "Invalid Setting", "Icon!")
-            return
+            return false
         }
 
         ; Validate the microphone name is present when the swap is enabled, otherwise
@@ -489,7 +489,7 @@ class Settings {
         micName := Trim(controls.micName.Value)
         if (controls.checkboxes["SwapMicrophoneOnLogin"].Value && micName = "") {
             MsgBox("Enter a microphone name to select on login, or turn off 'Set microphone on login'.", "Invalid Setting", "Icon!")
-            return
+            return false
         }
 
         values := Map()

@@ -37,7 +37,8 @@ class PACSMonitorTest {
         "TestRefreshFailureNotificationUsesTextThenTitle",
         "TestScanFailuresNotifyOnceAndReset",
         "TestNewStudyNotificationUsesTextThenTitle",
-        "TestFailedAlertDoesNotConsumeAccession"
+        "TestFailedAlertDoesNotConsumeAccession",
+        "TestCompactDateRecognitionHonorsCalendarRules"
     ]
     
     Setup() {
@@ -74,6 +75,13 @@ class PACSMonitorTest {
         ]
     }
     
+    TestCompactDateRecognitionHonorsCalendarRules() {
+        for value in ["20240229", "20000229", "19991231", "20250131", "20240430"]
+            Assert.True(PACSMonitor.LooksLikeCompactDate(value), value " is a real calendar date")
+        for value in ["19000229", "20230229", "20241301", "20240100", "20240431", "18991231", "21000101", "12345678"]
+            Assert.False(PACSMonitor.LooksLikeCompactDate(value), value " is not a compact calendar date")
+    }
+
     TestHasAccession() {
         Assert.False(PACSMonitor.HasAccession("12345678"))
         PACSMonitor.MarkAccessionSeen("12345678")

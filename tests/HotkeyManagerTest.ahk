@@ -28,7 +28,8 @@ class HotkeyManagerTest {
         "TestEquivalentModifierOrderIsRejected",
         "TestEquivalentCustomCombinationPrefixesAreRejected",
         "TestMissingCallbackReassignmentPreservesExistingRegistration",
-        "TestInvalidHotkeyReassignmentPreservesExistingRegistration"
+        "TestInvalidHotkeyReassignmentPreservesExistingRegistration",
+        "TestHotkeyIdentityEdgeCases"
     ]
 
     Setup() {
@@ -164,6 +165,20 @@ class HotkeyManagerTest {
     ; AutoHotkey identifies a hotkey variant by the exact function object handed to
     ; HotIf, so a fresh closure per registration would leak an unreachable variant
     ; every time a bind is re-applied
+    TestHotkeyIdentityEdgeCases() {
+        ; Left/right modifiers are distinct hotkeys in AutoHotkey; the generic form
+        ; is a third variant. Modifier order still does not matter.
+        Assert.NotEqual(HotkeyManager.HotkeyIdentity("<^a"), HotkeyManager.HotkeyIdentity("^a"))
+        Assert.NotEqual(HotkeyManager.HotkeyIdentity("<^a"), HotkeyManager.HotkeyIdentity(">^a"))
+        Assert.Equal(HotkeyManager.HotkeyIdentity(">!<^x"), HotkeyManager.HotkeyIdentity("<^>!X"))
+        Assert.Equal("", HotkeyManager.HotkeyIdentity("   "))
+        ; Three-key combinations are not valid AutoHotkey syntax; they keep a
+        ; normalized literal identity so two spellings still collide.
+        Assert.Equal(HotkeyManager.HotkeyIdentity("a & b & c"), HotkeyManager.HotkeyIdentity("A  &  B  &  C"))
+        Assert.Equal("*a & b", HotkeyManager.HotkeyIdentity("*a & b"))
+        Assert.Throws(ObjBindMethod(HotkeyContract, "BindingIdentity", 42), "Hotkey must be a string")
+    }
+
     TestScopePredicatesAreStable() {
         for scope in HotkeyManager.scopes {
             if (scope == "Any") {

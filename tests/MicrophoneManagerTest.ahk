@@ -30,8 +30,33 @@ class MicrophoneManagerTest {
         "PickerReappearanceStartsANewLoginSession",
         "PickerUncertaintyConsumesOneBoundedSessionBudget",
         "ActiveClinicalLeaseSkipsBackgroundMicrophoneCheck",
-        "RecycledWindowHandleWithNewProcessStartsANewLoginSession"
+        "RecycledWindowHandleWithNewProcessStartsANewLoginSession",
+        "MonitoringStartsOnlyWithSwapEnabledAndANamedMicrophone"
     ]
+
+    MonitoringStartsOnlyWithSwapEnabledAndANamedMicrophone() {
+        originalSettingsFile := Settings.settingsFile
+        Settings.settingsFile := TestTempPath("microphone-monitoring", ".ini")
+        try {
+            cases := [
+                {swap: false, name: "PowerMic", armed: false},
+                {swap: true, name: "   ", armed: false},
+                {swap: true, name: "PowerMic", armed: true}
+            ]
+            for expected in cases {
+                Settings.SaveValues(Map("SwapMicrophoneOnLogin", expected.swap, "MicrophoneName", expected.name))
+                MicrophoneManager.StartMonitoring()
+                armed := IsObject(MicrophoneManager.pollTimer)
+                MicrophoneManager.StopMonitoring()
+                Assert.Equal(expected.armed, armed, "swap=" expected.swap " name='" expected.name "'")
+            }
+        } finally {
+            MicrophoneManager.StopMonitoring()
+            if FileExist(Settings.settingsFile)
+                FileDelete(Settings.settingsFile)
+            Settings.settingsFile := originalSettingsFile
+        }
+    }
 
     Setup() {
         this.originalNotifier := MicrophoneManager.notifier

@@ -26,7 +26,13 @@ class SettingsTest {
         "TestSavingSettingsReportsListenerFailures",
         "TestChangeListenersAllRun",
         "TestChangeListenerFailureDoesNotBlockLaterListeners",
-        "TestSettingsLayoutFitsScaled768p"
+        "TestSettingsLayoutFitsScaled768p",
+        "TestSavingRejectsRefreshIntervalOutsideBounds",
+        "TestSavingAcceptsRefreshIntervalBounds",
+        "TestPersistedRefreshIntervalBounds",
+        "TestSavingRequiresMicrophoneNameWhenSwapEnabled",
+        "TestSaveFailureKeepsDialogOpenAndFileUnchanged",
+        "TestChangeListenerMustBeCallable"
     ]
 
     Setup() {
@@ -159,16 +165,7 @@ class SettingsTest {
     }
 
     TestSavingRejectsExcessiveRefreshInterval() {
-        controls := {
-            checkboxes: Map(
-                "AutoUpdate", {Value: false},
-                "SwapMicrophoneOnLogin", {Value: false}
-            ),
-            refreshInterval: {Value: 86401},
-            micName: {Value: ""},
-            soundDropDown: {Text: "Ding"},
-            customSound: {Text: ""}
-        }
+        controls := this.SettingsControls(false, 86401)
         dialog := FakeSettingsDialog()
 
         result := Settings.SaveSettings(controls, dialog)
@@ -272,16 +269,7 @@ class SettingsTest {
     TestSavingSettingsNotifiesListeners() {
         calls := []
         Settings.AddChangeListener((*) => calls.Push("changed"))
-        controls := {
-            checkboxes: Map(
-                "AutoUpdate", {Value: false},
-                "SwapMicrophoneOnLogin", {Value: false}
-            ),
-            refreshInterval: {Value: 45},
-            micName: {Value: ""},
-            soundDropDown: {Text: "Ding"},
-            customSound: {Text: ""}
-        }
+        controls := this.SettingsControls(false, 45)
         dialog := FakeSettingsDialog()
 
         Settings.SaveSettings(controls, dialog)
@@ -322,31 +310,81 @@ class SettingsTest {
         Assert.Equal(60, Settings.Get("RefreshInterval"))
     }
 
-    SettingsControls(autoUpdate, interval) {
+    SettingsControls(autoUpdate, interval, swapMicrophone := false, micName := "") {
         return {
             checkboxes: Map(
                 "AutoUpdate", {Value: autoUpdate},
-                "SwapMicrophoneOnLogin", {Value: false}
+                "SwapMicrophoneOnLogin", {Value: swapMicrophone}
             ),
             refreshInterval: {Value: interval},
-            micName: {Value: ""},
+            micName: {Value: micName},
             soundDropDown: {Text: "Ding"},
             customSound: {Text: ""}
         }
     }
 
+    TestSavingRejectsRefreshIntervalOutsideBounds() {
+        for interval in [9, 0, 86401] {
+            dialog := FakeSettingsDialog()
+            result := Settings.SaveSettings(this.SettingsControls(false, interval), dialog)
+
+            Assert.Equal(false, result, "Interval " interval " must be rejected with false")
+            Assert.False(dialog.destroyed)
+            Assert.Equal("Invalid Setting", TestRunner.dialogs[TestRunner.dialogs.Length].title)
+        }
+        Assert.Equal(60, Settings.Get("RefreshInterval"))
+    }
+
+    TestSavingAcceptsRefreshIntervalBounds() {
+        for interval in [10, 86400] {
+            Assert.True(Settings.SaveSettings(this.SettingsControls(false, interval), FakeSettingsDialog()))
+            Assert.Equal(interval, Settings.Get("RefreshInterval"))
+        }
+    }
+
+    TestPersistedRefreshIntervalBounds() {
+        expectations := Map("9", 60, "10", 10, "86400", 86400, "86401", 60, "-10", 60, "1e2", 60)
+        for persisted, expected in expectations {
+            IniWrite(persisted, Settings.settingsFile, "Settings", "RefreshInterval")
+            Assert.Equal(expected, Settings.Get("RefreshInterval"), "Persisted interval '" persisted "'")
+        }
+    }
+
+    TestSavingRequiresMicrophoneNameWhenSwapEnabled() {
+        dialog := FakeSettingsDialog()
+
+        result := Settings.SaveSettings(this.SettingsControls(false, 60, true, "   "), dialog)
+
+        Assert.Equal(false, result)
+        Assert.False(dialog.destroyed)
+        Assert.Equal("Invalid Setting", TestRunner.dialogs[1].title)
+        Assert.False(Settings.Get("SwapMicrophoneOnLogin"))
+
+        Assert.True(Settings.SaveSettings(this.SettingsControls(false, 60, true, " PowerMic "), FakeSettingsDialog()))
+        Assert.Equal("PowerMic", Settings.Get("MicrophoneName"))
+    }
+
+    TestSaveFailureKeepsDialogOpenAndFileUnchanged() {
+        Settings.mutationGuard := (*) => false
+        dialog := FakeSettingsDialog()
+
+        result := Settings.SaveSettings(this.SettingsControls(false, 45), dialog)
+
+        Assert.Equal(false, result)
+        Assert.False(dialog.destroyed)
+        Assert.Equal("Save Failed", TestRunner.dialogs[1].title)
+        Assert.Equal(60, Settings.Get("RefreshInterval"))
+    }
+
+    TestChangeListenerMustBeCallable() {
+        Assert.Throws(ObjBindMethod(Settings, "AddChangeListener", "not callable"), "must be callable")
+        Assert.Throws(ObjBindMethod(Settings, "AddChangeListener", {}), "must be callable")
+        Assert.Equal(0, Settings.changeListeners.Length)
+    }
+
     TestSavingSettingsReportsListenerFailures() {
         Settings.AddChangeListener(ThrowSettingsListener)
-        controls := {
-            checkboxes: Map(
-                "AutoUpdate", {Value: false},
-                "SwapMicrophoneOnLogin", {Value: false}
-            ),
-            refreshInterval: {Value: 45},
-            micName: {Value: ""},
-            soundDropDown: {Text: "Ding"},
-            customSound: {Text: ""}
-        }
+        controls := this.SettingsControls(false, 45)
         dialog := FakeSettingsDialog()
         reports := []
 
