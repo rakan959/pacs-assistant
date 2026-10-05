@@ -32,6 +32,7 @@ class UpdateCheckerTest {
         "TestSkippedCachedVersionCannotReopen",
         "TestManualCompletionDefersDialogDuringClinicalCommand",
         "TestUpdateDialogRequiresPresentationLease",
+        "TestFailedUpdateNowLeavesTheDialogButtonsUsable",
         "TestAsyncRequestCancelBreaksCallbackOwnership",
         "TestStaleCallbackContextNeverFallsBackToReusedHandle",
         "TestNativeCallbackMasksThirtyTwoBitParameters",
@@ -646,6 +647,28 @@ class UpdateCheckerTest {
         Assert.Equal(1, this.manualNotifications.Length)
     }
 
+    ; Update Now keeps the dialog open when the update does not start, so the
+    ; preferences it saved must not make the next button report a conflict.
+    TestFailedUpdateNowLeavesTheDialogButtonsUsable() {
+        UpdateChecker.shutdownCoordinator := FakeShutdownCoordinator(false)
+        updateGui := UpdateChecker.ShowUpdateDialog(ValidUpdateInfo())
+        Assert.True(IsObject(updateGui))
+        try {
+            ClickDialogButton(updateGui, "Update Now")
+            Assert.True(UpdateChecker.UpdateDialogIsLive(), "a refused update must keep the dialog open")
+            ClickDialogButton(updateGui, "Remind Me Later")
+        } finally {
+            if UpdateChecker.UpdateDialogIsLive()
+                UpdateChecker.CloseUpdateDialog(updateGui)
+        }
+
+        for dialog in TestRunner.dialogs
+            Assert.False(dialog.title = "Settings Changed", "Remind Me Later reported a settings conflict")
+        Assert.Equal(1, UpdateChecker.shutdownCoordinator.beginCalls)
+        Assert.True(UpdateChecker.lastRemindTime > 0)
+        Assert.Equal(0, UpdateChecker.updateDialog)
+    }
+
     TestAsyncRequestCancelBreaksCallbackOwnership() {
         operation := WinHttpTextRequest(
             "https://api.github.com/test",
@@ -916,6 +939,18 @@ UpdateReleaseJson(version) {
         . '"browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/'
         . version '/pacs-assistant.exe"}'
         . ']}'
+}
+
+; Clicks a dialog button the way a user does, then lets its handler run.
+ClickDialogButton(dialogGui, text) {
+    for , control in dialogGui {
+        if (control.Type = "Button" && control.Text = text) {
+            SendMessage(0xF5, 0, 0, control)  ; BM_CLICK
+            Sleep(50)
+            return
+        }
+    }
+    throw Error("The dialog has no '" text "' button")
 }
 
 ValidUpdateInfo() {

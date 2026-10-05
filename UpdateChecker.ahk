@@ -686,16 +686,15 @@ class UpdateChecker {
             skipBetaCheckbox := updateGui.Add("Checkbox", "y+5", "Skip beta versions")
             skipBetaCheckbox.Value := Settings.Get("SkipBetaVersions")
 
-            ; Persisting the two checkboxes has to happen on every way out of the dialog.
-            ; It used to live only in the Close handler, and Gui.Destroy() does not raise
-            ; Close - so every button discarded the user's choices.
-            saveChoices := (*) => this.TrySaveUpdatePreferences(
-                updateGui.settingsRevision,
+            ; Gui.Destroy() does not raise Close, so every way out of the dialog saves
+            ; the two checkboxes itself.
+            saveChoices := (*) => this.SaveDialogChoices(
+                updateGui,
                 autoUpdateCheckbox.Value,
                 skipBetaCheckbox.Value
             )
-            saveSkippedChoices := (*) => this.TrySaveUpdatePreferences(
-                updateGui.settingsRevision,
+            saveSkippedChoices := (*) => this.SaveDialogChoices(
+                updateGui,
                 autoUpdateCheckbox.Value,
                 skipBetaCheckbox.Value,
                 updateInfo.latestVersion
@@ -723,6 +722,21 @@ class UpdateChecker {
             updateGui.Show()
             return updateGui
         } finally this.dialogRelease.Call()
+    }
+
+    ; Saves the update dialog's choices at the settings revision it was opened at.
+    ; The dialog stays open when Update Now does not start, so a successful save
+    ; moves it to the revision that save wrote.
+    static SaveDialogChoices(updateGui, autoUpdate, skipBetaVersions, skippedVersion?) {
+        if !this.TrySaveUpdatePreferences(
+            updateGui.settingsRevision,
+            autoUpdate,
+            skipBetaVersions,
+            skippedVersion?
+        )
+            return false
+        updateGui.settingsRevision := Settings.revision
+        return true
     }
 
     ; Defers the automatic notice for remindLaterMs. The version counts as not yet
