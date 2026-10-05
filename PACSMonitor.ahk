@@ -283,6 +283,8 @@ class PACSMonitor {
         this.consecutiveRefreshFailures++
         if (this.consecutiveRefreshFailures >= this.refreshFailureThreshold && !this.refreshFailureNotified) {
             this.refreshFailureNotified := true
+            ; Logged once per failure episode, with the notice.
+            AppLog.Write("PACS auto-refresh is not working: " this.consecutiveRefreshFailures " consecutive refreshes failed")
             this.Notify(
                 "Explorer Portal could not be refreshed safely. Monitoring may be stale; refresh and check the worklist manually until this warning clears.",
                 "PACS auto-refresh is not working",

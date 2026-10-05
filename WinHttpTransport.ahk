@@ -126,8 +126,6 @@ class WinHttpTransport {
                 throw Error("Update download Content-Length does not match trusted metadata")
 
             output := FileOpen(destination, "w")
-            if !output
-                throw Error("Update destination could not be opened")
             total := 0
             downloadBuffer := Buffer(64 * 1024)
             loop {

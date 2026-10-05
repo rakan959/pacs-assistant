@@ -779,8 +779,6 @@ class UpdateChecker {
             )
 
             inputFile := FileOpen(path, "r")
-            if !inputFile
-                throw OSError(A_LastError, , "Could not open update for hashing")
             readBuffer := Buffer(1024 * 1024)
             while (bytesRead := inputFile.RawRead(readBuffer)) {
                 this.CheckNtStatus(
@@ -847,8 +845,6 @@ class UpdateChecker {
             if (size < 64)
                 return false
             executableFile := FileOpen(path, "r")
-            if !executableFile
-                return false
 
             signature := Buffer(2)
             if (executableFile.RawRead(signature) != 2 || NumGet(signature, 0, "UShort") != 0x5A4D)
@@ -938,8 +934,6 @@ class UpdateChecker {
             ; permission. Probe that complete contract before acquiring shutdown or
             ; downloading an executable that cannot be installed.
             probeFile := FileOpen(probePath, "w")
-            if !probeFile
-                return false
             probeFile.Write("PACS Assistant update write probe")
             probeFile.Close()
             probeFile := 0
@@ -1146,6 +1140,8 @@ class UpdateChecker {
         } catch as err {
             if shutdownStarted
                 this.shutdownCoordinator.CancelShutdown()
+            ; Includes a rejected download (size, SHA-256, PE or version check).
+            AppLog.Write("Update failed: " ErrorText.Describe(err))
             MsgBox("Update failed: " err.Message, "Update Failed", "Icon!")
             ; The running executable is not touched until the updater starts after
             ; ExitApp, so a preflight failure only needs to remove staged artifacts.

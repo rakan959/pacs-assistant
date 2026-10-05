@@ -137,7 +137,7 @@ class MicrophoneManager {
 
             comboResult := this.ResolveMicrophoneCombo(session)
             if (comboResult.status == "absent") {
-                this.RecordPickerPresence(false)
+                this.RecordPickerAbsence()
                 return  ; Logged in, or the picker has not rendered yet
             }
             if !(comboResult.status == "found") {
@@ -149,7 +149,6 @@ class MicrophoneManager {
                 return
             }
             combo := comboResult.combo
-            this.RecordPickerPresence(combo ? true : false)
 
             if (this.attempts >= this.maxAttempts)
                 return
@@ -205,9 +204,8 @@ class MicrophoneManager {
     ; Only a confirmed picker absence ends the current login interval. Provider errors
     ; and ambiguity are uncertainty, not evidence of disappearance, and must continue
     ; consuming the same bounded retry budget.
-    static RecordPickerPresence(present) {
-        if !present
-            this.ResetAttemptState()
+    static RecordPickerAbsence() {
+        this.ResetAttemptState()
     }
 
     static RecordOperationalError(err) {

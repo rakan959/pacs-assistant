@@ -419,14 +419,10 @@ class MicrophoneManagerTest {
         MicrophoneManager.failureNotified := true
         MicrophoneManager.lastError := "old failure"
 
-        MicrophoneManager.RecordPickerPresence(false)
+        MicrophoneManager.RecordPickerAbsence()
         Assert.Equal(0, MicrophoneManager.attempts)
         Assert.False(MicrophoneManager.failureNotified)
         Assert.Equal("", MicrophoneManager.lastError)
-
-        MicrophoneManager.attempts := MicrophoneManager.maxAttempts
-        MicrophoneManager.RecordPickerPresence(true)
-        Assert.Equal(MicrophoneManager.maxAttempts, MicrophoneManager.attempts)
     }
 
     PickerUncertaintyConsumesOneBoundedSessionBudget() {

@@ -2,9 +2,10 @@
 ;   + Preamble
 ;   + NativeStickyNoteWindowDriver / StickyNoteOpener (Sticky Notes discovery & pinning)
 ;   + NativeWetReadFocusDriver / NativeWetReadControlDriver / NativeWetReadDriver (UIA note field)
-;   + WetReadPasteEngine (report capture, paste, verification, rollback)
+;   + WetReadPasteEngine (direct write and verification; never retries or rolls back)
 ;   + CheckAttending, AttendingFailureMessage, RunPinnedWetReadWorkflow, WetRead,
-;       PerformWetReadPaste, PromptWetReadMode (file-scope wet-read workflow)
+;       PerformWetReadPaste, ConvertWetReadLineEndings, WetReadPasteFailureDialog,
+;       PromptWetReadMode (file-scope wet-read workflow)
 
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk

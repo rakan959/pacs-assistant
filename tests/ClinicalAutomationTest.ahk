@@ -8,6 +8,7 @@
 #Include ../PACSCommands.ahk
 #Include TestRunner.ahk
 #Include FakeWindowList.ahk
+#Include LogCapture.ahk
 
 class ClinicalAutomationTest {
     static tests := [
@@ -46,6 +47,7 @@ class ClinicalAutomationTest {
         "RestartPreparationCapturesHiddenTrustedVueProcesses",
         "RestartAbortsWhenTargetReappearsBeforeLaunch",
         "RestartStopBoundaryFailureCancelsLaunch",
+        "RestartNamesWhyATargetCouldNotBeStopped",
         "RestartRejectsMalformedStopResult",
         "RestartLaunchBoundaryFailuresAreReported",
         "RestartRequiresExpectedVueWindowAfterLaunch",
@@ -535,6 +537,8 @@ class ClinicalAutomationTest {
         Assert.False(result.anyStopped)
         Assert.Equal(1, result.failedTargets.Length)
         Assert.Equal("First Target", result.failedTargets[1])
+        ; The user can fix this one, so the reason says how.
+        Assert.Equal("First Target (2 windows are open; close the extra ones)", result.details[1])
         Assert.Equal(0, lifecycle.closeCalls)
     }
 
@@ -563,6 +567,7 @@ class ClinicalAutomationTest {
         Assert.False(result.anyStopped)
         Assert.Equal(1, result.failedTargets.Length)
         Assert.Equal("First Target", result.failedTargets[1])
+        Assert.True(InStr(result.details[1], "First Target (") = 1 && StrLen(result.details[1]) > StrLen("First Target ()"), result.details[1])
         Assert.Equal(1, lifecycle.closeCalls)
     }
 
@@ -709,9 +714,27 @@ class ClinicalAutomationTest {
         driver := FakePacsRestartDriver([], 0, true)
         driver.stopError := "simulated stop failure"
 
-        Assert.False(RestartPACS(driver))
+        capturedLog := LogCapture()
+        try {
+            Assert.False(RestartPACS(driver))
+            logged := capturedLog.Count("PACS Restart Cancelled: PACS target shutdown could not be completed or verified.")
+        } finally capturedLog.Restore()
         Assert.Equal(1, driver.stopCalls)
         Assert.Equal(0, driver.launchCalls)
+        Assert.Equal(1, logged)
+    }
+
+    RestartNamesWhyATargetCouldNotBeStopped() {
+        driver := FakePacsRestartDriver([], 0, true)
+        driver.stopResult := {
+            anyStopped: false,
+            failedTargets: ["Explorer Portal"],
+            details: ["Explorer Portal (the exact window did not close)"]
+        }
+
+        Assert.False(RestartPACS(driver))
+        Assert.True(InStr(TestRunner.dialogs[TestRunner.dialogs.Length].text,
+            "could not stop: Explorer Portal (the exact window did not close)."), TestRunner.dialogs[TestRunner.dialogs.Length].text)
     }
 
     RestartRejectsMalformedStopResult() {

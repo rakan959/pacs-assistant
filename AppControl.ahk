@@ -8,6 +8,7 @@
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
 #Include ErrorText.ahk
+#Include AppLog.ahk
 
 /**
  * Thin wrapper around focus-sensitive AutoHotkey primitives. Tests replace this
@@ -434,7 +435,7 @@ class AppControl {
      */
     static StopTarget(target, targetKind) {
         if (targetKind = "window")
-            return this.CloseWindowTarget(target)
+            return this.CloseExactWindowTarget(target)
         if (targetKind = "process") {
             return {
                 found: false,
@@ -443,12 +444,6 @@ class AppControl {
             }
         }
         return {found: false, stopped: false, error: "Unsupported restart target kind: " targetKind}
-    }
-
-    static CloseWindowTarget(target) {
-        if !IsObject(target)
-            return {found: false, stopped: false, error: "Exact window spec is required"}
-        return this.CloseExactWindowTarget(target)
     }
 
     static CloseExactWindowTarget(spec) {
@@ -506,34 +501,43 @@ class AppControl {
      * Resolves every restart target without mutating it. The restart is an
      * all-target transaction: known ambiguity or lookup failure must be found
      * before PowerScribe or any PACS window is closed.
+     * @returns {clear, failedTargets: labels, details: "label (reason)" texts}
      */
     static PreflightTargetSpecs(specs) {
         failedTargets := []
+        details := []
         if (Type(specs) != "Array")
-            return {clear: false, failedTargets: ["restart target list"]}
+            return {clear: false, failedTargets: ["restart target list"], details: ["restart target list (invalid)"]}
 
         for spec in specs {
             label := this.RestartTargetLabel(spec)
+            reason := ""
             if (!IsObject(spec)
                 || !HasProp(spec, "kind")
                 || spec.kind != "window"
                 || !HasProp(spec, "target")
                 || !IsObject(spec.target)) {
-                failedTargets.Push(label)
-                continue
+                reason := "invalid restart target"
+            } else {
+                try {
+                    sessions := this.ResolveExactWindows(spec.target)
+                    if (Type(sessions) != "Array")
+                        reason := "window lookup returned an invalid result"
+                    else if (sessions.Length > 1)
+                        reason := sessions.Length " windows are open; close the extra ones"
+                } catch Any as err {
+                    reason := "window lookup failed: " ErrorText.Message(err)
+                }
             }
-
-            try sessions := this.ResolveExactWindows(spec.target)
-            catch {
+            if (reason != "") {
                 failedTargets.Push(label)
-                continue
+                details.Push(label " (" reason ")")
             }
-            if (Type(sessions) != "Array" || sessions.Length > 1)
-                failedTargets.Push(label)
         }
         return {
             clear: failedTargets.Length = 0,
-            failedTargets: failedTargets
+            failedTargets: failedTargets,
+            details: details
         }
     }
 
@@ -551,25 +555,36 @@ class AppControl {
         if !preflight.clear {
             return {
                 anyStopped: false,
-                failedTargets: preflight.failedTargets
+                failedTargets: preflight.failedTargets,
+                details: preflight.details
             }
         }
 
         anyStopped := false
         failedTargets := []
+        details := []
         for spec in specs {
-            target := spec.target
-            result := this.StopTarget(target, spec.kind)
+            result := this.StopTarget(spec.target, spec.kind)
             if (result.found && result.stopped)
                 anyStopped := true
             if !result.stopped {
-                failedTargets.Push(this.RestartTargetLabel(spec))
+                label := this.RestartTargetLabel(spec)
+                failedTargets.Push(label)
+                details.Push(HasProp(result, "error") && result.error != "" ? label " (" result.error ")" : label)
                 ; Once the transaction is partial, do not close additional
                 ; clinical clients. The caller will cancel rather than launch.
                 break
             }
         }
-        return {anyStopped: anyStopped, failedTargets: failedTargets}
+        return {anyStopped: anyStopped, failedTargets: failedTargets, details: details}
+    }
+
+    ; "a, b, c" for messages.
+    static JoinList(items) {
+        text := ""
+        for item in items
+            text .= (text = "" ? "" : ", ") item
+        return text
     }
 
     static LaunchVuePacs(directory, expectedExecutablePath := "") {
@@ -765,12 +780,8 @@ class NativePacsRestartDriver {
         preflight := AppControl.PreflightTargetSpecs(
             AppControl.PacsRestartTargetSpecs()
         )
-        if !preflight.clear {
-            names := ""
-            for label in preflight.failedTargets
-                names .= (names = "" ? "" : ", ") label
-            throw Error("Restart target identity could not be verified: " names)
-        }
+        if !preflight.clear
+            throw Error("Restart target identity could not be verified: " AppControl.JoinList(preflight.details))
         this.priorVueProcessIds := this.CaptureVueProcessIds()
         return true
     }
@@ -946,9 +957,7 @@ RestartPACS(driver := 0) {
     anyClosed := anyClosed || stopResult.anyStopped
 
     if stopResult.failedTargets.Length {
-        names := ""
-        for target in stopResult.failedTargets
-            names .= (names = "" ? "" : ", ") target
+        names := AppControl.JoinList(HasProp(stopResult, "details") ? stopResult.details : stopResult.failedTargets)
         return StopRestart("PACS Assistant could not stop: " names ". The restart was cancelled to avoid launching duplicate clinical clients.")
     }
 
@@ -990,6 +999,8 @@ RestartPACS(driver := 0) {
 StopRestart(message, detail := "", title := "PACS Restart Cancelled") {
     if IsObject(detail)
         detail := ErrorText.Message(detail)
-    MsgBox(message (detail != "" ? "`n`n" detail : ""), title, "Icon!")
+    text := message (detail != "" ? "`n`n" detail : "")
+    AppLog.Write(title ": " StrReplace(text, "`n`n", " "))
+    MsgBox(text, title, "Icon!")
     return false
 }

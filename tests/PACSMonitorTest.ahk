@@ -490,8 +490,15 @@ class PACSMonitorTest {
     }
 
     TestRefreshFailureNotificationUsesTextThenTitle() {
-        loop PACSMonitor.refreshFailureThreshold
-            PACSMonitor.RecordRefreshResult(false)
+        capturedLog := LogCapture()
+        try {
+            loop PACSMonitor.refreshFailureThreshold + 2
+                PACSMonitor.RecordRefreshResult(false)
+        } finally {
+            logged := capturedLog.Count("PACS auto-refresh is not working: ")
+            capturedLog.Restore()
+        }
+        Assert.Equal(1, logged)
 
         Assert.Equal(1, this.notifications.Length)
         Assert.True(InStr(this.notifications[1].text, "Monitoring may be stale") > 0)

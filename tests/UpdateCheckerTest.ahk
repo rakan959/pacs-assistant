@@ -759,11 +759,17 @@ class UpdateCheckerTest {
         ThrowingUpdaterPathChecker.shutdownCoordinator := coordinator
         ThrowingUpdaterPathChecker.clinicalActivityProbe := (*) => false
 
+        capturedLog := LogCapture()
         try result := ThrowingUpdaterPathChecker.PerformUpdate(ValidUpdateInfo(), {})
-        ; The failure path re-arms the 30-second artifact cleanup on the subclass.
-        finally ThrowingUpdaterPathChecker.CancelUpdateArtifactCleanup()
+        finally {
+            ; The failure path re-arms the 30-second artifact cleanup on the subclass.
+            ThrowingUpdaterPathChecker.CancelUpdateArtifactCleanup()
+            logged := capturedLog.Count("Update failed: Error: simulated updater path failure")
+            capturedLog.Restore()
+        }
 
         Assert.False(result)
+        Assert.Equal(1, logged)
         Assert.Equal(1, coordinator.beginCalls)
         Assert.Equal(0, coordinator.completeCalls)
         Assert.Equal(1, coordinator.cancelCalls)
