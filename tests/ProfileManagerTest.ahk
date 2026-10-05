@@ -164,12 +164,17 @@ class ProfileManagerTest {
     TestProfileRename() {
         ProfileManager.profiles["OldName"] := ProfileManager.NewProfile()
         ProfileManager.SaveProfile("OldName", ProfileManager.profiles["OldName"])
+        ProfileManager.currentProfile := "OldName"
+        Assert.True(ProfileManager.SetDefaultProfile("OldName"))
 
         Assert.True(ProfileManager.RenameProfile("OldName", "NewName"))
         Assert.True(ProfileManager.profiles.Has("NewName"))
         Assert.False(ProfileManager.profiles.Has("OldName"))
         Assert.True(FileExist(ProfileManager.profilesPath "\NewName.ini") != "")
         Assert.False(FileExist(ProfileManager.profilesPath "\OldName.ini"))
+        Assert.Equal("NewName", ProfileManager.currentProfile)
+        Assert.Equal("NewName", ProfileManager.defaultProfile)
+        Assert.Equal("NewName", IniRead(ProfileManager.configPath, "Settings", "DefaultProfile"))
     }
 
     TestProfileCaseOnlyRename() {
@@ -624,7 +629,8 @@ class ProfileManagerTest {
             . "Order=Custom: Foo|Custom: foo|`n"
             . "Custom: Foo_keys=FIRST`n"
             . "Custom: Foo_window=`n",
-            path
+            path,
+            "UTF-16"
         )
 
         Assert.Throws(
@@ -640,7 +646,8 @@ class ProfileManagerTest {
             . "Order=`n"
             . "[ModalityAttendings]`n"
             . "Order=Order|`n",
-            path
+            path,
+            "UTF-16"
         )
 
         Assert.Throws(
