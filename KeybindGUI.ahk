@@ -1692,7 +1692,7 @@ class KeybindGUI {
             key := upMatch[1]
         ; A single character shows as typed (GetKeyName("+") is the unshifted "=");
         ; named keys use the canonical spelling.
-        name := StrLen(key) = 1 ? StrUpper(key) : GetKeyName(key)
+        name := StrLen(key) = 1 ? StrUpper(key) : HotkeyContract.CanonicalKeyName(key)
         if (name = "")
             name := key
         return text name (release ? " Up" : "")

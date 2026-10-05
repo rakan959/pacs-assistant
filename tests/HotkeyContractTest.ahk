@@ -9,6 +9,7 @@ class HotkeyContractTest {
         "TestNonCanonicalScopeCasingIsRejected",
         "TestBindingIdentityMatchesAutoHotkeySemantics",
         "TestBindingIdentityEdgeCases",
+        "TestNumpadKeysAreNotTheirDedicatedTwins",
         "TestPrefixSymbolsMayFollowModifiers"
     ]
 
@@ -59,6 +60,27 @@ class HotkeyContractTest {
             HotkeyContract.BindingIdentity("Esc & F24"),
             HotkeyContract.BindingIdentity("Escape & f24")
         )
+    }
+
+    ; With NumLock off a numpad key reports a navigation name, but it has its own
+    ; scan code and AutoHotkey registers it as a separate hotkey.
+    TestNumpadKeysAreNotTheirDedicatedTwins() {
+        for pair in [["NumpadEnd", "End"], ["NumpadHome", "Home"], ["NumpadDel", "Delete"], ["NumpadUp", "Up"]] {
+            Assert.NotEqual(
+                HotkeyContract.BindingIdentity("^" pair[2]),
+                HotkeyContract.BindingIdentity("^" pair[1]),
+                pair[1]
+            )
+            Assert.NotEqual(
+                HotkeyContract.BindingIdentity(pair[2] " & F24"),
+                HotkeyContract.BindingIdentity(pair[1] " & F24"),
+                pair[1] " in a combination"
+            )
+        }
+        ; Aliases of one key still match.
+        Assert.Equal(HotkeyContract.BindingIdentity("NumpadEnd"), HotkeyContract.BindingIdentity("sc04F"))
+        Assert.Equal(HotkeyContract.BindingIdentity("End"), HotkeyContract.BindingIdentity("sc14F"))
+        Assert.Equal(HotkeyContract.BindingIdentity("a"), HotkeyContract.BindingIdentity("vk41"))
     }
 
     TestBindingIdentityEdgeCases() {

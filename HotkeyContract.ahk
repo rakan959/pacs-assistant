@@ -48,10 +48,12 @@ class HotkeyContract {
     }
 
     /**
-     * Identity used to detect bindings which AutoHotkey treats as one hotkey.
-     * Modifier order and key-name casing are insignificant. Tilde and dollar alter
-     * the behavior of an existing hotkey rather than creating independent variants;
-     * wildcard remains distinct. Custom combinations retain their written order.
+     * Identity used to detect two bindings of the same key combination. Modifier
+     * order, key-name casing and aliases of one key (Esc, Escape) are insignificant;
+     * a numpad key is not its dedicated twin (NumpadEnd is not End). Tilde and
+     * dollar alter the behavior of an existing hotkey rather than creating
+     * independent variants; wildcard remains distinct. Custom combinations retain
+     * their written order.
      */
     static BindingIdentity(hotkeyStr) {
         if (Type(hotkeyStr) != "String")
@@ -90,11 +92,7 @@ class HotkeyContract {
             keyUp := true
         }
 
-        try {
-            normalizedKey := GetKeyName(key)
-            if (normalizedKey != "")
-                key := normalizedKey
-        }
+        key := this.CanonicalKeyName(key)
 
         identity := wildcard ? "*" : ""
         for token in ["<^", ">^", "^", "<!", ">!", "!", "<+", ">+", "+", "<#", ">#", "#"] {
@@ -109,13 +107,23 @@ class HotkeyContract {
 
     static NormalizeCombinationKey(key) {
         prefix := this.ParsePrefix(Trim(key), false)
-        key := Trim(prefix.rest)
-        try {
-            normalizedKey := GetKeyName(key)
-            if (normalizedKey != "")
-                key := normalizedKey
-        }
+        key := this.CanonicalKeyName(Trim(prefix.rest))
         return (prefix.wildcard ? "*" : "") StrLower(key)
+    }
+
+    /**
+     * The canonical spelling of a key name, so that aliases of one key (Esc,
+     * Escape, vk1B) compare equal. GetKeyName names a numpad navigation key after
+     * its dedicated twin (NumpadEnd -> End), a different key with a different scan
+     * code, so a name whose scan code differs from the key's is not used.
+     * @returns the canonical name, or key unchanged when it has none
+     */
+    static CanonicalKeyName(key) {
+        name := ""
+        try name := GetKeyName(key)
+        if (name = "" || GetKeySC(name) != GetKeySC(key))
+            return key
+        return name
     }
 
     /**

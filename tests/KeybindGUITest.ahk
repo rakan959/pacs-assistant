@@ -223,6 +223,7 @@ class KeybindGUITest {
         ; Key names use AutoHotkey's canonical spelling.
         Assert.Equal("Ctrl + NumpadAdd", this.gui.PrettifyHotkey("^numpadadd"))
         Assert.Equal("Ctrl + Escape", this.gui.PrettifyHotkey("^Esc"))
+        Assert.Equal("Ctrl + NumpadHome", this.gui.PrettifyHotkey("^NumpadHome"))
         Assert.Equal("Ctrl + F13", this.gui.PrettifyHotkey("^F13"))
     }
 
