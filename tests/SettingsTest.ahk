@@ -401,14 +401,9 @@ class SettingsTest {
         Settings.AddChangeListener(ThrowError.Bind("listener failed"))
         controls := this.SettingsControls(false, 45)
         dialog := FakeSettingsDialog()
-        reports := []
 
         capturedLog := LogCapture()
-        try savedAndApplied := Settings.SaveSettings(
-            controls,
-            dialog,
-            (message, errors) => reports.Push({message: message, errors: errors})
-        )
+        try savedAndApplied := Settings.SaveSettings(controls, dialog)
         finally {
             logged := capturedLog.Count("Settings change listener failed: ")
             capturedLog.Restore()
@@ -418,9 +413,10 @@ class SettingsTest {
         Assert.False(savedAndApplied)
         Assert.True(dialog.destroyed)
         Assert.False(Settings.Get("AutoUpdate"))
-        Assert.Equal(1, reports.Length)
-        Assert.Equal(1, reports[1].errors.Length)
-        Assert.True(InStr(reports[1].message, "restart") > 0)
+        Assert.Equal(1, TestRunner.dialogs.Length)
+        Assert.Equal("Settings Need Restart", TestRunner.dialogs[1].title)
+        Assert.True(InStr(TestRunner.dialogs[1].text, "1 running service could not apply them"), TestRunner.dialogs[1].text)
+        Assert.True(InStr(TestRunner.dialogs[1].text, "- listener failed"), TestRunner.dialogs[1].text)
     }
 
     TestChangeListenersAllRun() {

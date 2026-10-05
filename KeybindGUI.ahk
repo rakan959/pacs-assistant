@@ -121,10 +121,10 @@ class KeybindGUI {
         } finally this.EndProfileMutationTransaction()
     }
 
-    RequestExit(exitCode := 0) {
+    RequestExit() {
         if !this.BeginShutdown("close PACS Assistant")
             return false
-        return this.CompleteShutdown(exitCode)
+        return this.CompleteShutdown()
     }
 
     BeginShutdown(action) {
@@ -160,11 +160,11 @@ class KeybindGUI {
         } finally Critical("Off")
     }
 
-    CompleteShutdown(exitCode := 0) {
+    CompleteShutdown() {
         if !ExclusiveOperations.shutdownActive
             return false
         KeybindGUI.shutdownAuthorized := true
-        ExitApp(exitCode)
+        ExitApp()
         return true
     }
 
@@ -866,9 +866,6 @@ class KeybindGUI {
                 return false
             }
 
-            ; First disable all existing hotkeys
-            HotkeyManager.DisableAllHotkeys()
-
             ; Update profile
             currentProfile.binds[funcName] := newBind
             bindingChanged := true
@@ -1148,9 +1145,7 @@ class KeybindGUI {
         return nextRevision
     }
 
-    MarkProfileDirty(profileName := "") {
-        if (profileName = "")
-            profileName := ProfileManager.currentProfile
+    MarkProfileDirty(profileName) {
         if (profileName != "") {
             this.EnsureDirtyProfiles()[profileName] := true
             KeybindGUI.AdvanceProfileMutationRevision(profileName)
@@ -1163,9 +1158,7 @@ class KeybindGUI {
             dirty.Delete(profileName)
     }
 
-    IsProfileDirty(profileName := "") {
-        if (profileName = "")
-            profileName := ProfileManager.currentProfile
+    IsProfileDirty(profileName) {
         return profileName != "" && this.EnsureDirtyProfiles().Has(profileName)
     }
 
@@ -1253,7 +1246,7 @@ class KeybindGUI {
         } finally this.EndProfileMutationTransaction()
     }
 
-    ApplyBinds(showErrors := true) {
+    ApplyBinds() {
         ownsTransaction := false
         if (!ExclusiveOperations.captureActive
             && !ExclusiveOperations.profileMutationActive) {
@@ -1263,7 +1256,7 @@ class KeybindGUI {
         }
         try {
             currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
-            return this.ApplyProfileBinds(currentProfile, showErrors)
+            return this.ApplyProfileBinds(currentProfile, true)
         } finally {
             if ownsTransaction
                 this.EndProfileMutationTransaction()

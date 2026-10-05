@@ -436,7 +436,7 @@ class Settings {
     }
 
     ; Save settings from GUI
-    static SaveSettings(controls, settingsGui, liveRefreshFailureNotifier?) {
+    static SaveSettings(controls, settingsGui) {
         if (!HasProp(settingsGui, "settingsRevision")
             || settingsGui.settingsRevision != this.revision) {
             try settingsGui.Destroy()
@@ -512,10 +512,7 @@ class Settings {
             warning := "The settings were saved, but " listenerErrors.Length
                 . " " serviceLabel " could not apply them. Restart PACS Assistant to apply every change."
                 . (details = "" ? "" : "`n`n" details)
-            if IsSet(liveRefreshFailureNotifier)
-                liveRefreshFailureNotifier.Call(warning, listenerErrors)
-            else
-                MsgBox(warning, "Settings Need Restart", "Icon!")
+            MsgBox(warning, "Settings Need Restart", "Icon!")
             return false
         }
         return true
