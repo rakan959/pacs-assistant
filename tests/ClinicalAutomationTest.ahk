@@ -60,7 +60,7 @@ class ClinicalAutomationTest {
         "RestartLaunchBoundaryFailuresAreReported",
         "RestartRequiresExpectedVueWindowAfterLaunch",
         "RestartLaunchProofRequiresANewStableVueSession",
-        "GracefulCloseTimesOutAcross32BitTickWrap",
+        "GracefulCloseDeadlineHoldsPastThe32BitTickRange",
         "GracefulCloseSucceedsWhenTheProcessExits",
         "GracefulCloseRequiresCapturedProcessIdentity",
         "GracefulCloseRejectsSameProcessWrongTitleBeforeRequest",
@@ -986,7 +986,9 @@ class ClinicalAutomationTest {
         Assert.Equal(1, driver.closeRequests)
     }
 
-    GracefulCloseTimesOutAcross32BitTickWrap() {
+    ; The deadline arithmetic works on a 64-bit clock that has passed 2^32 ms. That
+    ; the native clock is 64-bit is a repository contract check: this fake replaces it.
+    GracefulCloseDeadlineHoldsPastThe32BitTickRange() {
         driver := FakeGracefulCloseDriver(0xFFFFFFFF - 50, 77)
 
         Assert.False(CloseWithSavePrompt(this.PowerScribeSession(), 300, driver))

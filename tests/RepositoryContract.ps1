@@ -143,6 +143,12 @@ foreach ($ahkSource in $ahkSources) {
     foreach ($call in [regex]::Matches($text, 'FileOpen\(\s*[^,()]+,\s*"[^"]*[wa][^"]*"\s*\)')) {
         $failures.Add("$($ahkSource.Name) opens a file for writing without naming its encoding: $($call.Value)")
     }
+    # Timeouts and deadlines use GetTickCount64. A_TickCount and the GetTickCount
+    # export are 32-bit and wrap after 49.7 days, which a clinical workstation
+    # can exceed; the tests replace every clock, so only this check can see one.
+    if ($text -match '\bA_TickCount\b|"GetTickCount"') {
+        $failures.Add("$($ahkSource.Name) reads a 32-bit tick count; use DllCall(""GetTickCount64"", ""UInt64"").")
+    }
 }
 
 Assert-Matches $workflowCode '(?m)^permissions:\s*\r?\n  contents:\s*read\s*$' 'The top-level workflow token permission must be contents: read.'
