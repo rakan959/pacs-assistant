@@ -33,6 +33,7 @@ UseIsolatedDataRoot("pacs-assistant-unit-tests")
 #Include WetReadTest.ahk
 #Include KeybindGUITest.ahk
 #Include UIAValueTest.ahk
+#Include UIAElementIdentityTest.ahk
 
 TestRunner.AddTest(TestRunnerTest)
 TestRunner.AddTest(AppStorageTest)
@@ -53,6 +54,7 @@ TestRunner.AddTest(ExclusiveOperationsTest)
 TestRunner.AddTest(WetReadTest)
 TestRunner.AddTest(KeybindGUITest)
 TestRunner.AddTest(UIAValueTest)
+TestRunner.AddTest(UIAElementIdentityTest)
 
 TestRunner.RunAll()
 
