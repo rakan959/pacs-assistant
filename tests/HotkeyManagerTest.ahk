@@ -101,10 +101,15 @@ class HotkeyManagerTest {
         Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^a", "PowerScribe"))
         Assert.Equal("PowerScribe", HotkeyManager.activeHotkeys["ActionOne"].scope)
 
-        ; Re-registering under a different scope must replace, not accumulate
+        ; Re-registering under a different scope must replace, not accumulate. The
+        ; PowerScribe variant is a separate AutoHotkey hotkey, so it is turned off.
+        driver := HotkeyManager.hotkeyDriver
+        Assert.Equal(0, driver.disabled.Length)
         Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^a", "PACS"))
         Assert.Equal("PACS", HotkeyManager.activeHotkeys["ActionOne"].scope)
         Assert.Equal(1, HotkeyManager.activeHotkeys.Count)
+        Assert.Equal(1, driver.disabled.Length)
+        Assert.Equal("^a", driver.disabled[1])
     }
 
     TestUnknownScopeIsRejectedWithoutReplacingRegistration() {
