@@ -1,6 +1,7 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Ignore
 #Warn All, StdOut
+FileEncoding "UTF-8"
 
 #Include KeybindGUI.ahk
 #Include Settings.ahk
