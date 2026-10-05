@@ -17,6 +17,7 @@ class KeybindGUITest {
         "TestCustomFunctionNameChecksUnboundFunctions",
         "TestCustomFunctionNamesUsePersistedCaseInsensitiveIdentity",
         "TestCustomKeybindRejectsABlankLookingWindow",
+        "TestAddedCustomKeybindSucceedsWhenCaptureDoesNotStart",
         "TestLoadErrorSummaryNamesEachFileAndCause",
         "TestStaleAddFunctionCannotClearANewerBinding",
         "TestProfileBindingOwnerUsesRuntimeIdentity",
@@ -228,6 +229,25 @@ class KeybindGUITest {
         Assert.Equal(1, TestRunner.dialogs.Length)
         Assert.Equal("Invalid Custom Keybind", TestRunner.dialogs[1].title)
         Assert.False(dialog.destroyed)
+    }
+
+    ; Like Add Function, the function is added and marked dirty whether or not
+    ; key capture then starts.
+    TestAddedCustomKeybindSucceedsWhenCaptureDoesNotStart() {
+        profile := ProfileManager.NewProfile()
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        dialog := FakeProfileDialog("Test")
+        listView := FunctionalListView("Sign Report", "Unassigned", "Any window")
+        editor := {base: CaptureRefusingKeybindGUI.Prototype, gui: "", promptCalls: 0}
+
+        Assert.True(editor.AddCustomKeybind("Yell", "HELLO", "", listView, dialog))
+
+        Assert.Equal(1, editor.promptCalls)
+        Assert.True(profile.customFuncs.Has("Custom: Yell"))
+        Assert.Equal("Custom: Yell", listView.GetText(2, 1))
+        Assert.True(editor.IsProfileDirty("Test"))
+        Assert.True(dialog.destroyed)
     }
 
     TestLoadErrorSummaryNamesEachFileAndCause() {
@@ -2276,6 +2296,14 @@ class FailingListView {
     }
 }
 
+class CaptureRefusingKeybindGUI extends KeybindGUI {
+    ; As when another capture is already waiting for a key.
+    PromptKeybind(*) {
+        this.promptCalls++
+        return false
+    }
+}
+
 class RejectingAddListView {
     Add(*) {
         throw Error("a stale dialog must not append a duplicate row")
@@ -2301,6 +2329,11 @@ class FunctionalListView {
     }
 
     ModifyCol(*) {
+    }
+
+    Add(options := "", values*) {
+        this.rows.Push(values)
+        return this.rows.Length
     }
 }
 

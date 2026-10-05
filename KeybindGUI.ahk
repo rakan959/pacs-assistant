@@ -2123,7 +2123,8 @@ class KeybindGUI {
         customGui.Destroy()
 
         ; Prompt user to set the keybind
-        return this.PromptKeybind(funcName, listView, profileName)
+        this.PromptKeybind(funcName, listView, profileName)
+        return true
     }
 
     CustomFunctionNameAvailable(profile, funcName) {
