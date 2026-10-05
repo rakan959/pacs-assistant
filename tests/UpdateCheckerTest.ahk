@@ -749,12 +749,15 @@ class UpdateCheckerTest {
         coordinator := FakeShutdownCoordinator(true)
         UpdateChecker.shutdownCoordinator := coordinator
         updateGui := FakeUpdateGui()
+        transport.observedGui := updateGui
 
         result := UpdateChecker.PerformUpdate(updateInfo, updateGui)
 
         newExe := this.installRoot "\pacs-assistant.new.exe"
         Assert.True(result)
         Assert.Equal(1, transport.downloads.Length)
+        ; Its buttons would otherwise run against the shutdown lease mid-download.
+        Assert.True(transport.downloads[1].guiDisabled)
         Assert.Equal(updateInfo.downloadUrl, transport.downloads[1].url)
         Assert.Equal(newExe, transport.downloads[1].destination)
         Assert.True(FileExist(newExe), "the verified download must stay staged for the updater")
@@ -818,11 +821,15 @@ class UpdateCheckerTest {
         coordinator := FakeShutdownCoordinator(true)
         UpdateChecker.shutdownCoordinator := coordinator
         updateGui := FakeUpdateGui()
+        transport.observedGui := updateGui
 
         result := UpdateChecker.PerformUpdate(updateInfo, updateGui)
 
         Assert.False(result)
         Assert.Equal(1, transport.downloads.Length)
+        Assert.True(transport.downloads[1].guiDisabled)
+        ; Re-enabled, so the update can be retried or dismissed.
+        Assert.False(updateGui.disabled)
         Assert.False(FileExist(this.installRoot "\pacs-assistant.new.exe"))
         Assert.Equal(0, launches.Length)
         Assert.Equal(0, updateGui.destroyCalls)
@@ -1003,10 +1010,17 @@ class RecordingDownloadTransport {
     __New(sourcePath := "") {
         this.sourcePath := sourcePath
         this.downloads := []
+        ; An update dialog whose state each download records.
+        this.observedGui := 0
     }
 
     Download(url, destination, expectedSize, maximumSize) {
-        this.downloads.Push({url: url, destination: destination, expectedSize: expectedSize})
+        this.downloads.Push({
+            url: url,
+            destination: destination,
+            expectedSize: expectedSize,
+            guiDisabled: IsObject(this.observedGui) && this.observedGui.disabled
+        })
         if (this.sourcePath != "")
             FileCopy(this.sourcePath, destination)
     }
@@ -1015,6 +1029,14 @@ class RecordingDownloadTransport {
 class FakeUpdateGui {
     __New() {
         this.destroyCalls := 0
+        this.disabled := false
+    }
+
+    Opt(options) {
+        if (options = "+Disabled")
+            this.disabled := true
+        else if (options = "-Disabled")
+            this.disabled := false
     }
 
     Destroy() {

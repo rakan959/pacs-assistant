@@ -1144,6 +1144,9 @@ class UpdateChecker {
             ; Every operation after acquiring the shutdown lease belongs inside this
             ; recovery boundary. Even allocating a GUID-backed temporary path can
             ; fail, and must release the lease rather than blocking the app forever.
+            ; The download runs while messages are still pumped, so the dialog's
+            ; buttons would otherwise run mid-install, against the shutdown lease.
+            try updateGui.Opt("+Disabled")
             currentExe := this.installedExecutable
             backupExe := this.installDirectory "\pacs-assistant.backup.exe"
             newExe := this.installDirectory "\pacs-assistant.new.exe"
@@ -1182,6 +1185,8 @@ class UpdateChecker {
             return this.shutdownCoordinator.CompleteShutdown()
         } catch as err {
             this.shutdownCoordinator.CancelShutdown()
+            ; The dialog stays open so the update can be retried or dismissed.
+            try updateGui.Opt("-Disabled")
             ; Includes a rejected download (size, SHA-256, PE or version check).
             AppLog.Write("Update failed: " ErrorText.Describe(err))
             MsgBox("Update failed: " err.Message, "Update Failed", "Icon!")
