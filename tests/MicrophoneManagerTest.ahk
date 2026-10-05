@@ -35,6 +35,7 @@ class MicrophoneManagerTest {
         "ActiveClinicalLeaseSkipsBackgroundMicrophoneCheck",
         "RecycledWindowHandleWithNewProcessStartsANewLoginSession",
         "MonitoringStartsOnlyWithSwapEnabledAndANamedMicrophone",
+        "SettingsChangeArmsAndDisarmsTheLoginCheck",
         "ApplyNowSelectsTheConfiguredMicrophone",
         "LoginCheckSelectsOnceAndStaysQuiet",
         "ApplyNowNamesEachFailureAndKeepsTheResolutionError",
@@ -72,6 +73,19 @@ class MicrophoneManagerTest {
                 MicrophoneManager.StopMonitoring()
                 Assert.Equal(expected.armed, armed, "swap=" expected.swap " name='" expected.name "'")
             }
+        } finally MicrophoneManager.StopMonitoring()
+    }
+
+    ; A settings save takes effect without a restart.
+    SettingsChangeArmsAndDisarmsTheLoginCheck() {
+        try {
+            Settings.SaveValues(Map("SwapMicrophoneOnLogin", true, "MicrophoneName", "PowerMic"))
+            MicrophoneManager.OnSettingsChanged()
+            Assert.True(IsObject(MicrophoneManager.pollTimer))
+
+            SetTestSetting("SwapMicrophoneOnLogin", false)
+            MicrophoneManager.OnSettingsChanged()
+            Assert.Equal(0, MicrophoneManager.pollTimer)
         } finally MicrophoneManager.StopMonitoring()
     }
 

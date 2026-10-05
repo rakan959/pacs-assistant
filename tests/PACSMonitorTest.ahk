@@ -38,6 +38,7 @@ class PACSMonitorTest {
         "TestStudyListFallbackRequiresExpectedTypeAndProcess",
         "TestStudyListDoesNotUseGenericFirstMatch",
         "TestOnSettingsChangedRespectsAutoRefresh",
+        "TestSettingsChangeRestartsMonitoringWithTheNewInterval",
         "TestRefreshFailureNotificationUsesTextThenTitle",
         "TestScanFailuresNotifyOnceAndReset",
         "TestUnapprovedRefreshIsReportedOnceAsUnavailable",
@@ -476,12 +477,39 @@ class PACSMonitorTest {
         Assert.Equal(1, timerDriver.stopCalls)
     }
 
+    ; Turning auto-refresh off stops the timer, and a settings save clears the
+    ; failure state so a fixed setup is not still reported as failing.
     TestOnSettingsChangedRespectsAutoRefresh() {
         SetTestSetting("AutoRefreshPACS", true)
         PACSMonitor.StartMonitoring()
+        PACSMonitor.consecutiveRefreshFailures := 5
+        PACSMonitor.refreshFailureNotified := true
+        PACSMonitor.consecutiveScanFailures := 5
+        PACSMonitor.scanFailureNotified := true
         SetTestSetting("AutoRefreshPACS", false)
+
         PACSMonitor.OnSettingsChanged()
+
         Assert.Equal(0, PACSMonitor.refreshTimer)
+        Assert.Equal(0, PACSMonitor.consecutiveRefreshFailures)
+        Assert.False(PACSMonitor.refreshFailureNotified)
+        Assert.Equal(0, PACSMonitor.consecutiveScanFailures)
+        Assert.False(PACSMonitor.scanFailureNotified)
+    }
+
+    TestSettingsChangeRestartsMonitoringWithTheNewInterval() {
+        SetTestSetting("AutoRefreshPACS", true)
+        SetTestSetting("RefreshInterval", 10)
+        timerDriver := PACSMonitor.timerDriver
+        PACSMonitor.StartMonitoring()
+        SetTestSetting("RefreshInterval", 30)
+
+        PACSMonitor.OnSettingsChanged()
+
+        Assert.True(IsObject(PACSMonitor.refreshTimer))
+        Assert.Equal(1, timerDriver.stopCalls)
+        Assert.Equal(2, timerDriver.startCalls)
+        Assert.Equal(30000, timerDriver.interval)
     }
 
     TestRefreshFailureNotificationUsesTextThenTitle() {
