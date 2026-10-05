@@ -82,10 +82,17 @@ class KeyReceiver {
         this.handler := ObjBindMethod(this, "OnKeyDown")
         OnMessage(0x100, this.handler)  ; WM_KEYDOWN
         this.gui.Show()
-        WinActivate("ahk_id " this.gui.Hwnd)
-        WinWaitActive("ahk_id " this.gui.Hwnd, , 2)
-        this.edit.Focus()
     }
+
+    Focus() {
+        WinActivate("ahk_id " this.gui.Hwnd)
+        if !WinWaitActive("ahk_id " this.gui.Hwnd, , 2)
+            return false
+        this.edit.Focus()
+        return true
+    }
+
+    IsFocused() => WinActive("ahk_id " this.gui.Hwnd) != 0
 
     OnKeyDown(wParam, *) {
         if (wParam = 0x7C)  ; VK_F13
@@ -96,6 +103,21 @@ class KeyReceiver {
         OnMessage(0x100, this.handler, 0)
         this.gui.Destroy()
     }
+}
+
+; Sends Ctrl+F13 with the receiver focused and reports how many times the bound
+; action ran and how many key-downs reached the receiver. Another window can take
+; the focus meanwhile, so a press is retried until the receiver held it throughout.
+PressIntoReceiver(receiver) {
+    loop 5 {
+        if !receiver.Focus()
+            continue
+        before := receiver.count
+        actions := Press()
+        if receiver.IsFocused()
+            return {focused: true, fired: actions, received: receiver.count - before}
+    }
+    return {focused: false, fired: 0, received: 0}
 }
 
 ; Sends Ctrl+F13 and reports how many times the bound action ran
@@ -153,8 +175,10 @@ Main() {
         pacs.active := false
         receiver := KeyReceiver()
         try {
-            AssertEqual(0, Press(), "a PACS-scoped bind does not fire outside PACS")
-            AssertEqual(1, receiver.count, "outside PACS the key reaches the focused window")
+            result := PressIntoReceiver(receiver)
+            AssertEqual(true, result.focused, "the receiver window keeps the focus for the key press")
+            AssertEqual(0, result.fired, "a PACS-scoped bind does not fire outside PACS")
+            AssertEqual(1, result.received, "outside PACS the key reaches the focused window")
         } finally receiver.Close()
 
         ; Turning it off only works in the HotIf context it was created in; a variant
