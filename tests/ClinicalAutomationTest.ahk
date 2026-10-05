@@ -53,6 +53,9 @@ class ClinicalAutomationTest {
         "RestartSucceedsWhenEveryStepIsVerified",
         "RestartPreparationRejectsAmbiguousTargets",
         "RestartPreparationCapturesHiddenTrustedVueProcesses",
+        "RestartPreparationRejectsAnUnverifiableVueIdentity",
+        "RestartQuiescenceRefusesEachRemainingProcessOrWindow",
+        "ExactWindowCloseIsVerifiedAfterClosing",
         "RestartAbortsWhenTargetReappearsBeforeLaunch",
         "RestartStopBoundaryFailureCancelsLaunch",
         "RestartNamesWhyATargetCouldNotBeStopped",
@@ -869,6 +872,87 @@ class ClinicalAutomationTest {
         Assert.Equal(trustedPath, driver.trustedVueExecutablePath)
     }
 
+    ; The installed Vue executable must be proven from the running windows before
+    ; anything is closed; each unverifiable identity refuses the restart.
+    RestartPreparationRejectsAnUnverifiableVueIdentity() {
+        trustedPath := A_Temp "\Philips\Vue\mp.exe"
+        vue := {hwnd: 501, title: AppControl.vuePacsTitle, exe: AppControl.vuePacsExecutable, pid: 42}
+        client := {hwnd: 502, title: AppControl.vuePacsClientTitle, exe: AppControl.vuePacsExecutable, pid: 43}
+        listed := {processId: 42, name: AppControl.vuePacsExecutable, path: trustedPath}
+        cases := [
+            {windows: [], paths: Map(), processes: [], reason: "A running exact Vue PACS window is required"},
+            {windows: [vue], paths: Map(42, ""), processes: [listed], reason: "Vue PACS process path could not be verified"},
+            {windows: [vue, client], paths: Map(42, trustedPath, 43, A_Temp "\Other\mp.exe"), processes: [listed],
+                reason: "owned by different executable paths"},
+            {windows: [vue], paths: Map(42, trustedPath),
+                processes: [listed, {processId: 44, name: AppControl.vuePacsExecutable, path: ""}],
+                reason: "An mp.exe process path could not be verified"},
+            {windows: [vue], paths: Map(42, trustedPath), processes: [], reason: "process inventory changed during capture"}
+        ]
+        for testCase in cases {
+            AppControl.windowDriver := FakeExactWindowDriver(testCase.windows)
+            AppControl.lifecycleDriver := FakeProcessInventoryLifecycleDriver(testCase.paths, testCase.processes)
+            driver := NativePacsRestartDriver()
+            Assert.Throws(() => driver.CaptureVueProcessIds(), testCase.reason)
+            Assert.Equal("", driver.trustedVueExecutablePath, testCase.reason)
+        }
+    }
+
+    ; Nothing may still be running or open when the new Vue client is launched:
+    ; each remaining window or process stops the restart with its own reason.
+    RestartQuiescenceRefusesEachRemainingProcessOrWindow() {
+        trustedPath := A_Temp "\Philips\Vue\mp.exe"
+        portal := AppControl.PacsRestartTargetSpecs()[1]
+        powerScribeWindow := {hwnd: 601, title: AppControl.powerScribeReportingTitle, exe: AppControl.powerScribeExecutable, pid: 77}
+        portalWindow := {hwnd: 100, title: portal.target.title, exe: portal.target.exe, pid: 4242}
+        cases := [
+            {label: "clear", windows: [], reason: ""},
+            {label: "PowerScribe window", windows: [powerScribeWindow], reason: "PowerScribe reporting window reappeared"},
+            {label: "PowerScribe process", powerScribeProcessId: 77, reason: "PowerScribe process is still running"},
+            {label: "prior Vue process", running: Map(42, true), reason: "A previous Vue PACS process is still running"},
+            {label: "new Vue process", processes: [{processId: 55, name: AppControl.vuePacsExecutable, path: trustedPath}],
+                reason: "A Vue PACS process appeared before launch"},
+            {label: "unverifiable mp.exe", processes: [{processId: 56, name: AppControl.vuePacsExecutable, path: ""}],
+                reason: "An mp.exe process path could not be verified"},
+            {label: "target window", windows: [portalWindow], reason: portal.label " reappeared"}
+        ]
+        for testCase in cases {
+            lifecycle := FakeProcessInventoryLifecycleDriver(Map(), HasProp(testCase, "processes") ? testCase.processes : [])
+            if HasProp(testCase, "powerScribeProcessId")
+                lifecycle.powerScribeProcessId := testCase.powerScribeProcessId
+            if HasProp(testCase, "running")
+                lifecycle.runningProcessIds := testCase.running
+            AppControl.lifecycleDriver := lifecycle
+            AppControl.windowDriver := FakeWindowList(HasProp(testCase, "windows") ? testCase.windows : [])
+            driver := NativePacsRestartDriver()
+            driver.trustedVueExecutablePath := trustedPath
+            driver.priorVueProcessIds := Map(42, true)
+
+            result := driver.VerifyQuiescence()
+
+            Assert.Equal(testCase.reason = "", result.clear, testCase.label)
+            Assert.Equal(testCase.reason, result.error, testCase.label)
+        }
+    }
+
+    ; Closing reports success only when the exact window is gone afterwards.
+    ExactWindowCloseIsVerifiedAfterClosing() {
+        spec := AppControl.ExactWindowSpec("First Target", "first.exe")
+        windows := FakeExactWindowDriver([{hwnd: 101, title: "First Target", exe: "first.exe", pid: 11}])
+        AppControl.windowDriver := windows
+        AppControl.lifecycleDriver := CountingCloseLifecycleDriver()
+
+        stayed := AppControl.CloseExactWindowTarget(spec)
+
+        Assert.False(stayed.stopped)
+        Assert.Equal("the exact window remained or reappeared", stayed.error)
+
+        AppControl.lifecycleDriver := WindowRemovingLifecycleDriver(windows)
+        closed := AppControl.CloseExactWindowTarget(spec)
+
+        Assert.True(closed.stopped, closed.error)
+    }
+
     RestartAbortsWhenTargetReappearsBeforeLaunch() {
         driver := FakePacsRestartDriver([], 0, true)
         driver.quiescent := false
@@ -958,10 +1042,19 @@ class ClinicalAutomationTest {
             ),
             []
         )
+        ; A stable window of a process that ran before the restart is not the launch.
         native.priorVueProcessIds := Map(42, true)
         AppControl.windowDriver := SequencedLaunchWindowDriver([
             [{hwnd: 701, pid: 42}],
-            [{hwnd: 702, pid: 43}]
+            [{hwnd: 701, pid: 42}]
+        ])
+        Assert.False(native.WaitForLaunch(350))
+
+        ; Nor is a stable window of an executable other than the trusted one.
+        AppControl.lifecycleDriver.pathsByProcessId[71] := A_Temp "\Other\mp.exe"
+        AppControl.windowDriver := SequencedLaunchWindowDriver([
+            [{hwnd: 711, pid: 71}],
+            [{hwnd: 711, pid: 71}]
         ])
         Assert.False(native.WaitForLaunch(350))
 
@@ -1469,6 +1562,16 @@ class FakeProcessInventoryLifecycleDriver {
     __New(pathsByProcessId, processes) {
         this.pathsByProcessId := pathsByProcessId
         this.processes := processes
+        this.powerScribeProcessId := 0
+        this.runningProcessIds := Map()
+    }
+
+    FindProcess(executable) {
+        return executable = AppControl.powerScribeExecutable ? this.powerScribeProcessId : 0
+    }
+
+    ProcessExists(processId) {
+        return this.runningProcessIds.Has(processId)
     }
 
     ProcessPath(processId) {
@@ -1479,6 +1582,23 @@ class FakeProcessInventoryLifecycleDriver {
 
     ListProcessesByExecutable(*) {
         return this.processes
+    }
+}
+
+; Closing removes the window from the given window list, as a real close does.
+class WindowRemovingLifecycleDriver {
+    __New(windowDriver) {
+        this.windowDriver := windowDriver
+    }
+
+    CloseWindow(session) {
+        for index, window in this.windowDriver.windows {
+            if (window.hwnd = session.hwnd) {
+                this.windowDriver.windows.RemoveAt(index)
+                break
+            }
+        }
+        return true
     }
 }
 
