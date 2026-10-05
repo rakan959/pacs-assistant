@@ -374,7 +374,8 @@ class PACSMonitor {
             if !skipScan
                 session := resolution.session
 
-            ; Skip refresh if Explorer Portal is the active window
+            ; While the user has Explorer Portal active, skip the whole cycle: refresh,
+            ; scan and alerts.
             if (!skipScan && this.driver.IsActive(session))
                 skipScan := true
 

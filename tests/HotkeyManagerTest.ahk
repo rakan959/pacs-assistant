@@ -38,8 +38,9 @@ class HotkeyManagerTest {
         this.originalHotkeyFunctions := HotkeyManager.hotkeyFunctions
         ; Unit tests model registration through a recording driver so the suite never
         ; grabs a key the user might press. The two tests that need AutoHotkey itself
-        ; switch to the native driver with Ctrl+F13/Ctrl+F22, which have no physical
-        ; key; run-hotkey-tests.ahk covers the rest of the native behavior.
+        ; switch to the native driver: one registers Ctrl+F22, which has no physical
+        ; key, and one an invalid key name, which registers nothing.
+        ; run-hotkey-tests.ahk covers the rest of the native behavior.
         HotkeyManager.hotkeyDriver := FakeHotkeyDriver()
 
         this.func1Calls := 0
