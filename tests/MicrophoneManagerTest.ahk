@@ -38,6 +38,7 @@ class MicrophoneManagerTest {
         "LoginCheckSelectsOnceAndStaysQuiet",
         "ApplyNowNamesEachFailureAndKeepsTheResolutionError",
         "UnconfirmedSelectionNamesTheTimeoutNotTheName",
+        "UnverifiableMicrophoneListIsNotBlamedOnTheName",
         "AmbiguousNameReasonReachesBothNotices"
     ]
 
@@ -142,6 +143,31 @@ class MicrophoneManagerTest {
             "Could not select microphone 'PowerMic III': PowerScribe did not confirm the selection within 1 second.",
             TestRunner.dialogs[1].text
         )
+    }
+
+    ; A list with no items, or none that verify, is not a misspelled name.
+    UnverifiableMicrophoneListIsNotBlamedOnTheName() {
+        empty := MicrophoneFixture([])
+        disabled := MicrophoneFixture(["PowerMic III"])
+        disabled.items[1].IsEnabled := false
+        originalName := Settings.Get("MicrophoneName")
+        try {
+            SetTestSetting("MicrophoneName", "PowerMic III")
+            MicrophoneManager.sessionDriver := empty.driver
+            Assert.False(MicrophoneManager.ApplyNow())
+            MicrophoneManager.sessionDriver := disabled.driver
+            Assert.False(MicrophoneManager.ApplyNow())
+        } finally SetTestSetting("MicrophoneName", originalName)
+
+        Assert.Equal(
+            "Could not select microphone 'PowerMic III': the microphone list exposed no items.",
+            TestRunner.dialogs[1].text
+        )
+        Assert.Equal(
+            "Could not select microphone 'PowerMic III': the microphone list items did not have their expected identity.",
+            TestRunner.dialogs[2].text
+        )
+        Assert.Equal(0, disabled.items[1].selectCalls)
     }
 
     ; "PowerMic" matches two devices: the advice must not blame the name's spelling.
@@ -330,7 +356,10 @@ class MicrophoneManagerTest {
             fixture.combo,
             "PowerMic"
         )
-        Assert.Equal("absent", result.status)
+        ; Never selectable; and the picker's own list is empty, which is the reason.
+        Assert.Equal(0, result.selection)
+        Assert.Equal("error", result.status)
+        Assert.Equal("the microphone list exposed no items", result.error)
     }
 
     UnreadableMicrophoneItemAlongsideValidDoesNotSelect() {

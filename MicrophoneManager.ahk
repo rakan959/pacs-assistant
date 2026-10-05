@@ -338,9 +338,17 @@ class MicrophoneManager {
         } catch as err {
             return {status: "error", items: [], error: err.Message}
         }
-        return items.Length
-            ? {status: "found", items: items, error: ""}
-            : {status: "absent", items: [], error: ""}
+        if items.Length
+            return {status: "found", items: items, error: ""}
+        ; No verified item says nothing about the configured name, so it is an error
+        ; with its own reason rather than "no device by that name".
+        return {
+            status: "error",
+            items: [],
+            error: comboItems.Length
+                ? "the microphone list items did not have their expected identity"
+                : "the microphone list exposed no items"
+        }
     }
 
     static ResolveMicrophoneItemResult(root, combo, configuredName) {
