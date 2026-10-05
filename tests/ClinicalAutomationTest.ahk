@@ -1,3 +1,8 @@
+; = CONTENTS
+;   + Preamble
+;   + ClinicalAutomationTest class (window targeting, activation, clinical command, restart, graceful close)
+;   + Test doubles (window/restart/close/PowerScribe drivers, report roots & elements, lifecycle drivers)
+
 #Requires AutoHotkey v2.0
 #Include ../ProfileManager.ahk
 #Include ../PACSCommands.ahk

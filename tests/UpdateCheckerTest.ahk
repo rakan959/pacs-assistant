@@ -1,3 +1,8 @@
+; = CONTENTS
+;   + Preamble
+;   + UpdateCheckerTest class (version parsing, auto/manual check, download/verify, updater, dialog)
+;   + Test doubles (transports, status operations, shutdown coordinator, presentation lease, json/info helpers)
+
 #Requires AutoHotkey v2.0
 #Include ../UpdateChecker.ahk
 #Include ../Settings.ahk

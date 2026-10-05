@@ -1,3 +1,8 @@
+; = CONTENTS
+;   + Preamble
+;   + ProfileManagerTest class (profile CRUD, keybind/scope persistence, modality/attending)
+;   + Test doubles (FaultInjectingProfileStorageDriver)
+
 #Requires AutoHotkey v2.0
 #Include ../ProfileManager.ahk
 #Include TestRunner.ahk

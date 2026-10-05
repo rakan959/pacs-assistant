@@ -1,3 +1,8 @@
+; = CONTENTS
+;   + Preamble
+;   + MicrophoneManagerTest class (microphone selection, combo resolution, picker session)
+;   + Test doubles (session drivers, combo/item/expand/selection patterns, fixture)
+
 #Requires AutoHotkey v2.0
 #Include ../MicrophoneManager.ahk
 #Include ../PACSCommands.ahk

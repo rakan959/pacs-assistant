@@ -1,3 +1,8 @@
+; = CONTENTS
+;   + Preamble
+;   + KeybindGUITest class (keybind GUI: capture, profile editing, save/rename/delete, modality/attending)
+;   + Test doubles (ListView fakes, KeybindGUI capture/restore variants, capture owners, runtime fakes)
+
 #Requires AutoHotkey v2.0
 #Include ../KeybindGUI.ahk
 #Include TestRunner.ahk

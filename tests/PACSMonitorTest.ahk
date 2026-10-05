@@ -1,3 +1,8 @@
+; = CONTENTS
+;   + Preamble
+;   + PACSMonitorTest class (study-list refresh, accession detection, alerts, portal targeting)
+;   + Test doubles (timer/portal drivers, study & refresh roots, action buttons, notification fakes)
+
 #Requires AutoHotkey v2.0
 #Include ../PACSMonitor.ahk
 #Include ../PACSCommands.ahk

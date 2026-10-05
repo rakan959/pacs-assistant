@@ -1,3 +1,8 @@
+; = CONTENTS
+;   + Preamble
+;   + WetReadTest class (wet-read paste, UIA write/verify, sticky note targeting, attending routing)
+;   + Test doubles (wet-read drivers/elements, sticky target elements, notification recorder)
+
 #Requires AutoHotkey v2.0
 #Include ../WetRead.ahk
 #Include TestRunner.ahk

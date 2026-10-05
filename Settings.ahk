@@ -1,3 +1,7 @@
+; = CONTENTS
+;   + Preamble
+;   + Settings class (settings load/save, change listeners, mutation/dialog guards, settings dialog)
+
 #Requires AutoHotkey v2.0
 #Include AppStorage.ahk
 
