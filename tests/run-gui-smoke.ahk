@@ -39,6 +39,9 @@ Assert(condition, label) => DesktopChecks.Record(condition, label)
 
 OpenAndCaptureWindow(title, action) {
     global openedWindows
+    ; Only this run's windows: another process, such as a running PACS Assistant,
+    ; can open one with the same title meanwhile.
+    title .= " ahk_pid " DllCall("GetCurrentProcessId", "UInt")
     before := Map()
     for hwnd in WinGetList(title)
         before[hwnd] := true
