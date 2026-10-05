@@ -2595,11 +2595,19 @@ class StaleScopeTrackingKeybindGUI extends KeybindGUI {
     }
 }
 
-class RenameRuntimeTrackingKeybindGUI extends KeybindGUI {
-    GuiIsLive(targetGui) {
-        return !HasProp(targetGui, "destroyed") || !targetGui.destroyed
+; A double whose dialogs are plain objects: one counts as live until its Destroy()
+; has run.
+class FakeWindowKeybindGUI extends KeybindGUI {
+    static IsLive(targetGui) {
+        return IsObject(targetGui) && (!HasProp(targetGui, "destroyed") || !targetGui.destroyed)
     }
 
+    GuiIsLive(targetGui) {
+        return FakeWindowKeybindGUI.IsLive(targetGui)
+    }
+}
+
+class RenameRuntimeTrackingKeybindGUI extends FakeWindowKeybindGUI {
     CreateMainGUI(applyBinds := true) {
         this.createCalls++
         if applyBinds
@@ -2640,7 +2648,7 @@ class DirtyLeaveTestGUI extends KeybindGUI {
 
 class DirtyRenameTestGUI extends DirtyLeaveTestGUI {
     GuiIsLive(targetGui) {
-        return !HasProp(targetGui, "destroyed") || !targetGui.destroyed
+        return FakeWindowKeybindGUI.IsLive(targetGui)
     }
 
     NewProfileDialog(*) {
@@ -2655,11 +2663,7 @@ class DirtyRenameTestGUI extends DirtyLeaveTestGUI {
     }
 }
 
-class DiscardRenameTrackingGUI extends KeybindGUI {
-    GuiIsLive(targetGui) {
-        return IsObject(targetGui) && (!HasProp(targetGui, "destroyed") || !targetGui.destroyed)
-    }
-
+class DiscardRenameTrackingGUI extends FakeWindowKeybindGUI {
     HasMainWindow() {
         return this.GuiIsLive(this.gui)
     }
@@ -2746,11 +2750,7 @@ class CallbackProfileLeaveDriver extends FixedProfileLeaveDriver {
     }
 }
 
-class ProfileDeleteTestGUI extends KeybindGUI {
-    GuiIsLive(targetGui) {
-        return IsObject(targetGui) && (!HasProp(targetGui, "destroyed") || !targetGui.destroyed)
-    }
-
+class ProfileDeleteTestGUI extends FakeWindowKeybindGUI {
     ShowProfileSelector() {
     }
 }
@@ -2942,11 +2942,7 @@ class ReentrantDefaultProfileStorageDriver {
     }
 }
 
-class ProfileSelectorTransactionGUI extends KeybindGUI {
-    GuiIsLive(targetGui) {
-        return IsObject(targetGui) && (!HasProp(targetGui, "destroyed") || !targetGui.destroyed)
-    }
-
+class ProfileSelectorTransactionGUI extends FakeWindowKeybindGUI {
     HasMainWindow() {
         return false
     }
