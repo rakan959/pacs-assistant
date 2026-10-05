@@ -52,8 +52,9 @@ class HotkeyContract {
      * order, key-name casing and aliases of one key (Esc, Escape) are insignificant;
      * a numpad key is not its dedicated twin (NumpadEnd is not End). Tilde and
      * dollar alter the behavior of an existing hotkey rather than creating
-     * independent variants; wildcard remains distinct. Custom combinations retain
-     * their written order.
+     * independent variants; wildcard remains distinct. A character the keyboard
+     * layout types with Shift is Shift plus its key (^? is ^+/). Custom
+     * combinations, two keys joined by " & ", retain their written order.
      */
     static BindingIdentity(hotkeyStr) {
         if (Type(hotkeyStr) != "String")
@@ -69,8 +70,9 @@ class HotkeyContract {
         ; the early custom-combination return while preserving wildcard identity.
         behavior := this.ParsePrefix(hotkeyStr, false)
         hotkeyBody := Trim(behavior.rest)
-        if InStr(hotkeyBody, "&") {
-            parts := StrSplit(hotkeyBody, "&")
+        ; Only " & " joins a combination; ^& is Ctrl and the & key.
+        if InStr(hotkeyBody, " & ") {
+            parts := StrSplit(hotkeyBody, " & ")
             if (parts.Length != 2)
                 return (behavior.wildcard ? "*" : "")
                     . StrLower(RegExReplace(hotkeyBody, "\s+", " "))
@@ -81,10 +83,15 @@ class HotkeyContract {
         }
 
         prefix := this.ParsePrefix(hotkeyBody, true)
-        wildcard := behavior.wildcard || prefix.wildcard
         key := Trim(prefix.rest)
-        if (key = "")
-            return StrLower((behavior.wildcard ? "*" : "") hotkeyBody)
+        if (key = "") {
+            ; A symbol that ends the hotkey is its key: ^+ is Ctrl and the + key.
+            key := SubStr(hotkeyBody, -1)
+            prefix := this.ParsePrefix(SubStr(hotkeyBody, 1, -1), true)
+            if (prefix.rest != "")
+                return StrLower((behavior.wildcard ? "*" : "") hotkeyBody)
+        }
+        wildcard := behavior.wildcard || prefix.wildcard
 
         keyUp := false
         if RegExMatch(key, "i)^(.+?)\s+up$", &upMatch) {
@@ -92,6 +99,15 @@ class HotkeyContract {
             keyUp := true
         }
 
+        ; With a left or right Shift, AutoHotkey keeps the character's hotkey apart
+        ; from the base key's; treating them as one refuses a bind rather than
+        ; letting one replace the other.
+        if (this.IsShiftedCharacter(key, &baseKey)
+            && !prefix.modifiers.Has("<+")
+            && !prefix.modifiers.Has(">+")) {
+            key := baseKey
+            prefix.modifiers["+"] := true
+        }
         key := this.CanonicalKeyName(key)
 
         identity := wildcard ? "*" : ""
@@ -109,6 +125,24 @@ class HotkeyContract {
         prefix := this.ParsePrefix(Trim(key), false)
         key := this.CanonicalKeyName(Trim(prefix.rest))
         return (prefix.wildcard ? "*" : "") StrLower(key)
+    }
+
+    /**
+     * Whether key is a character that the keyboard layout types with Shift alone,
+     * such as ? or & on a US layout. AutoHotkey registers such a key as Shift plus
+     * the key that types it. Letters are the exception: ^F is the ^f hotkey.
+     * @param baseKey receives the name of the key that types the character
+     */
+    static IsShiftedCharacter(key, &baseKey) {
+        baseKey := ""
+        if (StrLen(key) != 1 || IsAlpha(key))
+            return false
+        ; The low byte is the virtual key; the high byte the shift state, 1 = Shift.
+        scan := DllCall("VkKeyScan", "UShort", Ord(key), "Short")
+        if (scan = -1 || (scan >> 8) != 1)
+            return false
+        baseKey := GetKeyName(Format("vk{:02X}", scan & 0xFF))
+        return baseKey != ""
     }
 
     /**

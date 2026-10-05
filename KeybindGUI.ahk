@@ -1710,12 +1710,13 @@ class KeybindGUI {
     /**
      * Display form of a hotkey, such as "Ctrl + Shift + V". ~ $ * change only how a
      * hotkey behaves, so they are not shown; a symbol that ends the hotkey is its
-     * key (^+ is Ctrl and the + key). Custom combinations read as written.
+     * key (^+ is Ctrl and the + key). A custom combination ("a & b") shows as
+     * written, in capitals.
      */
     PrettifyHotkey(hotkeyStr) {
         if (hotkeyStr = "")
             return "Unassigned"
-        if InStr(hotkeyStr, "&")
+        if InStr(hotkeyStr, " & ")
             return StrUpper(hotkeyStr)
 
         prefix := HotkeyContract.ParsePrefix(Trim(hotkeyStr), true)

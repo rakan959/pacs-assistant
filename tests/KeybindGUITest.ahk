@@ -232,6 +232,9 @@ class KeybindGUITest {
         ; A trailing symbol is the key itself.
         Assert.Equal("Ctrl + +", this.gui.PrettifyHotkey("^+"))
         Assert.Equal("Ctrl + #", this.gui.PrettifyHotkey("^#"))
+        ; Only " & " joins a combination.
+        Assert.Equal("Ctrl + &", this.gui.PrettifyHotkey("^&"))
+        Assert.Equal("ESC & F24", this.gui.PrettifyHotkey("Esc & F24"))
         ; Behavior prefixes are not shown; sided modifiers are.
         Assert.Equal("Ctrl + J", this.gui.PrettifyHotkey("~$^j"))
         Assert.Equal("LCtrl + J", this.gui.PrettifyHotkey("<^j"))

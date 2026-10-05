@@ -10,7 +10,10 @@ class HotkeyContractTest {
         "TestBindingIdentityMatchesAutoHotkeySemantics",
         "TestBindingIdentityEdgeCases",
         "TestNumpadKeysAreNotTheirDedicatedTwins",
-        "TestPrefixSymbolsMayFollowModifiers"
+        "TestPrefixSymbolsMayFollowModifiers",
+        "TestShiftTypedCharacterIsShiftPlusItsKey",
+        "TestShiftTypedSymbolEndingAHotkeyIsShiftPlusItsKey",
+        "TestOnlySpacedAmpersandJoinsACombination"
     ]
 
     TestScopeFlagsRoundTrip() {
@@ -97,6 +100,33 @@ class HotkeyContractTest {
         Assert.Throws(ObjBindMethod(HotkeyContract, "BindingIdentity", 42), "Hotkey must be a string")
     }
 
+    ; AutoHotkey 2.0.26 registers ^? as ^+/ (registering one replaces the other)
+    ; and keeps it apart from ^/. Letters are the exception: ^F is ^f.
+    TestShiftTypedCharacterIsShiftPlusItsKey() {
+        character := ShiftTypedCharacter(["?", "&", "%", ":", "_"], &baseKey)
+
+        Assert.Equal(HotkeyContract.BindingIdentity("^+" baseKey), HotkeyContract.BindingIdentity("^" character))
+        Assert.Equal(HotkeyContract.BindingIdentity("^+" baseKey), HotkeyContract.BindingIdentity("^+" character))
+        Assert.Equal(HotkeyContract.BindingIdentity("^+" baseKey " up"), HotkeyContract.BindingIdentity("^" character " up"))
+        Assert.NotEqual(HotkeyContract.BindingIdentity("^" baseKey), HotkeyContract.BindingIdentity("^" character))
+        Assert.Equal(HotkeyContract.BindingIdentity("^f"), HotkeyContract.BindingIdentity("^F"))
+    }
+
+    ; ^+ is Ctrl and the + key, which on a US layout is the ^+= hotkey.
+    TestShiftTypedSymbolEndingAHotkeyIsShiftPlusItsKey() {
+        symbol := ShiftTypedCharacter(["+", "!", "#", "^"], &baseKey)
+
+        Assert.Equal(HotkeyContract.BindingIdentity("^+" baseKey), HotkeyContract.BindingIdentity("^" symbol))
+    }
+
+    ; "a&b" is not a valid hotkey; ^& is Ctrl and the & key, so modifier order
+    ; does not matter for it.
+    TestOnlySpacedAmpersandJoinsACombination() {
+        Assert.Equal(HotkeyContract.BindingIdentity("$^!&"), HotkeyContract.BindingIdentity("$!^&"))
+        Assert.False(InStr(HotkeyContract.BindingIdentity("^&"), " & "))
+        Assert.Equal("f13 & f14", HotkeyContract.BindingIdentity("F13 & F14"))
+    }
+
     ; AutoHotkey accepts ~ $ * among the modifier symbols in any order.
     TestPrefixSymbolsMayFollowModifiers() {
         Assert.Equal(HotkeyContract.BindingIdentity("^a"), HotkeyContract.BindingIdentity("^~a"))
@@ -104,4 +134,20 @@ class HotkeyContractTest {
         Assert.Equal(HotkeyContract.BindingIdentity("*^a"), HotkeyContract.BindingIdentity("^*a"))
         Assert.Equal("*<^>!x", HotkeyContract.BindingIdentity(">!~*<^X"))
     }
+}
+
+; The first of candidates that this keyboard layout types with Shift alone, read
+; from Windows rather than from HotkeyContract.
+ShiftTypedCharacter(candidates, &baseKey) {
+    for candidate in candidates {
+        scan := DllCall("VkKeyScan", "UShort", Ord(candidate), "Short")
+        if (scan != -1 && (scan >> 8) = 1) {
+            baseKey := GetKeyName(Format("vk{:02X}", scan & 0xFF))
+            return candidate
+        }
+    }
+    names := ""
+    for candidate in candidates
+        names .= " " candidate
+    throw Error("This keyboard layout types none of these with Shift alone:" names)
 }
