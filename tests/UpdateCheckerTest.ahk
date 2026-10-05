@@ -307,21 +307,30 @@ class UpdateCheckerTest {
         }
     }
 
+    ; The script runs only on an installed workstation, so these pin its control
+    ; flow rather than its text: each statement is matched where it must sit.
     TestUpdaterScriptRequiresHealthyRelaunch() {
         script := UpdateChecker.BuildUpdaterScript()
-        Assert.True(InStr(script, "Start-Process -FilePath $CurrentExe -PassThru") > 0)
-        Assert.True(InStr(script, "Start-Sleep -Seconds 5") > 0)
-        Assert.True(InStr(script, "$newProcess.HasExited") > 0)
+        ; A new build that exits within five seconds throws inside the try, which
+        ; sends the update to the recovery block.
+        Assert.True(RegExMatch(script,
+            "\$NewProcess = Start-Process -FilePath \$CurrentExe -PassThru\R"
+            . "\s*Start-Sleep -Seconds 5\R"
+            . "\s*\$NewProcess\.Refresh\(\)\R"
+            . "\s*if \(\$NewProcess\.HasExited\) \{\R"
+            . "\s*throw '"
+        ), script)
     }
 
     TestUpdaterScriptRecoversAfterPreSwapFailure() {
         script := UpdateChecker.BuildUpdaterScript()
+        recovery := SubStr(script, InStr(script, "} catch {"))
 
-        Assert.True(InStr(script, "$ParentExited = $false") > 0)
-        Assert.True(InStr(script, "$RecoveryLaunched = $false") > 0)
-        Assert.True(InStr(script, "$RecoveryReady = $false") > 0)
-        Assert.True(InStr(script, "if ($ParentExited -and -not $RecoveryLaunched)") > 0)
-        Assert.True(InStr(script, "Start-Process -FilePath $CurrentExe") > 0)
+        Assert.True(InStr(recovery, "if ($ParentExited -and -not $RecoveryLaunched) {"), recovery)
+        Assert.True(InStr(recovery, "$RecoveryReady = -not $SwapStarted"), recovery)
+        Assert.True(InStr(recovery, "if ($RecoveryReady -and (Test-Path -LiteralPath $CurrentExe -PathType Leaf)) {"), recovery)
+        Assert.True(RegExMatch(recovery, "Start-Process -FilePath \$CurrentExe\R\s*\$RecoveryLaunched = \$true"), recovery)
+        Assert.True(InStr(recovery, "throw $UpdateError"), recovery)
     }
 
     TestUpdaterUsesPrivateTemporaryScript() {
