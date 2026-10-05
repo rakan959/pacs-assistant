@@ -1,6 +1,5 @@
 #Requires AutoHotkey v2.0
 #Include ../ErrorText.ahk
-#Include ../Settings.ahk
 
 TestTempPath(prefix, extension := "") {
     static sequence := 0
@@ -9,10 +8,6 @@ TestTempPath(prefix, extension := "") {
         . DllCall("GetCurrentProcessId") "-"
         . DllCall("GetTickCount64", "UInt64") "-"
         . sequence extension
-}
-
-SetTestSetting(settingName, value) {
-    return Settings.SaveValues(Map(settingName, value))
 }
 
 class TestRunner {

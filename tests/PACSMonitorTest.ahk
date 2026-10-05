@@ -8,6 +8,7 @@
 #Include ../PACSCommands.ahk
 #Include ../Settings.ahk
 #Include TestRunner.ahk
+#Include SettingsFixture.ahk
 #Include LogCapture.ahk
 
 class PACSMonitorTest {

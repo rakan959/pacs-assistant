@@ -6,6 +6,7 @@
 #Requires AutoHotkey v2.0
 #Include ../Settings.ahk
 #Include TestRunner.ahk
+#Include SettingsFixture.ahk
 #Include FakePresentationLease.ahk
 #Include LogCapture.ahk
 

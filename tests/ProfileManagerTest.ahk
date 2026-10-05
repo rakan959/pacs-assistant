@@ -6,6 +6,7 @@
 #Requires AutoHotkey v2.0
 #Include ../ProfileManager.ahk
 #Include TestRunner.ahk
+#Include SettingsFixture.ahk
 #Include LogCapture.ahk
 
 class ProfileManagerTest {

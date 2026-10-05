@@ -7,6 +7,7 @@
 #Include ../MicrophoneManager.ahk
 #Include ../PACSCommands.ahk
 #Include TestRunner.ahk
+#Include SettingsFixture.ahk
 #Include LogCapture.ahk
 
 class MicrophoneManagerTest {

@@ -8,6 +8,7 @@
 #Include ../UpdateChecker.ahk
 #Include ../Settings.ahk
 #Include TestRunner.ahk
+#Include SettingsFixture.ahk
 #Include FakePresentationLease.ahk
 #Include LogCapture.ahk
 
