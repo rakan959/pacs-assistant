@@ -78,6 +78,7 @@ class UIAValueTest {
         "TestTryReadPreservesSupportedBlank",
         "TestSupportedBlankDoesNotFallThroughToLegacy",
         "TestFailedReadIsNotConvertedToSupportedBlank",
+        "TestFailedLegacyReadIsNotConvertedToSupportedBlank",
         "TestCanWriteReflectsPatternAvailability",
         "TestWriteRefusesWhenPatternMissing",
         "TestWriteSucceedsWhenPatternPresent",
@@ -127,6 +128,14 @@ class UIAValueTest {
         Assert.Equal("", result.value)
     }
 
+    ; The Sticky Notes path: no ValuePattern, so the legacy read decides.
+    TestFailedLegacyReadIsNotConvertedToSupportedBlank() {
+        result := UIAValue.TryRead(FailingLegacyReadElement())
+
+        Assert.False(result.supported)
+        Assert.Equal("", result.value)
+    }
+
     TestCanWriteReflectsPatternAvailability() {
         Assert.True(UIAValue.CanWrite(FakeElement("", "", true)))
         Assert.False(UIAValue.CanWrite(FakeElement("", "", false)))
@@ -161,6 +170,17 @@ class UIAValueTest {
         Assert.Equal("wet read", el.storedValue)
         Assert.Equal(1, el.writeAttempts.Length)
         Assert.Equal("Value", el.writeAttempts[1])
+    }
+}
+
+class FailingLegacyReadElement {
+    GetPropertyValue(propertyId) {
+        switch propertyId {
+            case UIA.Property.LegacyIAccessibleValue: throw Error("legacy read failed")
+            case UIA.Property.IsValuePatternAvailable: return false
+            case UIA.Property.IsLegacyIAccessiblePatternAvailable: return true
+        }
+        return ""
     }
 }
 
