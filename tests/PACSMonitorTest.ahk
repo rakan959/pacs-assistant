@@ -394,7 +394,6 @@ class PACSMonitorTest {
         Assert.Equal("ahk_id 100", driver.rootTargets[1])
         Assert.Equal("ahk_id 100", driver.rootTargets[2])
         Assert.True(driver.liveChecks >= 2)
-        Assert.Equal(0, driver.restoreCalls)
         Assert.Equal(1, button.clickCalls)
         Assert.Equal(0, button.controlClickCalls)
     }
@@ -767,7 +766,6 @@ class PinnedPortalMonitorDriver {
         this.liveChecks := 0
         this.rootTargets := []
         this.rootCalls := 0
-        this.restoreCalls := 0
     }
 
     ResolvePortalSession() {
@@ -783,14 +781,6 @@ class PinnedPortalMonitorDriver {
 
     IsActive(*) {
         return false
-    }
-
-    GetActiveWindow() {
-        return 0
-    }
-
-    RestoreActiveWindow(*) {
-        this.restoreCalls++
     }
 
     RootForSession(session) {

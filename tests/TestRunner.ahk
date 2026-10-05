@@ -16,6 +16,13 @@ RecordNotification(notifications, text, title, options := "") {
     notifications.Push({text: text, title: title, options: options})
 }
 
+; Throws Error(message), ignoring any arguments after it. A fat-arrow body cannot
+; hold a throw statement, so a double that must fail uses this, for example
+; (*) => ThrowError("simulated failure") or ThrowError.Bind("simulated failure").
+ThrowError(message, *) {
+    throw Error(message)
+}
+
 class TestRunner {
     static tests := []
     static successes := 0

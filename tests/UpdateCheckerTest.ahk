@@ -675,7 +675,6 @@ class UpdateCheckerTest {
         ReadOnlyInstallUpdateChecker.transport := transport
         coordinator := FakeShutdownCoordinator(true)
         ReadOnlyInstallUpdateChecker.shutdownCoordinator := coordinator
-        ReadOnlyInstallUpdateChecker.clinicalActivityProbe := (*) => false
 
         result := ReadOnlyInstallUpdateChecker.PerformUpdate(ValidUpdateInfo(), {})
 
@@ -692,7 +691,6 @@ class UpdateCheckerTest {
     TestUpdaterPathFailureReleasesShutdownTransaction() {
         coordinator := FakeShutdownCoordinator(true)
         ThrowingUpdaterPathChecker.shutdownCoordinator := coordinator
-        ThrowingUpdaterPathChecker.clinicalActivityProbe := (*) => false
 
         capturedLog := LogCapture()
         try result := ThrowingUpdaterPathChecker.PerformUpdate(ValidUpdateInfo(), {})

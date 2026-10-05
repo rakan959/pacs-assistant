@@ -276,7 +276,6 @@ class HotkeyManagerTest {
     }
 
     TestEquivalentCustomCombinationPrefixesAreRejected() {
-        HotkeyManager.hotkeyDriver := FakeHotkeyDriver()
         Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "a & b"))
 
         Assert.False(HotkeyManager.RegisterHotkey("ActionTwo", "~a & b"))

@@ -79,7 +79,7 @@ class TestRunnerTest {
 
     CustomAssertionMessageKeepsTheDetail() {
         messages := []
-        try Assert.Throws(() => FakeEarlyFailure.Throw("Duplicate key"), "Expected ':'", "JSON was not rejected as expected")
+        try Assert.Throws(() => ThrowError("Duplicate key"), "Expected ':'", "JSON was not rejected as expected")
         catch Error as err
             messages.Push(err.Message)
         try Assert.Equal(1, 2, "counts differ")
@@ -154,7 +154,6 @@ class TestRunnerTest {
     }
 
     TeardownFailureCountsAsTheTestFailure() {
-        TeardownFailureProbe.Reset()
         result := this.RunProbe(TeardownFailureProbe)
 
         Assert.Equal(0, result.successes)
@@ -323,9 +322,6 @@ class SetupFailureProbe {
 class TeardownFailureProbe {
     static tests := ["Passes"]
 
-    static Reset() {
-    }
-
     Passes() {
     }
 
@@ -447,11 +443,5 @@ class DialogProbe {
 
     SeesNone() {
         DialogProbe.observed.Push(TestRunner.dialogs.Length)
-    }
-}
-
-class FakeEarlyFailure {
-    static Throw(message) {
-        throw Error(message)
     }
 }

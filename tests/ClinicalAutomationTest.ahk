@@ -1150,7 +1150,7 @@ class ClinicalAutomationTest {
 
     ReportCaptureReadsTheOneCurrentReport() {
         report := "EXAMINATION: CT CHEST`nFINDINGS: Current report."
-        driver := FakePowerScribeSessionDriver(, report)
+        driver := FakePowerScribeSessionDriver(report)
         PowerScribe.sessionDriver := driver
 
         capture := PowerScribe.CaptureReport()
@@ -1485,10 +1485,8 @@ class FakeGracefulCloseDriver {
 }
 
 class FakePowerScribeSessionDriver {
-    __New(session := 0, reportText := "EXAMINATION: CT CHEST") {
-        this.session := session ? session : {hwnd: 100, target: "ahk_id 100", processId: 42}
-        if !HasProp(this.session, "reportText")
-            this.session.reportText := reportText
+    __New(reportText := "EXAMINATION: CT CHEST") {
+        this.session := {hwnd: 100, target: "ahk_id 100", processId: 42}
         this.reportText := reportText
         this.captureCalls := 0
     }

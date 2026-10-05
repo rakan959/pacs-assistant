@@ -1,7 +1,7 @@
 ; = CONTENTS
 ;   + Preamble
 ;   + WetReadTest class (wet-read paste, UIA write/verify, sticky note targeting, attending routing)
-;   + Test doubles (wet-read drivers/elements, sticky target elements, notification recorder)
+;   + Test doubles (wet-read drivers/elements, sticky target elements, sticky window drivers)
 
 #Requires AutoHotkey v2.0
 #Include ../WetRead.ahk
@@ -713,7 +713,7 @@ class WetReadTest {
             captureFaults := capturedLog.Count("could not read the PowerScribe report: PropertyError")
             RunPinnedWetReadWorkflow("wet read", "uia",
                 (*) => session, (*) => {text: "EXAMINATION: CT HEAD", session: 0},
-                (*) => FakeEarlyWetReadExit.Throw("attending 'Dr. A' cannot be selected in PowerScribe automatically"),
+                (*) => ThrowError("attending 'Dr. A' cannot be selected in PowerScribe automatically"),
                 (*) => true, notify)
             RunPinnedWetReadWorkflow("wet read", "uia",
                 (*) => session, (*) => {text: "EXAMINATION: CT HEAD", session: 0},
@@ -759,7 +759,7 @@ class WetReadTest {
         try result := RunPinnedWetReadWorkflow(
             "wet read",
             "uia",
-            ObjBindMethod(FakeEarlyWetReadExit, "Throw", "simulated opener failure"),
+            ThrowError.Bind("simulated opener failure"),
             (*) => (captureCalls++, {text: "", session: 0}),
             (*) => true,
             (*) => true,
@@ -791,7 +791,7 @@ class WetReadTest {
             "wet read",
             "uia",
             (*) => stickySession,
-            ObjBindMethod(FakeEarlyWetReadExit, "Throw", "simulated report failure"),
+            ThrowError.Bind("simulated report failure"),
             (*) => routeCalls++,
             (*) => (pasteCalls++, true),
             RecordNotification.Bind(notifications)
@@ -837,12 +837,6 @@ class WetReadTest {
         Assert.Equal("capture-report", events[2])
         Assert.Equal("route-attending", events[3])
         Assert.Equal("paste-pinned-sticky", events[4])
-    }
-}
-
-class FakeEarlyWetReadExit {
-    static Throw(message) {
-        throw Error(message)
     }
 }
 
