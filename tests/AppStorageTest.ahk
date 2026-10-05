@@ -4,7 +4,9 @@
 
 class AppStorageTest {
     static tests := [
-        "TestInstalledDataMigrationPreservesLegacyAndDoesNotOverwriteDestination",
+        "TestInstalledDataMigrationCopiesOnceAndPreservesLegacy",
+        "TestResumedMigrationKeepsADestinationWrittenSinceTheFailedAttempt",
+        "TestMigrationNeverReplacesADestinationThatAppearsDuringTheCopy",
         "TestCompletedMigrationDoesNotResurrectDeletedProfile",
         "TestPartialMigrationRetriesBeforeWritingMarker",
         "TestFailedCopyCannotPublishAPartialDestination",
@@ -40,7 +42,7 @@ class AppStorageTest {
         Assert.True(DirExist(this.legacyRoot "\profiles") != "")
     }
 
-    TestInstalledDataMigrationPreservesLegacyAndDoesNotOverwriteDestination() {
+    TestInstalledDataMigrationCopiesOnceAndPreservesLegacy() {
         Assert.Equal(this.dataRoot, AppStorage.Ensure())
         Assert.Equal("legacy settings", FileRead(this.dataRoot "\settings.ini"))
         Assert.Equal("legacy config", FileRead(this.dataRoot "\config.ini"))
@@ -54,6 +56,36 @@ class AppStorageTest {
         AppStorage.Ensure()
 
         Assert.Equal("new destination", FileRead(this.dataRoot "\settings.ini"))
+    }
+
+    ; A failed migration resumes at the next start. Settings the user changed in the
+    ; meantime must not be replaced by the stale legacy copy.
+    TestResumedMigrationKeepsADestinationWrittenSinceTheFailedAttempt() {
+        AppStorage.copyFile := FailingMigrationCopy(this.dataRoot "\config.ini")
+        Assert.Throws((*) => AppStorage.Ensure(), "simulated migration copy failure")
+        FileDelete(this.dataRoot "\settings.ini")
+        FileAppend("newer destination", this.dataRoot "\settings.ini")
+
+        AppStorage.copyFile := this.originalCopyFile
+        AppStorage.Ensure()
+
+        Assert.Equal("newer destination", FileRead(this.dataRoot "\settings.ini"))
+        Assert.Equal("legacy config", FileRead(this.dataRoot "\config.ini"))
+    }
+
+    ; The final move refuses to overwrite, so a destination that appears after the
+    ; existence check survives and the migration stays unmarked for a later retry.
+    TestMigrationNeverReplacesADestinationThatAppearsDuringTheCopy() {
+        destination := this.dataRoot "\settings.ini"
+        AppStorage.copyFile := (source, temporary) => (
+            FileCopy(source, temporary),
+            InStr(temporary, destination ".") = 1 && FileAppend("written meanwhile", destination)
+        )
+
+        Assert.Throws((*) => AppStorage.Ensure())
+
+        Assert.Equal("written meanwhile", FileRead(destination))
+        Assert.False(FileExist(this.dataRoot "\" AppStorage.migrationMarkerName))
     }
 
     TestCompletedMigrationDoesNotResurrectDeletedProfile() {

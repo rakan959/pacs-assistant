@@ -13,6 +13,7 @@ class ProfileManagerTest {
         "TestProfileSaveAndLoad",
         "TestProfileNameContainingIniRoundTrips",
         "TestDefaultProfileTracking",
+        "TestStoredDefaultProfileIsReadAtStartup",
         "TestProfileRename",
         "TestProfileCaseOnlyRename",
         "TestLoadCanonicalizesCaseDriftedDefaultProfile",
@@ -117,6 +118,20 @@ class ProfileManagerTest {
         Assert.True(ProfileManager.SetDefaultProfile("DefaultTest"))
         ProfileManager.LoadProfiles()
         Assert.Equal("DefaultTest", ProfileManager.defaultProfile)
+    }
+
+    ; LoadProfiles never reads config.ini; the class initializer does, at startup.
+    TestStoredDefaultProfileIsReadAtStartup() {
+        ProfileManager.profiles["Night"] := ProfileManager.NewProfile()
+        ProfileManager.SaveProfile("Night", ProfileManager.profiles["Night"])
+        Assert.True(ProfileManager.SetDefaultProfile("Night"))
+        ProfileManager.defaultProfile := ""
+
+        ProfileManager.__New()
+        ProfileManager.LoadProfiles()
+
+        Assert.Equal("Night", ProfileManager.defaultProfile)
+        Assert.Equal("Night", ProfileManager.currentProfile)
     }
 
     TestProfileRename() {

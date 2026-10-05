@@ -20,7 +20,7 @@ class HotkeyManagerTest {
         "TestDisableAllHotkeys",
         "TestRegistersWithScope",
         "TestUnknownScopeIsRejectedWithoutReplacingRegistration",
-        "TestScopePredicatesAreStable",
+        "TestScopedBindCanBeTurnedOffAgain",
         "TestPowerScribeScopeRequiresExactReportingWindow",
         "TestPowerScribeScopeRejectsWrongTitleAndDuplicateWindows",
         "TestPacsScopeRejectsWrongTitleAndDuplicateWindows",
@@ -40,7 +40,9 @@ class HotkeyManagerTest {
         this.originalWindowDriver := AppControl.windowDriver
         this.originalHotkeyFunctions := HotkeyManager.hotkeyFunctions
         ; Unit tests model registration through a recording driver so the suite never
-        ; grabs real system-wide hotkeys; run-hotkey-tests.ahk covers native behavior.
+        ; grabs a key the user might press. The two tests that need AutoHotkey itself
+        ; switch to the native driver with Ctrl+F13/Ctrl+F22, which have no physical
+        ; key; run-hotkey-tests.ahk covers the rest of the native behavior.
         HotkeyManager.hotkeyDriver := FakeHotkeyDriver()
 
         this.func1Calls := 0
@@ -119,17 +121,23 @@ class HotkeyManagerTest {
     }
 
     ; AutoHotkey identifies a hotkey variant by the exact function object handed to
-    ; HotIf, so a fresh closure per registration would leak an unreachable variant
-    ; every time a bind is re-applied
-    TestScopePredicatesAreStable() {
+    ; HotIf, so a fresh closure per registration would leave each scoped bind
+    ; registered and unreachable: turning it off would fail with "Nonexistent hotkey
+    ; variant". Registers natively; Ctrl+F22 has no physical key.
+    TestScopedBindCanBeTurnedOffAgain() {
         for scope in HotkeyContract.scopes {
             if (scope == "Any") {
                 Assert.False(HotkeyManager.scopePredicates.Has(scope), "'Any' must register globally, with no predicate")
                 continue
             }
             Assert.True(HotkeyManager.scopePredicates.Has(scope), "No HotIf predicate for scope: " scope)
-            Assert.True(HotkeyManager.scopePredicates[scope] == HotkeyManager.scopePredicates[scope],
-                "Predicate for '" scope "' is not a stable object")
+        }
+
+        HotkeyManager.hotkeyDriver := this.originalHotkeyDriver
+        for scope in ["PACS", "PowerScribe", "PACS or PowerScribe"] {
+            Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^F22", scope), HotkeyManager.lastError)
+            Assert.True(HotkeyManager.Unregister("ActionOne"), scope ": " HotkeyManager.lastError)
+            Assert.False(HotkeyManager.activeHotkeys.Has("ActionOne"))
         }
     }
 

@@ -53,6 +53,7 @@ class ClinicalAutomationTest {
         "GracefulCloseRequiresCapturedProcessIdentity",
         "GracefulCloseRejectsSameProcessWrongTitleBeforeRequest",
         "GracefulCloseRejectsDuplicateExactWindowBeforeRequest",
+        "GracefulCloseRequestsCloseForTheUniqueExactWindow",
         "RestartTargetsUseExactClinicalIdentities",
         "PacsLauncherRejectsNonShortcutMatch",
         "PacsLauncherRejectsRetargetedShortcut",
@@ -817,18 +818,38 @@ class ClinicalAutomationTest {
         Assert.Equal(0, driver.closeRequests)
     }
 
+    ; These keep the shipped identity check (AppControl.ExactSessionIsUniqueAndLive)
+    ; and vary only the windows it sees.
     GracefulCloseRejectsSameProcessWrongTitleBeforeRequest() {
-        driver := FakeGracefulCloseDriver(1000, 77, false)
+        AppControl.windowDriver := FakeExactWindowDriver([
+            {hwnd: 601, title: AppControl.powerScribeReportingTitle " Extra", exe: AppControl.powerScribeExecutable, pid: 77}
+        ])
+        driver := ExactGateGracefulCloseDriver(1000, 77)
 
         Assert.False(CloseWithSavePrompt(this.PowerScribeSession(), 300, driver))
         Assert.Equal(0, driver.closeRequests)
     }
 
     GracefulCloseRejectsDuplicateExactWindowBeforeRequest() {
-        driver := FakeGracefulCloseDriver(1000, 77, false)
+        AppControl.windowDriver := FakeExactWindowDriver([
+            {hwnd: 601, title: AppControl.powerScribeReportingTitle, exe: AppControl.powerScribeExecutable, pid: 77},
+            {hwnd: 602, title: AppControl.powerScribeReportingTitle, exe: AppControl.powerScribeExecutable, pid: 78}
+        ])
+        driver := ExactGateGracefulCloseDriver(1000, 77)
 
         Assert.False(CloseWithSavePrompt(this.PowerScribeSession(), 300, driver))
         Assert.Equal(0, driver.closeRequests)
+    }
+
+    GracefulCloseRequestsCloseForTheUniqueExactWindow() {
+        AppControl.windowDriver := FakeExactWindowDriver([
+            {hwnd: 601, title: AppControl.powerScribeReportingTitle, exe: AppControl.powerScribeExecutable, pid: 77}
+        ])
+        driver := ExactGateGracefulCloseDriver(1000, 77)
+
+        CloseWithSavePrompt(this.PowerScribeSession(), 300, driver)
+
+        Assert.Equal(1, driver.closeRequests)
     }
 
     PowerScribeSession() {
@@ -1272,6 +1293,12 @@ class CountingCloseLifecycleDriver {
         if this.failAll
             throw Error("simulated close failure")
         return true
+    }
+}
+
+class ExactGateGracefulCloseDriver extends FakeGracefulCloseDriver {
+    IsExpectedSession(session) {
+        return NativeGracefulCloseDriver.Prototype.IsExpectedSession.Call(this, session)
     }
 }
 
