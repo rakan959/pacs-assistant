@@ -19,6 +19,8 @@ class KeybindGUITest {
         "TestCustomFunctionNamesUsePersistedCaseInsensitiveIdentity",
         "TestCustomKeybindRejectsABlankLookingWindow",
         "TestAddedCustomKeybindSucceedsWhenCaptureDoesNotStart",
+        "TestAddedFunctionMarksTheProfileUnsaved",
+        "TestRemovedFunctionMarksTheProfileUnsaved",
         "TestCustomKeybindRefusesAnExistingName",
         "TestCustomKeybindRechecksTheNameInsideTheTransaction",
         "TestLoadErrorSummaryNamesEachFileAndCause",
@@ -43,6 +45,7 @@ class KeybindGUITest {
         "TestProfileBoundDialogRejectsSameNameReplacement",
         "TestCapturedBindPublishesDirtyStateBeforeReleasingOwner",
         "TestStoppedCaptureHookDoesNotUnassignTheCommand",
+        "TestCapturedKeyHeldByAnUnregisteredBindIsRefused",
         "TestCancelCaptureWarnsWhenPriorRuntimeCannotBeRestored",
         "TestCancelCaptureRetainsTransactionWhenHookCannotStop",
         "TestOnInputEndRetainsCaptureWhenHookTeardownFails",
@@ -328,6 +331,38 @@ class KeybindGUITest {
         Assert.Equal(1, listView.GetCount())
         Assert.Equal(0, editor.promptCalls)
         Assert.False(ExclusiveOperations.profileMutationActive)
+    }
+
+    ; Unsaved changes are what the save prompt on exit or profile switch asks about.
+    TestAddedFunctionMarksTheProfileUnsaved() {
+        profile := ProfileManager.NewProfile()
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        dialog := FakeProfileDialog("Test")
+        listView := FunctionalListView("Draft Report", "Unassigned", "Any window")
+        editor := {base: CaptureRefusingKeybindGUI.Prototype, gui: "", promptCalls: 0}
+
+        Assert.True(editor.AddFunction("Sign Report", listView, dialog))
+
+        Assert.True(profile.binds.Has("Sign Report"))
+        Assert.Equal(1, editor.promptCalls)
+        Assert.True(editor.IsProfileDirty("Test"))
+    }
+
+    TestRemovedFunctionMarksTheProfileUnsaved() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F23"
+        profile.scopes["Sign Report"] := "Any"
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        listView := RemovableListView("Sign Report", "Ctrl + F23", "Any window")
+        editor := {base: PassiveRuntimeKeybindGUI.Prototype, applyCalls: 0}
+        editor.confirmationDriver := AlwaysConfirmDriver()
+
+        Assert.True(editor.RemoveFunction(listView))
+
+        Assert.False(ProfileManager.profiles["Test"].binds.Has("Sign Report"))
+        Assert.True(editor.IsProfileDirty("Test"))
     }
 
     TestLoadErrorSummaryNamesEachFileAndCause() {
@@ -1185,6 +1220,45 @@ class KeybindGUITest {
         Assert.Equal("Ctrl + F13", listView.GetText(1, 2))
         Assert.False(dirty)
         Assert.False(prompt.destroyed)
+    }
+
+    ; A bind left out of the runtime (here for a command this version lacks) is
+    ; seen only by the profile check, so it alone keeps the profile valid.
+    TestCapturedKeyHeldByAnUnregisteredBindIsRefused() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        profile.binds["Retired Command"] := "F14"
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
+        prompt := FakeProfileDialog("Test")
+        editor := {base: CaptureMutationGuardGUI.Prototype, notifications: []}
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            HotkeyManager.activeHotkeys := Map()
+            Assert.True(editor.CaptureFunctionDialogState(
+                prompt,
+                "Sign Report",
+                listView,
+                1
+            ))
+            Assert.True(editor.BeginListening("Sign Report", listView, prompt))
+            result := editor.OnInputEnd(
+                "Sign Report",
+                listView,
+                prompt,
+                KeybindGUI.activeInputHook
+            )
+        } finally {
+            try editor.StopListening()
+        }
+
+        Assert.False(result)
+        Assert.Equal("^F13", profile.binds["Sign Report"])
+        Assert.Equal("Duplicate Binding", TestRunner.dialogs[-1].title)
+        Assert.False(ExclusiveOperations.captureActive)
+        ProfileManager.ValidateProfile(profile)
     }
 
     TestCancelCaptureWarnsWhenPriorRuntimeCannotBeRestored() {
