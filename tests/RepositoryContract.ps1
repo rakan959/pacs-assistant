@@ -263,6 +263,37 @@ if (-not (Test-Path -LiteralPath $ownedDraftValidatorPath -PathType Leaf)) {
             $failures.Add('Foreign draft validation failed for the wrong reason.')
         }
     }
+    # Every other property that authorises the DELETE, changed one at a time (or
+    # removed), with the reason its rejection must give.
+    $invalidDraftCases = @(
+        @{ Property = 'draft'; Value = $false; Reason = 'not an unpublished draft' },
+        @{ Property = 'draft'; Value = 'true'; Reason = 'not an unpublished draft' },
+        @{ Property = 'prerelease'; Value = $true; Reason = 'wrong prerelease classification' },
+        @{ Property = 'prerelease'; Value = 'false'; Reason = 'wrong prerelease classification' },
+        @{ Property = 'tag_name'; Value = 'V2.0.0'; Reason = 'tag does not exactly match' },
+        @{ Property = 'name'; Value = 'Release v2.0.0'; Reason = 'exact title' },
+        @{ Property = 'author'; Value = $null; Reason = 'no author identity' },
+        @{ Property = 'author'; Value = [pscustomobject]@{ name = 'github-actions[bot]' }; Reason = "missing required property 'login'" },
+        @{ Property = 'name'; Remove = $true; Reason = "missing required property 'name'" }
+    )
+    foreach ($case in $invalidDraftCases) {
+        $invalidDraft = $ownedDraft.PSObject.Copy()
+        if ($case.ContainsKey('Remove')) {
+            $invalidDraft.PSObject.Properties.Remove($case.Property)
+            $label = "without $($case.Property)"
+        } else {
+            $invalidDraft.($case.Property) = $case.Value
+            $label = "with $($case.Property) = '$($case.Value)'"
+        }
+        try {
+            & $ownedDraftValidatorPath -Release $invalidDraft -ReleaseTag 'v2.0.0' -ExpectedPrerelease $false
+            $failures.Add("Draft reconciliation must reject a draft $label.")
+        } catch {
+            if ($_.Exception.Message -notmatch [regex]::Escape($case.Reason)) {
+                $failures.Add("A draft $label was rejected for the wrong reason: $($_.Exception.Message)")
+            }
+        }
+    }
 }
 
 if (-not (Test-Path -LiteralPath $publishFailureClassifierPath -PathType Leaf)) {
