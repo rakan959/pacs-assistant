@@ -974,6 +974,15 @@ class UpdateChecker {
         }
     }
 
+    ; The hidden PowerShell command that runs the updater script after this process
+    ; exits; the arguments are the ones BuildUpdaterScript reads from $args.
+    static UpdaterCommand(updaterPath, currentExe, newExe, backupExe) {
+        powershell := A_WinDir "\System32\WindowsPowerShell\v1.0\powershell.exe"
+        return '"' powershell '" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'
+            . updaterPath '" ' DllCall("GetCurrentProcessId")
+            . ' "' currentExe '" "' newExe '" "' backupExe '" "' AppLog.Path() '"'
+    }
+
     static BuildUpdaterScript() {
         script := "
         (
@@ -981,6 +990,7 @@ class UpdateChecker {
         $CurrentExe = [string]$args[1]
         $NewExe = [string]$args[2]
         $BackupExe = [string]$args[3]
+        $LogPath = [string]$args[4]
 
         $ParentExited = $false
         $RecoveryLaunched = $false
@@ -1045,6 +1055,12 @@ class UpdateChecker {
                     } catch {}
                 }
             }
+
+            # PACS Assistant has exited, so this is the only record of the failure.
+            try {
+                $entry = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss.fff') + ' Update install failed: ' + $UpdateError + '; previous version relaunched: ' + $RecoveryLaunched + [char]10
+                [IO.File]::AppendAllText($LogPath, $entry, (New-Object System.Text.UTF8Encoding $false))
+            } catch {}
 
             throw $UpdateError
         } finally {
@@ -1150,11 +1166,7 @@ class UpdateChecker {
             }
 
             FileAppend(this.BuildUpdaterScript(), updaterPath, "UTF-8-RAW")
-            powershell := A_WinDir "\System32\WindowsPowerShell\v1.0\powershell.exe"
-            command := '"' powershell '" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'
-                . updaterPath '" ' DllCall("GetCurrentProcessId")
-                . ' "' currentExe '" "' newExe '" "' backupExe '"'
-            Run(command, A_ScriptDir, "Hide")
+            Run(this.UpdaterCommand(updaterPath, currentExe, newExe, backupExe), A_ScriptDir, "Hide")
             updateGui.Destroy()
             if shutdownStarted
                 return this.shutdownCoordinator.CompleteShutdown()

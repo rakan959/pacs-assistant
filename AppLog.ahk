@@ -11,6 +11,11 @@
 class AppLog {
     static fileName := "error.log"
 
+    ; Where entries are written; the updater appends its own failures here too.
+    static Path() {
+        return AppStorage.DataRoot() "\" this.fileName
+    }
+
     /**
      * Appends "<yyyy-MM-dd HH:mm:ss.mmm> <text>". Never throws: a logging failure
      * must not mask or replace the failure being logged.

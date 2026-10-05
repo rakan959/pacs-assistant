@@ -43,6 +43,7 @@ class UpdateCheckerTest {
         "TestReleaseParserShortensOversizedNotes",
         "TestUpdaterScriptRequiresHealthyRelaunch",
         "TestUpdaterScriptRecoversAfterPreSwapFailure",
+        "TestUpdaterScriptLogsItsFailure",
         "TestUpdaterUsesPrivateTemporaryScript",
         "TestCleanupDoesNotOwnGenericScript",
         "TestUpdateDialogPreferencesCommitTogether",
@@ -228,6 +229,19 @@ class UpdateCheckerTest {
         Assert.True(InStr(recovery, "if ($RecoveryReady -and (Test-Path -LiteralPath $CurrentExe -PathType Leaf)) {"), recovery)
         Assert.True(RegExMatch(recovery, "Start-Process -FilePath \$CurrentExe\R\s*\$RecoveryLaunched = \$true"), recovery)
         Assert.True(InStr(recovery, "throw $UpdateError"), recovery)
+    }
+
+    ; The app has exited when the updater fails, so the updater itself records the
+    ; failure in error.log, whose path the app passes as the fifth argument.
+    TestUpdaterScriptLogsItsFailure() {
+        script := UpdateChecker.BuildUpdaterScript()
+        recovery := SubStr(script, InStr(script, "} catch {"))
+        Assert.True(InStr(script, "$LogPath = [string]$args[4]"), script)
+        Assert.True(RegExMatch(recovery, "\[IO\.File\]::AppendAllText\(\$LogPath, .*\R(?:.*\R)*?\s*throw \$UpdateError"), recovery)
+
+        command := UpdateChecker.UpdaterCommand("C:\t\u.ps1", "C:\app\a.exe", "C:\app\a.new.exe", "C:\app\a.old.exe")
+        tail := ' "C:\app\a.old.exe" "' AppLog.Path() '"'
+        Assert.Equal(tail, SubStr(command, -StrLen(tail)))
     }
 
     TestUpdaterUsesPrivateTemporaryScript() {
