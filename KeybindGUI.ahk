@@ -6,6 +6,7 @@
 #Requires AutoHotkey v2.0
 
 #Include ExclusiveOperations.ahk
+#Include AppLog.ahk
 #Include HotkeyManager.ahk
 #Include ProfileManager.ahk
 #Include PACSCommands.ahk
@@ -27,6 +28,13 @@ class KeybindGUI {
     ; The V option would pass the selected key through to the foreground application.
     ; Capture is intentionally suppressing: the key is configuration data only.
     static inputHookOptions := ""
+    ; Modifier symbols and their display names, in display order.
+    static modifierNames := [
+        ["<^", "LCtrl"], [">^", "RCtrl"], ["^", "Ctrl"],
+        ["<!", "LAlt"], [">!", "RAlt"], ["!", "Alt"],
+        ["<+", "LShift"], [">+", "RShift"], ["+", "Shift"],
+        ["<#", "LWin"], [">#", "RWin"], ["#", "Win"]
+    ]
 
     __New() {
         ; The launch-time update check belongs to UpdateChecker.Start(), called from
@@ -260,7 +268,7 @@ class KeybindGUI {
             return this.AbortStaleCapture(dialog, message, "Profile Changed")
         this.StopListening()
         try dialog.Destroy()
-        MsgBox(message, "Profile Changed", "Icon!")
+        this.NotifyUser(message, "Profile Changed", "Icon!")
         return false
     }
 
@@ -957,6 +965,7 @@ class KeybindGUI {
             } catch as err {
                 ; Preserve the live hook and listening state so callers cannot tear
                 ; down its profile/dialog while it may still capture the next key.
+                AppLog.Write("Key capture could not be stopped: " ErrorText.Describe(err))
                 throw Error("Input capture could not be stopped: " err.Message)
             }
             KeybindGUI.activeInputHook := 0
@@ -1283,25 +1292,28 @@ class KeybindGUI {
             }
         }
 
-        ; One message for the whole apply rather than a dialog per bind
-        if (failed.Length && showErrors) {
-            errMsg := "These keybinds failed to register:" "`n"
-            for item in failed {
-                errMsg .= "- " item "`n"
-            }
-            this.NotifyUser(RTrim(errMsg, "`n"), "Keybind Errors", "Icon!")
-        }
-        return failed.Length = 0
+        if !failed.Length
+            return true
+        ; Logged on every failed apply, including the silent ones a restore or a
+        ; candidate check makes; one dialog for the whole apply when shown.
+        errMsg := "These keybinds failed to register:"
+        for item in failed
+            errMsg .= "`n- " item
+        AppLog.Write(StrReplace(errMsg, "`n", " "))
+        if showErrors
+            this.NotifyUser(errMsg, "Keybind Errors", "Icon!")
+        return false
     }
 
-    RestoreRuntimeProfile(profile, &errorText) {
-        errorText := ""
+    RestoreRuntimeProfile(profile, &failureText) {
+        failureText := ""
         try {
             if this.ApplyProfileBinds(profile, false)
                 return true
-            errorText := "one or more previous keybinds could not be re-registered"
+            failureText := "one or more previous keybinds could not be re-registered"
         } catch as err {
-            errorText := err.Message
+            failureText := err.Message
+            AppLog.Write("Runtime keybinds could not be restored: " ErrorText.Describe(err))
         }
         return false
     }
@@ -1473,6 +1485,7 @@ class KeybindGUI {
                 true
             )
         } else {
+            AppLog.Write("Runtime keybinds could not be restored: no current profile could be verified")
             this.NotifyUser(
                 message "`n`nNo current profile could be verified. Restart PACS Assistant before relying on its shortcuts.",
                 title,
@@ -1642,39 +1655,44 @@ class KeybindGUI {
         if !restored
             message .= "`n`nThe previous runtime bindings also could not be fully restored: " restoreError
                 . ". Restart PACS Assistant before relying on its shortcuts."
-        MsgBox(message, "Keybind Change Cancelled", "Icon!")
+        ; Callers hold the profile-mutation lease; NotifyUser shows this after it.
+        this.NotifyUser(message, "Keybind Change Cancelled", "Icon!")
         return false
     }
 
+    /**
+     * Display form of a hotkey, such as "Ctrl + Shift + V". ~ $ * change only how a
+     * hotkey behaves, so they are not shown; a symbol that ends the hotkey is its
+     * key (^+ is Ctrl and the + key). Custom combinations read as written.
+     */
     PrettifyHotkey(hotkeyStr) {
         if (hotkeyStr = "")
             return "Unassigned"
+        if InStr(hotkeyStr, "&")
+            return StrUpper(hotkeyStr)
 
-        modifiers := ""
-        key := hotkeyStr
-
-        ; Extract modifiers in order
-        if (InStr(key, "^")) {
-            modifiers .= "Ctrl + "
-            key := StrReplace(key, "^")
-        }
-        if (InStr(key, "!")) {
-            modifiers .= "Alt + "
-            key := StrReplace(key, "!")
-        }
-        if (InStr(key, "+")) {
-            modifiers .= "Shift + "
-            key := StrReplace(key, "+")
-        }
-        if (InStr(key, "#")) {
-            modifiers .= "Win + "
-            key := StrReplace(key, "#")
+        prefix := HotkeyContract.ParsePrefix(Trim(hotkeyStr), true)
+        key := Trim(prefix.rest)
+        if (key = "") {
+            key := SubStr(Trim(hotkeyStr), -1)
+            if prefix.modifiers.Has(key)
+                prefix.modifiers.Delete(key)
         }
 
-        ; Capitalize the key
-        key := Format("{:U}", key)
-
-        return modifiers key
+        text := ""
+        for modifier in KeybindGUI.modifierNames {
+            if prefix.modifiers.Has(modifier[1])
+                text .= modifier[2] " + "
+        }
+        release := RegExMatch(key, "i)^(.+?)\s+up$", &upMatch)
+        if release
+            key := upMatch[1]
+        ; A single character shows as typed (GetKeyName("+") is the unshifted "=");
+        ; named keys use the canonical spelling.
+        name := StrLen(key) = 1 ? StrUpper(key) : GetKeyName(key)
+        if (name = "")
+            name := key
+        return text name (release ? " Up" : "")
     }
 
     PromptRenameProfile(name, parentGui := 0) {
@@ -1805,7 +1823,7 @@ class KeybindGUI {
             return true
 
         try renameGui.Destroy()
-        MsgBox(
+        this.NotifyUser(
             "The profile context changed while this rename dialog was open. Reopen it before renaming.",
             "Profile Changed",
             "Icon!"

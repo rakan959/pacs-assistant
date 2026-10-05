@@ -7,6 +7,7 @@
 #Include ../KeybindGUI.ahk
 #Include TestRunner.ahk
 #Include ExclusiveOperationsFixture.ahk
+#Include LogCapture.ahk
 
 class KeybindGUITest {
     static tests := [
@@ -63,6 +64,8 @@ class KeybindGUITest {
         "TestClosingSavesDirtyProfileBeforeExit",
         "TestShutdownLeaseIsReleasedWhenTheDirtyPromptThrowsANonError",
         "TestNoticesUnderTheProfileLeaseWaitForItsRelease",
+        "TestCancelledCandidateNoticeWaitsForTheLeaseAndIsLogged",
+        "TestUnstoppableCaptureHookIsLogged",
         "TestProfileSwitchCanDiscardDirtyChanges",
         "TestFailedCustomDeletePreservesLiveProfile",
         "TestRemoveFunctionKeepsProfileAndRowWhenNativeOffFails",
@@ -184,6 +187,18 @@ class KeybindGUITest {
         Assert.Equal("Ctrl + Alt + D", this.gui.PrettifyHotkey("^!d"))
         Assert.Equal("Ctrl + Shift + V", this.gui.PrettifyHotkey("^+v"))
         Assert.Equal("Win + E", this.gui.PrettifyHotkey("#e"))
+        Assert.Equal("Ctrl + Alt + Shift + Win + K", this.gui.PrettifyHotkey("#+!^k"))
+        ; A trailing symbol is the key itself.
+        Assert.Equal("Ctrl + +", this.gui.PrettifyHotkey("^+"))
+        Assert.Equal("Ctrl + #", this.gui.PrettifyHotkey("^#"))
+        ; Behavior prefixes are not shown; sided modifiers are.
+        Assert.Equal("Ctrl + J", this.gui.PrettifyHotkey("~$^j"))
+        Assert.Equal("LCtrl + J", this.gui.PrettifyHotkey("<^j"))
+        Assert.Equal("F5", this.gui.PrettifyHotkey("*F5"))
+        ; Key names use AutoHotkey's canonical spelling.
+        Assert.Equal("Ctrl + NumpadAdd", this.gui.PrettifyHotkey("^numpadadd"))
+        Assert.Equal("Ctrl + Escape", this.gui.PrettifyHotkey("^Esc"))
+        Assert.Equal("Ctrl + F13", this.gui.PrettifyHotkey("^F13"))
     }
 
     TestCustomFunctionNameChecksUnboundFunctions() {
@@ -1713,6 +1728,45 @@ class KeybindGUITest {
         Assert.Equal(3, notifications.calls.Length)
     }
 
+    ; RemoveFunction and DeleteCustomFunction call ApplyProfileCandidate under the
+    ; profile-mutation lease.
+    TestCancelledCandidateNoticeWaitsForTheLeaseAndIsLogged() {
+        notifications := LeaseObservingNotificationDriver()
+        editor := {base: KeybindGUI.Prototype, gui: "", notificationDriver: notifications}
+        HotkeyManager.hotkeyFunctions := Map()
+        candidate := ProfileManager.NewProfile()
+        candidate.binds["Unknown Command"] := "^F13"
+        candidate.scopes["Unknown Command"] := "Any"
+
+        capturedLog := LogCapture()
+        try {
+            Assert.True(editor.BeginProfileMutationTransaction("remove a function"))
+            Assert.False(editor.ApplyProfileCandidate(candidate, ProfileManager.NewProfile(), "function removal"))
+            shownUnderLease := notifications.calls.Length
+            editor.EndProfileMutationTransaction()
+            logged := capturedLog.Count("Keybinds failed to register: - Unknown Command")
+        } finally capturedLog.Restore()
+
+        Assert.Equal(0, shownUnderLease)
+        Assert.Equal(1, notifications.calls.Length)
+        Assert.False(notifications.calls[1].leaseHeld)
+        Assert.True(InStr(notifications.calls[1].message, "function removal was not applied"), notifications.calls[1].message)
+        Assert.Equal(1, logged)
+    }
+
+    TestUnstoppableCaptureHookIsLogged() {
+        KeybindGUI.activeInputHook := FailingCaptureHook("F13")
+        KeybindGUI.isListening := true
+
+        capturedLog := LogCapture()
+        try {
+            Assert.Throws(ObjBindMethod(this.gui, "StopListening"), "Input capture could not be stopped")
+            logged := capturedLog.Count("Key capture could not be stopped: Error: simulated InputHook stop failure")
+        } finally capturedLog.Restore()
+
+        Assert.Equal(1, logged)
+    }
+
     TestProfileSwitchCanDiscardDirtyChanges() {
         tempRoot := this.UseTempProfilesFolder()
         profile := ProfileManager.NewProfile()
@@ -2304,8 +2358,8 @@ class FakeCaptureOwnerGui {
 }
 
 class FailedRestoreKeybindGUI extends PassiveRuntimeKeybindGUI {
-    RestoreRuntimeProfile(profile, &errorText) {
-        errorText := "simulated restore failure"
+    RestoreRuntimeProfile(profile, &failureText) {
+        failureText := "simulated restore failure"
         return false
     }
 }
@@ -2316,9 +2370,9 @@ class RollbackFailingKeybindGUI extends KeybindGUI {
         return false
     }
 
-    RestoreRuntimeProfile(profile, &errorText) {
+    RestoreRuntimeProfile(profile, &failureText) {
         this.restoreCalls++
-        errorText := "simulated restore failure"
+        failureText := "simulated restore failure"
         return false
     }
 
@@ -2331,9 +2385,9 @@ class CaptureStartRestoreFailingKeybindGUI extends KeybindGUI {
         throw Error("simulated hook start failure")
     }
 
-    RestoreRuntimeProfile(profile, &errorText) {
+    RestoreRuntimeProfile(profile, &failureText) {
         this.restoreCalls++
-        errorText := "simulated capture restore failure"
+        failureText := "simulated capture restore failure"
         return false
     }
 }
@@ -2351,8 +2405,8 @@ class CaptureMutationGuardGUI extends KeybindGUI {
         return true
     }
 
-    RestoreRuntimeProfile(profile, &errorText) {
-        errorText := ""
+    RestoreRuntimeProfile(profile, &failureText) {
+        failureText := ""
         HotkeyManager.activeHotkeys := Map()
         for funcName, bind in profile.binds {
             if (bind != "")
@@ -2380,9 +2434,9 @@ class ShowFailureRecoveryGUI extends CaptureMutationGuardGUI {
         return true
     }
 
-    RestoreRuntimeProfile(profile, &errorText) {
+    RestoreRuntimeProfile(profile, &failureText) {
         this.restoreCalls++
-        return super.RestoreRuntimeProfile(profile, &errorText)
+        return super.RestoreRuntimeProfile(profile, &failureText)
     }
 }
 
@@ -2412,9 +2466,9 @@ class CaptureCancelRestoreFailingKeybindGUI extends KeybindGUI {
     StartInputHook(*) {
     }
 
-    RestoreRuntimeProfile(profile, &errorText) {
+    RestoreRuntimeProfile(profile, &failureText) {
         this.restoreCalls++
-        errorText := "simulated cancel restore failure"
+        failureText := "simulated cancel restore failure"
         return false
     }
 }
@@ -2431,9 +2485,9 @@ class OnEndStopFailureGUI extends CaptureMutationGuardGUI {
         KeybindGUI.activeInputHook := FailingCaptureHook("F14")
     }
 
-    RestoreRuntimeProfile(profile, &errorText) {
+    RestoreRuntimeProfile(profile, &failureText) {
         this.restoreCalls++
-        return super.RestoreRuntimeProfile(profile, &errorText)
+        return super.RestoreRuntimeProfile(profile, &failureText)
     }
 }
 
@@ -2454,9 +2508,9 @@ class ModifierRestartRestoreFailingKeybindGUI extends KeybindGUI {
             throw Error("simulated modifier hook restart failure")
     }
 
-    RestoreRuntimeProfile(profile, &errorText) {
+    RestoreRuntimeProfile(profile, &failureText) {
         this.restoreCalls++
-        errorText := "simulated modifier restore failure"
+        failureText := "simulated modifier restore failure"
         return false
     }
 }
@@ -2467,9 +2521,9 @@ class SaveRuntimeFailingKeybindGUI extends KeybindGUI {
         return false
     }
 
-    RestoreRuntimeProfile(profile, &errorText) {
+    RestoreRuntimeProfile(profile, &failureText) {
         this.restoreCalls++
-        errorText := "simulated saved-profile restore failure"
+        failureText := "simulated saved-profile restore failure"
         return false
     }
 }
@@ -2485,9 +2539,9 @@ class ConcurrentSaveMutationGUI extends KeybindGUI {
         return true
     }
 
-    RestoreRuntimeProfile(profile, &errorText) {
+    RestoreRuntimeProfile(profile, &failureText) {
         this.restoreCalls++
-        errorText := ""
+        failureText := ""
         this.restoredAttending := profile.modalityAttendings["Concurrent"]
         return true
     }
@@ -2569,8 +2623,8 @@ class DiscardRenameTrackingGUI extends KeybindGUI {
         return this.GuiIsLive(this.gui)
     }
 
-    RestoreRuntimeProfile(profile, &errorText) {
-        errorText := ""
+    RestoreRuntimeProfile(profile, &failureText) {
+        failureText := ""
         HotkeyManager.activeHotkeys := Map(
             "Sign Report", {
                 hotkey: profile.binds["Sign Report"],
