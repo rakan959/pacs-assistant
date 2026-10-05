@@ -5,6 +5,7 @@ class TestRunnerTest {
         "ThrowsRejectsAFunctionThatReturnsNormally",
         "EqualRejectsCaseOnlyAndTypeOnlyDifferences",
         "NotEqualAcceptsCaseOnlyAndTypeOnlyDifferences",
+        "TruthAndInequalityAssertionsCanFail",
         "FailedAssertionNamesTheTestLineAndShowsObjects",
         "CustomAssertionMessageKeepsTheDetail",
         "TemporaryPathsAreUniqueAndProcessScoped",
@@ -104,6 +105,37 @@ class TestRunnerTest {
 
         Assert.True(caseDifferenceAccepted, "Assert.NotEqual must distinguish string case")
         Assert.True(typeDifferenceAccepted, "Assert.NotEqual must distinguish value types")
+    }
+
+    ; A no-op or too-lenient assertion would pass every test that uses it.
+    TruthAndInequalityAssertionsCanFail() {
+        mustFail := [
+            {label: "Assert.False(true)", call: () => Assert.False(true)},
+            {label: "Assert.False(2)", call: () => Assert.False(2)},
+            {label: 'Assert.False("x")', call: () => Assert.False("x")},
+            {label: "Assert.True(false)", call: () => Assert.True(false)},
+            {label: "Assert.True(0)", call: () => Assert.True(0)},
+            {label: 'Assert.True("")', call: () => Assert.True("")},
+            {label: 'Assert.NotEqual("PACS", "PACS")', call: () => Assert.NotEqual("PACS", "PACS")},
+            {label: "Assert.NotEqual(1, 1)", call: () => Assert.NotEqual(1, 1)}
+        ]
+        for testCase in mustFail {
+            ; Called as a method, the closure would get the case object as an extra
+            ; parameter and throw for that reason instead.
+            check := testCase.call
+            failed := false
+            try check()
+            catch Error
+                failed := true
+            Assert.True(failed, testCase.label " must fail")
+        }
+
+        Assert.False(false)
+        Assert.False(0)
+        Assert.False("")
+        Assert.True(2)
+        Assert.True("x")
+        Assert.NotEqual(1, 2)
     }
 
     TemporaryPathsAreUniqueAndProcessScoped() {
