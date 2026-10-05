@@ -23,6 +23,7 @@ class ProfileManagerTest {
         "TestCaseOnlyRenameRollbackFailureFollowsTheStoredName",
         "TestInterruptedCaseOnlyRenameIsRecoveredOnStartup",
         "TestInterruptedCaseOnlyRenameNeverOverwritesConflictingProfile",
+        "TestRefusedChangeNamesTheEarlierStorageFailure",
         "TestProfileDeletionRules",
         "TestFailedDefaultDeletionPreservesProfile",
         "TestDefaultDeleteRollbackFailureIsSurfacedAndReconciled",
@@ -73,6 +74,7 @@ class ProfileManagerTest {
         this.originalStorageDriver := ProfileManager.storageDriver
         this.originalLastError := ProfileManager.lastError
         this.originalRecoveryRequired := ProfileManager.recoveryRequired
+        this.originalRecoveryCause := ProfileManager.recoveryCause
 
         ProfileManager.configPath := this.tempRoot "\config.ini"
         ProfileManager.profilesPath := this.profilesDir
@@ -84,6 +86,7 @@ class ProfileManagerTest {
         ProfileManager.storageDriver := NativeProfileStorageDriver()
         ProfileManager.lastError := ""
         ProfileManager.recoveryRequired := false
+        ProfileManager.recoveryCause := ""
     }
 
     TestProfileSaveAndLoad() {
@@ -293,6 +296,22 @@ class ProfileManagerTest {
         Assert.True(ProfileManager.recoveryRequired)
         Assert.Equal(1, ProfileManager.loadErrors.Length)
         Assert.True(InStr(ProfileManager.loadErrors[1].message, "conflicts") > 0)
+        ; A later change is refused with that cause, not an unrelated reason.
+        Assert.False(ProfileManager.CreateProfile("Fresh"))
+        Assert.True(InStr(ProfileManager.lastError, "An earlier profile storage operation could not be completed: "), ProfileManager.lastError)
+        Assert.True(InStr(ProfileManager.lastError, "conflicts"), ProfileManager.lastError)
+    }
+
+    ; Once storage needs a restart, every refused change says so and why, rather
+    ; than a reason that belongs to that change or the earlier failure's own text.
+    TestRefusedChangeNamesTheEarlierStorageFailure() {
+        Assert.False(ProfileManager.FailStorageMutation("simulated rollback failure", true))
+        expected := "An earlier profile storage operation could not be completed: simulated rollback failure"
+
+        Assert.False(ProfileManager.CreateProfile("Fresh"))
+        Assert.Equal(expected, ProfileManager.lastError)
+        Assert.False(ProfileManager.SetDefaultProfile("Fresh"))
+        Assert.Equal(expected, ProfileManager.lastError)
     }
 
     TestProfileDeletionRules() {
@@ -824,6 +843,7 @@ class ProfileManagerTest {
         ProfileManager.storageDriver := this.originalStorageDriver
         ProfileManager.lastError := this.originalLastError
         ProfileManager.recoveryRequired := this.originalRecoveryRequired
+        ProfileManager.recoveryCause := this.originalRecoveryCause
     }
 }
 

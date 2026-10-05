@@ -126,6 +126,7 @@ class KeybindGUITest {
         this.originalProfileRevisions := ProfileManager.profileRevisions
         this.originalStorageDriver := ProfileManager.storageDriver
         this.originalRecoveryRequired := ProfileManager.recoveryRequired
+        this.originalRecoveryCause := ProfileManager.recoveryCause
         this.originalStorageLastError := ProfileManager.lastError
         this.originalIsListening := KeybindGUI.isListening
         this.originalActiveInputHook := KeybindGUI.activeInputHook
@@ -158,6 +159,7 @@ class KeybindGUITest {
         ProfileManager.profileRevisions := this.originalProfileRevisions
         ProfileManager.storageDriver := this.originalStorageDriver
         ProfileManager.recoveryRequired := this.originalRecoveryRequired
+        ProfileManager.recoveryCause := this.originalRecoveryCause
         ProfileManager.lastError := this.originalStorageLastError
         KeybindGUI.isListening := this.originalIsListening
         KeybindGUI.activeInputHook := this.originalActiveInputHook
@@ -1710,7 +1712,7 @@ class KeybindGUITest {
         dialog := FakeProfileDialog()
 
         ProfileManager.recoveryRequired := true
-        ProfileManager.lastError := "simulated profile storage uncertainty"
+        ProfileManager.recoveryCause := "simulated profile storage uncertainty"
         result := editor.CreateProfile("New Profile", dialog)
 
         Assert.False(result)

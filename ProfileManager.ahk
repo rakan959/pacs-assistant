@@ -29,6 +29,8 @@ class ProfileManager {
     static storageDriver := NativeProfileStorageDriver()
     static lastError := ""
     static recoveryRequired := false
+    ; The failure that left storage needing a restart; each refused change names it.
+    static recoveryCause := ""
 
     static __New() {
         ; IniRead returns the Default for a missing file or key; an unreadable
@@ -151,11 +153,10 @@ class ProfileManager {
                 this.storageDriver.MoveFile(temporaryPath, canonicalPath, false)
                 this.LoadProfile(canonicalPath)
             } catch as err {
+                message := "Interrupted case-only rename could not be recovered: " err.Message
                 this.recoveryRequired := true
-                this.RecordLoadError(
-                    temporaryPath,
-                    "Interrupted case-only rename could not be recovered: " err.Message
-                )
+                this.recoveryCause := message
+                this.RecordLoadError(temporaryPath, message)
             }
         }
     }
@@ -768,8 +769,11 @@ class ProfileManager {
     }
 
     static BeginStorageMutation() {
-        if this.recoveryRequired
+        if this.recoveryRequired {
+            this.lastError := "An earlier profile storage operation could not be completed"
+                . (this.recoveryCause != "" ? ": " this.recoveryCause : ".")
             return false
+        }
         this.lastError := ""
         return true
     }
@@ -783,8 +787,10 @@ class ProfileManager {
 
     static FailStorageMutation(message, recoveryRequired := false) {
         this.lastError := message
-        if recoveryRequired
+        if recoveryRequired {
             this.recoveryRequired := true
+            this.recoveryCause := message
+        }
         AppLog.Write("Profile storage operation failed: " message)
         return false
     }
