@@ -37,6 +37,7 @@ class UpdateCheckerTest {
         "TestUpdateDialogRequiresPresentationLease",
         "TestFailedUpdateNowLeavesTheDialogButtonsUsable",
         "TestStaleUpdateDialogClosesAfterItsConflictNotice",
+        "TestNewerReleaseReplacesAnOpenUpdateDialog",
         "TestSettingsChangeCancelsInFlightAutomaticCheck",
         "TestClinicalCommandBlocksUpdateExit",
         "TestReadOnlyInstallDirectoryBlocksUpdateBeforeShutdown",
@@ -620,6 +621,29 @@ class UpdateCheckerTest {
         Assert.Equal(1, conflicts)
         Assert.False(stillOpen)
         Assert.Equal(0, UpdateChecker.lastRemindTime)
+    }
+
+    ; A dialog opened for one version is replaced, not re-shown, once a newer
+    ; release is pending: its buttons would act on the older version.
+    TestNewerReleaseReplacesAnOpenUpdateDialog() {
+        older := ValidUpdateInfo()
+        newer := ValidUpdateInfo()
+        newer.latestVersion := "v9.1.0"
+        first := UpdateChecker.ShowUpdateDialog(older)
+        Assert.True(IsObject(first))
+        try {
+            UpdateChecker.RecordAvailableUpdate(newer)
+            second := UpdateChecker.ShowUpdateDialog()
+            again := UpdateChecker.ShowUpdateDialog()
+        } finally {
+            if UpdateChecker.UpdateDialogIsLive()
+                UpdateChecker.CloseUpdateDialog(UpdateChecker.updateDialog)
+            try first.Destroy()
+        }
+
+        Assert.False(first == second)
+        Assert.Equal("v9.1.0", second.latestVersion)
+        Assert.True(again == second, "the same version re-shows the open dialog")
     }
 
     TestSettingsChangeCancelsInFlightAutomaticCheck() {

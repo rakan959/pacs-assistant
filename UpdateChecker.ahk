@@ -665,14 +665,20 @@ class UpdateChecker {
         }
         try {
             if this.UpdateDialogIsLive() {
-                try WinActivate("ahk_id " this.updateDialog.Hwnd)
-                return this.updateDialog
+                if (this.updateDialog.latestVersion == updateInfo.latestVersion) {
+                    try WinActivate("ahk_id " this.updateDialog.Hwnd)
+                    return this.updateDialog
+                }
+                ; A newer release was announced since this dialog opened, and its
+                ; buttons act on the version it shows, so it is replaced.
+                this.CloseUpdateDialog(this.updateDialog)
             }
 
             ; Create update dialog with modern styling
             ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
             updateGui := Gui(, "PACS Assistant - Update Available")
             updateGui.settingsRevision := Settings.revision
+            updateGui.latestVersion := updateInfo.latestVersion
             updateGui.SetFont("s10", "Segoe UI")  ; Modern font
 
             ; Header
