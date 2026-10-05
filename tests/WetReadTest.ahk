@@ -35,6 +35,7 @@ class WetReadTest {
         "StickyOpenerRejectsUnactivatedStickyWindow",
         "StickyOpenerRejectsPreexistingReactivatedStickyWindow",
         "NativeProcessDiscoveryIncludesHiddenUntitledWindow",
+        "NativeStickyLookupReadsHiddenWindowTitles",
         "StickyOpenerRejectsOwnerlessStickyWindow",
         "StickyOpenerPinsNewlyActiveExactWindow",
         "StickyOpenerRejectsTwoNewWindowsAfterInvoke",
@@ -379,6 +380,35 @@ class WetReadTest {
             }
             Assert.True(found)
         } finally hiddenWindow.Destroy()
+    }
+
+    ; The real driver against this process, which, like the PACS process, has hidden
+    ; top-level windows: their titles must not fail the Sticky Notes lookup.
+    NativeStickyLookupReadsHiddenWindowTitles() {
+        processId := DllCall("GetCurrentProcessId")
+        driver := NativeStickyNoteWindowDriver()
+        owner := Gui(, "Sticky Lookup Owner")
+        sticky := 0
+        try {
+            preexisting := driver.FindProcessWindows(processId)
+            sticky := Gui("+Owner" owner.Hwnd, NativeStickyNoteWindowDriver.stickyTitle)
+            sticky.Show("w200 h80 NoActivate")
+
+            found := driver.FindExactStickyWindows(processId)
+            Assert.True(IsObject(found), "a hidden window's title failed the lookup")
+            Assert.Equal(1, found.Length)
+            Assert.Equal(sticky.Hwnd, found[1])
+            Assert.True(driver.IsExpectedStickySession({
+                pacsHwnd: owner.Hwnd,
+                stickyHwnd: sticky.Hwnd,
+                processId: processId,
+                preexistingProcessWindows: preexisting
+            }))
+        } finally {
+            if sticky
+                sticky.Destroy()
+            owner.Destroy()
+        }
     }
 
     StickyOpenerRejectsOwnerlessStickyWindow() {

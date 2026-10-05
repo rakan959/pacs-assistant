@@ -51,8 +51,15 @@ class NativeStickyNoteWindowDriver {
         }
     }
 
+    ; FindProcessWindows lists hidden windows too (every GUI thread owns a hidden
+    ; IME window), and an "ahk_id" lookup finds a hidden window only while hidden
+    ; windows are detected, so the title read detects them whatever the caller's
+    ; setting.
     GetTitle(hwnd) {
-        return WinGetTitle("ahk_id " hwnd)
+        previousHiddenSetting := A_DetectHiddenWindows
+        DetectHiddenWindows(true)
+        try return WinGetTitle("ahk_id " hwnd)
+        finally DetectHiddenWindows(previousHiddenSetting)
     }
 
     ; A disappearing or opaque same-executable window makes uniqueness uncertain,
