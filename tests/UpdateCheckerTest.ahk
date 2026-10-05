@@ -89,6 +89,11 @@ class UpdateCheckerTest {
         ; Never the folder beside the test scripts: the write probe and staged
         ; files go to a private folder, and no updater is ever really launched.
         this.UseTestInstall()
+        ; CI writes Version.ahk from the release tag before the tests run, so the
+        ; running version must not decide whether a test's release is newer. A
+        ; distinct value still shows the version comes from AppVersion.
+        this.originalAppVersion := AppVersion.current
+        AppVersion.current := "v0.0.1-test"
         UpdateChecker.shutdownCoordinator := 0
         UpdateChecker.updateCheckEligibleProbe := (*) => true
         this.updateNotifications := []
@@ -860,6 +865,7 @@ class UpdateCheckerTest {
     }
 
     Teardown() {
+        AppVersion.current := this.originalAppVersion
         try UpdateChecker.CancelActiveCheck()
         UpdateChecker.StopAutoCheck()
         UpdateChecker.transport := this.originalTransport
