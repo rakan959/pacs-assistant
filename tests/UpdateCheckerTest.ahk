@@ -368,6 +368,7 @@ class UpdateCheckerTest {
         )
 
         Assert.False(result)
+        Assert.Equal("Settings Changed", TestRunner.dialogs[1].title)
         Assert.False(Settings.Get("AutoUpdate"))
         Assert.True(Settings.Get("SkipBetaVersions"))
     }

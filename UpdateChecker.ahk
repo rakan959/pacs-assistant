@@ -26,6 +26,9 @@ class UpdateChecker {
     ; The composition root supplies the authoritative two-phase shutdown owner.
     ; Tests may leave this unset and exercise the legacy clinical probe directly.
     static shutdownCoordinator := 0
+    static autoCheckIntervalMs := 60 * 60 * 1000
+    ; "Remind Me Later" suppresses the dialog for this long.
+    static remindLaterMs := 4 * 60 * 60 * 1000
     static maxUpdateSizeBytes := 100 * 1024 * 1024
     static maxMetadataSizeBytes := 1024 * 1024
     static maxReleaseNotesCharacters := 20000
@@ -59,7 +62,7 @@ class UpdateChecker {
         ; Set up new timer if auto-update is enabled
         if Settings.Get("AutoUpdate") {
             this.updateTimer := ObjBindMethod(this, "BeginAutoCheck")
-            SetTimer(this.updateTimer, 3600000)  ; Check every hour (3600000 ms)
+            SetTimer(this.updateTimer, this.autoCheckIntervalMs)
         }
     }
 
@@ -121,12 +124,8 @@ class UpdateChecker {
     }
 
     static CompleteAutoCheck(slot, stableOnly, response) {
-        if slot.completed
+        if !this.ClaimSlot(slot)
             return
-        slot.completed := true
-        slot.handle := 0
-        if (this.activeRequest = slot)
-            this.activeRequest := 0
 
         try {
             updateInfo := this.ProcessReleaseResponse(response, stableOnly)
@@ -137,13 +136,21 @@ class UpdateChecker {
         }
     }
 
-    static FailAutoCheck(slot, err) {
+    ; Marks a check's slot finished and drops it as the active request. Returns
+    ; false when a cancel or the other completion callback already claimed it.
+    static ClaimSlot(slot) {
         if slot.completed
-            return
+            return false
         slot.completed := true
         slot.handle := 0
         if (this.activeRequest = slot)
             this.activeRequest := 0
+        return true
+    }
+
+    static FailAutoCheck(slot, err) {
+        if !this.ClaimSlot(slot)
+            return
         OutputDebug("Update check failed: " ErrorText.Message(err))
     }
 
@@ -193,12 +200,17 @@ class UpdateChecker {
             Settings.SaveValuesAtRevision(values, expectedRevision)
             if IsSet(skippedVersion)
                 this.skippedVersion := skippedVersion
+        } catch SettingsConflictError {
+            MsgBox(
+                "Settings changed while this update dialog was open. Reopen it before saving preferences.",
+                "Settings Changed",
+                "Icon!"
+            )
+            return false
         } catch as err {
             MsgBox(
-                (InStr(err.Message, "Settings changed")
-                    ? "Settings changed while this update dialog was open. Reopen it before saving preferences."
-                    : "The update preferences could not be saved. The previous settings were left unchanged.`n`n" err.Message),
-                InStr(err.Message, "Settings changed") ? "Settings Changed" : "Save Failed",
+                "The update preferences could not be saved. The previous settings were left unchanged.`n`n" err.Message,
+                "Save Failed",
                 "Icon!"
             )
             return false
@@ -465,7 +477,7 @@ class UpdateChecker {
             return false
         if (respectReminder
             && this.lastRemindTime
-            && (DllCall("GetTickCount64", "UInt64") - this.lastRemindTime) < 14400000)
+            && (DllCall("GetTickCount64", "UInt64") - this.lastRemindTime) < this.remindLaterMs)
             return false
         return this.CompareVersions(this.currentVersion, updateInfo.latestVersion) < 0
     }
@@ -540,12 +552,8 @@ class UpdateChecker {
     }
 
     static CompleteManualCheck(slot, stableOnly, response) {
-        if slot.completed
+        if !this.ClaimSlot(slot)
             return
-        slot.completed := true
-        slot.handle := 0
-        if (this.activeRequest = slot)
-            this.activeRequest := 0
         try {
             updateInfo := this.ProcessReleaseResponse(response, stableOnly)
             if !updateInfo.hasUpdate {
@@ -576,12 +584,8 @@ class UpdateChecker {
     }
 
     static FailManualCheck(slot, err) {
-        if slot.completed
+        if !this.ClaimSlot(slot)
             return
-        slot.completed := true
-        slot.handle := 0
-        if (this.activeRequest = slot)
-            this.activeRequest := 0
         this.manualResultNotifier.Call(
             "The update check failed: " ErrorText.Message(err),
             "Update Check Failed",
@@ -1113,7 +1117,7 @@ class UpdateChecker {
         } catch as err {
             if shutdownStarted
                 this.shutdownCoordinator.CancelShutdown()
-            MsgBox("Update failed: " err.Message, "Error", "Icon!")
+            MsgBox("Update failed: " err.Message, "Update Failed", "Icon!")
             ; The running executable is not touched until the updater starts after
             ; ExitApp, so a preflight failure only needs to remove staged artifacts.
             if (newExe != "")

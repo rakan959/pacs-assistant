@@ -4,7 +4,7 @@
 #Include UIAValue.ahk
 
 class NativePowerScribeSessionDriver {
-    Capture(*) {
+    Capture() {
         try session := AppControl.ResolveUniqueExactWindow(
             AppControl.PowerScribeWindowSpec()
         )
@@ -66,7 +66,6 @@ class NativePowerScribeSessionDriver {
  * every workflow's implementation in one file.
  */
 class PowerScribe {
-    static windowTitle := AppControl.PacsGracefulCloseTarget()
     static sessionDriver := NativePowerScribeSessionDriver()
 
     ; Positional path to the report text. Brittle - kept only as a last resort behind
@@ -119,7 +118,7 @@ class PowerScribe {
     }
 
     static CaptureReport() {
-        session := this.sessionDriver.Capture(this.windowTitle)
+        session := this.sessionDriver.Capture()
         if !session
             return {text: "", session: 0}
         text := this.ReadReportText(session)

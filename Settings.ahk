@@ -1,6 +1,7 @@
 ; = CONTENTS
 ;   + Preamble
 ;   + Settings class (settings load/save, change listeners, mutation/dialog guards, settings dialog)
+;   + SettingsConflictError (stale-revision save)
 
 #Requires AutoHotkey v2.0
 #Include AppStorage.ahk
@@ -178,16 +179,9 @@ class Settings {
         return value
     }
 
+    ; Booleans persist as "1"/"0"; every other value is written as text.
     static WriteSetting(path, settingName, value) {
-        ; Handle numeric values
-        if (settingName = "RefreshInterval")
-            IniWrite(value, path, "Settings", settingName)
-        ; Handle boolean values
-        else if this.IsBooleanSetting(settingName)
-            IniWrite(value ? "1" : "0", path, "Settings", settingName)
-        ; Handle string values
-        else
-            IniWrite(value, path, "Settings", settingName)
+        IniWrite(this.IsBooleanSetting(settingName) ? (value ? "1" : "0") : value, path, "Settings", settingName)
     }
 
     static NewTemporarySettingsPath() {
@@ -220,7 +214,7 @@ class Settings {
         this.BeginWriteTransaction()
         try {
             if (this.revision != expectedRevision)
-                throw Error("Settings changed while this dialog was open")
+                throw SettingsConflictError("Settings changed while this dialog was open")
             return this.CommitValues(values)
         } finally this.EndWriteTransaction()
     }
@@ -449,7 +443,7 @@ class Settings {
             return
 
         if (selectedSound = "Custom File")
-            MsgBox("Could not play the custom sound file. Check that the file still exists and is a .wav or .mp3.", "Error", "Icon!")
+            MsgBox("Could not play the custom sound file. Check that the file still exists and is a .wav or .mp3.", "Sound Unavailable", "Icon!")
         else
             MsgBox("'" selectedSound "' is not available on this machine (missing from " A_WinDir "\Media). Played the default beep instead.", "Sound Unavailable", "Icon!")
     }
@@ -538,4 +532,9 @@ class Settings {
         }
         return true
     }
+}
+
+; Raised when a dialog saves against a settings revision that has since changed,
+; so callers can tell a stale dialog from a failed write without parsing text.
+class SettingsConflictError extends Error {
 }

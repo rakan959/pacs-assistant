@@ -611,8 +611,8 @@ class KeybindGUI {
         if !this.RequireCurrentProfileSelector(selectorGui)
             return false
         if (name = "") {
-            MsgBox("Please select a profile first.", "Error", "Icon!")
-            return
+            MsgBox("Please select a profile first.", "No Profile Selected", "Icon!")
+            return false
         }
 
         if !this.BeginProfileMutationTransaction("change the default profile")
@@ -654,8 +654,8 @@ class KeybindGUI {
         if !this.RequireCurrentProfileSelector(selectorGui)
             return false
         if (name = "") {
-            MsgBox("Please select a profile first.", "Error", "Icon!")
-            return
+            MsgBox("Please select a profile first.", "No Profile Selected", "Icon!")
+            return false
         }
 
         if !this.BeginProfileMutationTransaction("delete a profile")
@@ -1764,7 +1764,7 @@ class KeybindGUI {
         if (parentGui && !this.RequireCurrentProfileSelector(parentGui))
             return false
         if (name = "") {
-            MsgBox("Please select a profile first.", "Error", "Icon!")
+            MsgBox("Please select a profile first.", "No Profile Selected", "Icon!")
             return false
         }
         ; A case-only rename moves the existing file rather than rewriting it. Make
@@ -1822,8 +1822,8 @@ class KeybindGUI {
 
         newName := Trim(newName)
         if (newName = "") {
-            MsgBox("Profile name cannot be empty.", "Error", "Icon!")
-            return
+            MsgBox("Profile name cannot be empty.", "Invalid Profile Name", "Icon!")
+            return false
         }
 
         if !this.BeginProfileMutationTransaction("rename a profile")
@@ -1992,16 +1992,16 @@ class KeybindGUI {
         }
 
         if (funcName = "") {
-            MsgBox("Please select a custom function to delete.", "Error", "Icon!")
-            return
+            MsgBox("Please select a custom function to delete.", "No Function Selected", "Icon!")
+            return false
         }
 
         ; Note the parentheses: without them this parses as "(!InStr(...)) = 1", which
         ; is true only when the prefix is absent entirely and lets a name containing
         ; "Custom: " anywhere past the start through
         if (InStr(funcName, "Custom: ") != 1) {
-            MsgBox("Only custom functions can be deleted.", "Error", "Icon!")
-            return
+            MsgBox("Only custom functions can be deleted.", "Built-in Function", "Icon!")
+            return false
         }
 
         deletionState := this.CaptureCustomDeletionState(funcName, selectorGui)
@@ -2126,12 +2126,12 @@ class KeybindGUI {
 
         name := Trim(name)
         if (name = "") {
-            MsgBox("Please enter a name for the keybind.", "Error", "Icon!")
-            return
+            MsgBox("Please enter a name for the keybind.", "Invalid Custom Keybind", "Icon!")
+            return false
         }
         if (keys = "") {
-            MsgBox("Please enter keys to send.", "Error", "Icon!")
-            return
+            MsgBox("Please enter keys to send.", "Invalid Custom Keybind", "Icon!")
+            return false
         }
 
         ; Create unique function name
@@ -2144,8 +2144,8 @@ class KeybindGUI {
         ; Check if name already exists in current profile
         currentProfile := ProfileManager.profiles[profileName]
         if !this.CustomFunctionNameAvailable(currentProfile, funcName) {
-            MsgBox("A keybind with this name already exists in this profile.", "Error", "Icon!")
-            return
+            MsgBox("A keybind with this name already exists in this profile.", "Invalid Custom Keybind", "Icon!")
+            return false
         }
 
         if !this.BeginProfileMutationTransaction("create a custom keybind")
@@ -2197,8 +2197,8 @@ class KeybindGUI {
             return false
 
         if (funcName = "") {
-            MsgBox("Please select a function first.", "Error", "Icon!")
-            return
+            MsgBox("Please select a function first.", "No Function Selected", "Icon!")
+            return false
         }
 
         profileName := selectorGui.profileName
@@ -2255,8 +2255,8 @@ class KeybindGUI {
             return false
         removalState := this.CaptureFunctionRemovalState(listView)
         if !removalState {
-            MsgBox("Please select a function to remove.", "Error", "Icon!")
-            return
+            MsgBox("Please select a function to remove.", "No Function Selected", "Icon!")
+            return false
         }
 
         funcName := removalState.functionName
@@ -2318,8 +2318,8 @@ class KeybindGUI {
 
     ChangeSelectedKeybind(listView) {
         if (listView.GetNext(0) = 0) {
-            MsgBox("Please select a function to change.", "Error", "Icon!")
-            return
+            MsgBox("Please select a function to change.", "No Function Selected", "Icon!")
+            return false
         }
 
         funcName := listView.GetText(listView.GetNext(0), 1)
@@ -2393,8 +2393,8 @@ class KeybindGUI {
         if !this.ProfileMutationAllowed("change a keybind scope")
             return false
         if (listView.GetNext(0) = 0) {
-            MsgBox("Please select a function first.", "Error", "Icon!")
-            return
+            MsgBox("Please select a function first.", "No Function Selected", "Icon!")
+            return false
         }
 
         rowIndex := listView.GetNext(0)
@@ -2485,8 +2485,8 @@ class KeybindGUI {
         if !this.ProfileMutationAllowed("edit attending assignments")
             return false
         if (ProfileManager.GetCurrentProfile() = 0) {
-            MsgBox("Load a profile first.", "Error", "Icon!")
-            return
+            MsgBox("Load a profile first.", "No Profile Loaded", "Icon!")
+            return false
         }
         ; This dialog saves a complete profile snapshot. Force an explicit decision
         ; on pending keybind edits before capturing that snapshot.

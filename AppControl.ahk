@@ -3,10 +3,11 @@
 ;   + NativeWindowDriver / NativeAppLifecycleDriver (Win32 window & process primitives)
 ;   + AppControl class (exact-window resolution, targeted key send, graceful close, restart)
 ;   + NativeGracefulCloseDriver, CloseWithSavePrompt (PowerScribe close with save prompt)
-;   + NativePacsRestartDriver, RestartPACS (verified PACS restart workflow)
+;   + NativePacsRestartDriver, RestartPACS, StopRestart (verified PACS restart workflow)
 
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
+#Include ErrorText.ahk
 
 /**
  * Thin wrapper around focus-sensitive AutoHotkey primitives. Tests replace this
@@ -521,14 +522,6 @@ class AppControl {
         ]
     }
 
-    static PacsGracefulCloseTarget() {
-        return this.powerScribeReportingTitle " " this.PowerScribeProcessTarget()
-    }
-
-    static PowerScribeProcessTarget() {
-        return "ahk_exe " this.powerScribeExecutable
-    }
-
     /**
      * Resolves every restart target without mutating it. The restart is an
      * all-target transaction: known ambiguity or lookup failure must be found
@@ -931,125 +924,59 @@ RestartPACS(driver := 0) {
 
     ; Resolve the installed Vue executable and every already-running instance
     ; before touching PowerScribe or PACS. Failure here must have no side effects.
+    identityFailure := "The Vue PACS installation or restart target identities could not be verified. The restart was cancelled before closing any clinical window."
     try prepared := driver.PrepareRestart()
-    catch as err {
-        MsgBox(
-            "The Vue PACS installation or restart target identities could not be verified. The restart was cancelled before closing any clinical window.`n`n" err.Message,
-            "PACS Restart Cancelled",
-            "Icon!"
-        )
-        return false
-    }
-    if !prepared {
-        MsgBox(
-            "The Vue PACS installation or restart target identities could not be verified. The restart was cancelled before closing any clinical window.",
-            "PACS Restart Cancelled",
-            "Icon!"
-        )
-        return false
-    }
+    catch as err
+        return StopRestart(identityFailure, err)
+    if !prepared
+        return StopRestart(identityFailure)
 
     ; PowerScribe is never a force-kill target. A failed/slow save or an unverified
     ; running process aborts the restart rather than risking an in-progress report.
     try powerScribeWindows := driver.FindPowerScribeWindows()
-    catch as err {
-        MsgBox(
-            "PowerScribe window identity could not be verified. The restart was cancelled.`n`n" err.Message,
-            "PACS Restart Cancelled",
-            "Icon!"
-        )
-        return false
-    }
-    if (powerScribeWindows.Length > 1) {
-        MsgBox(
-            "Multiple PowerScribe reporting windows were found. Close them manually before restarting PACS.",
-            "PACS Restart Cancelled",
-            "Icon!"
-        )
-        return false
-    }
+    catch as err
+        return StopRestart("PowerScribe window identity could not be verified. The restart was cancelled.", err)
+    if (powerScribeWindows.Length > 1)
+        return StopRestart("Multiple PowerScribe reporting windows were found. Close them manually before restarting PACS.")
     if (powerScribeWindows.Length = 1) {
         try closedSafely := driver.ClosePowerScribe(powerScribeWindows[1])
         catch
             closedSafely := false
-        if !closedSafely {
-            MsgBox(
-                "PowerScribe did not close after its save prompt. The restart was cancelled to protect the in-progress report.",
-                "PACS Restart Cancelled",
-                "Icon!"
-            )
-            return false
-        }
+        if !closedSafely
+            return StopRestart("PowerScribe did not close after its save prompt. The restart was cancelled to protect the in-progress report.")
         anyClosed := true
     }
 
     ; A second/background PowerScribe process may have no reporting window. Check
     ; again even after the verified reporting process exits, before closing PACS.
     try powerScribePid := driver.FindPowerScribeProcess()
-    catch as err {
-        MsgBox(
-            "PowerScribe process state could not be verified. The restart was cancelled.`n`n" err.Message,
-            "PACS Restart Cancelled",
-            "Icon!"
-        )
-        return false
-    }
-    if powerScribePid {
-        MsgBox(
-            "PowerScribe is running without a uniquely verified reporting window. Close it manually before restarting PACS.",
-            "PACS Restart Cancelled",
-            "Icon!"
-        )
-        return false
-    }
+    catch as err
+        return StopRestart("PowerScribe process state could not be verified. The restart was cancelled.", err)
+    if powerScribePid
+        return StopRestart("PowerScribe is running without a uniquely verified reporting window. Close it manually before restarting PACS.")
 
     try stopResult := driver.StopTargets()
-    catch as err {
-        MsgBox(
-            "PACS target shutdown could not be completed or verified. The restart was cancelled.`n`n" err.Message,
-            "PACS Restart Cancelled",
-            "Icon!"
-        )
-        return false
-    }
+    catch as err
+        return StopRestart("PACS target shutdown could not be completed or verified. The restart was cancelled.", err)
     if (!IsObject(stopResult)
         || !HasProp(stopResult, "anyStopped")
         || !HasProp(stopResult, "failedTargets")
-        || Type(stopResult.failedTargets) != "Array") {
-        MsgBox(
-            "PACS target shutdown returned an invalid verification result. The restart was cancelled.",
-            "PACS Restart Cancelled",
-            "Icon!"
-        )
-        return false
-    }
+        || Type(stopResult.failedTargets) != "Array")
+        return StopRestart("PACS target shutdown returned an invalid verification result. The restart was cancelled.")
     anyClosed := anyClosed || stopResult.anyStopped
-    failedTargets := stopResult.failedTargets
 
-    if failedTargets.Length {
+    if stopResult.failedTargets.Length {
         names := ""
-        for target in failedTargets
+        for target in stopResult.failedTargets
             names .= (names = "" ? "" : ", ") target
-        MsgBox(
-            "PACS Assistant could not stop: " names ". The restart was cancelled to avoid launching duplicate clinical clients.",
-            "PACS Restart Cancelled",
-            "Icon!"
-        )
-        return false
+        return StopRestart("PACS Assistant could not stop: " names ". The restart was cancelled to avoid launching duplicate clinical clients.")
     }
 
     if anyClosed {
         try driver.Pause(500)
-        catch as err {
-            MsgBox(
-                "The restart stabilization wait failed. PACS was not relaunched.`n`n" err.Message,
-                "PACS Restart Cancelled",
-                "Icon!"
-            )
-            return false
-        }
+        catch as err
+            return StopRestart("The restart stabilization wait failed. PACS was not relaunched.", err)
     }
-
 
     try quiescence := driver.VerifyQuiescence()
     catch as err
@@ -1058,48 +985,31 @@ RestartPACS(driver := 0) {
         detail := IsObject(quiescence) && HasProp(quiescence, "error")
             ? quiescence.error
             : "restart target state could not be verified"
-        MsgBox(
-            "A clinical client reappeared before launch. The restart was cancelled.`n`n" detail,
-            "PACS Restart Cancelled",
-            "Icon!"
-        )
-        return false
+        return StopRestart("A clinical client reappeared before launch. The restart was cancelled.", detail)
     }
 
-    ; The shortcut sits on either the all-users desktop or this user's own
+    ; The shortcut sits on either the all-users desktop or this user's own desktop.
     try launched := driver.Launch()
-    catch as err {
-        MsgBox(
-            "The verified PACS shortcut could not be launched.`n`n" err.Message,
-            "PACS Launch Failed",
-            "Icon!"
-        )
-        return false
-    }
-    if !launched {
-        MsgBox(
-            "The verified PACS shortcut was not found or could not be launched.",
-            "PACS Launch Failed",
-            "Icon!"
-        )
-        return false
-    }
+    catch as err
+        return StopRestart("The verified PACS shortcut could not be launched.", err, "PACS Launch Failed")
+    if !launched
+        return StopRestart("The verified PACS shortcut was not found or could not be launched.", , "PACS Launch Failed")
     try launchVerified := driver.WaitForLaunch()
-    catch as err {
-        MsgBox(
-            "The PACS shortcut ran, but the new Vue PACS window could not be verified.`n`n" err.Message,
-            "PACS Launch Not Verified",
-            "Icon!"
-        )
-        return false
-    }
-    if !launchVerified {
-        MsgBox(
-            "The PACS shortcut ran, but one unique Vue PACS window did not appear. Check the client before trying again.",
-            "PACS Launch Not Verified",
-            "Icon!"
-        )
-        return false
-    }
+    catch as err
+        return StopRestart("The PACS shortcut ran, but the new Vue PACS window could not be verified.", err, "PACS Launch Not Verified")
+    if !launchVerified
+        return StopRestart("The PACS shortcut ran, but one unique Vue PACS window did not appear. Check the client before trying again.", , "PACS Launch Not Verified")
     return true
+}
+
+/**
+ * Ends a restart attempt with one dialog. Nothing after the failing step ran.
+ * @param detail An Error or text appended after a blank line, if any
+ * @returns false, so callers can `return StopRestart(...)`
+ */
+StopRestart(message, detail := "", title := "PACS Restart Cancelled") {
+    if IsObject(detail)
+        detail := ErrorText.Message(detail)
+    MsgBox(message (detail != "" ? "`n`n" detail : ""), title, "Icon!")
+    return false
 }

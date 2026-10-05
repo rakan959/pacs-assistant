@@ -253,10 +253,10 @@ class ClinicalAutomationTest {
         nativeDriver := NativePowerScribeSessionDriver()
 
         AppControl.windowDriver := FakeExactWindowDriver([exact, suffix])
-        Assert.Equal(601, nativeDriver.Capture(PowerScribe.windowTitle).hwnd)
+        Assert.Equal(601, nativeDriver.Capture().hwnd)
 
         AppControl.windowDriver := FakeExactWindowDriver([suffix])
-        Assert.Equal(0, nativeDriver.Capture(PowerScribe.windowTitle))
+        Assert.Equal(0, nativeDriver.Capture())
 
         AppControl.windowDriver := FakeExactWindowDriver([exact, {
             hwnd: 603,
@@ -264,7 +264,7 @@ class ClinicalAutomationTest {
             exe: AppControl.powerScribeExecutable,
             pid: 78
         }])
-        Assert.Equal(0, nativeDriver.Capture(PowerScribe.windowTitle))
+        Assert.Equal(0, nativeDriver.Capture())
     }
 
     NativePowerScribeHandleResolverRequiresExactIdentity() {
@@ -844,12 +844,6 @@ class ClinicalAutomationTest {
             Assert.True(HasProp(spec.target, "exe"))
         }
         Assert.Equal(3, specs.Length)
-
-        Assert.Equal(
-            "PowerScribe 360 | Reporting ahk_exe " AppControl.powerScribeExecutable,
-            PowerScribe.windowTitle
-        )
-        Assert.Equal(PowerScribe.windowTitle, AppControl.PacsGracefulCloseTarget())
     }
 
     PacsLauncherRejectsNonShortcutMatch() {

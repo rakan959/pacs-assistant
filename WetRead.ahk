@@ -630,6 +630,8 @@ RunPinnedWetReadWorkflow(
 ) {
     ; Establish the study-specific PACS target first. Later PowerScribe focus changes
     ; must never decide which Sticky Notes window receives the text.
+    notify := notifier ? notifier : MsgBox
+    stickyFailure := "A new Sticky Notes window for the active Vue PACS study could not be verified. Nothing was pasted"
     attendingRouted := false
     attendingError := 0
     haystack := ""
@@ -639,19 +641,11 @@ RunPinnedWetReadWorkflow(
             stickySession := openSticky.Call()
         } catch as err {
             attendingError := err
-            message := "A new Sticky Notes window for the active Vue PACS study could not be verified. Nothing was pasted: " err.Message
-            if notifier
-                notifier.Call(message, "Sticky Note Target Not Verified", "Icon!")
-            else
-                MsgBox(message, "Sticky Note Target Not Verified", "Icon!")
+            notify.Call(stickyFailure ": " ErrorText.Message(err), "Sticky Note Target Not Verified", "Icon!")
             return false
         }
         if !stickySession {
-            message := "A new Sticky Notes window for the active Vue PACS study could not be verified. Nothing was pasted."
-            if notifier
-                notifier.Call(message, "Sticky Note Target Not Verified", "Icon!")
-            else
-                MsgBox(message, "Sticky Note Target Not Verified", "Icon!")
+            notify.Call(stickyFailure ".", "Sticky Note Target Not Verified", "Icon!")
             return false
         }
 
@@ -679,13 +673,8 @@ RunPinnedWetReadWorkflow(
 
         return pasteAction.Call(clipText, pasteMode, stickySession)
     } finally {
-        if !attendingRouted {
-            message := AttendingFailureMessage(haystack, attendingError)
-            if notifier
-                notifier.Call(message, "Attending Not Assigned", "Icon!")
-            else
-                MsgBox(message, "Attending Not Assigned", "Icon!")
-        }
+        if !attendingRouted
+            notify.Call(AttendingFailureMessage(haystack, attendingError), "Attending Not Assigned", "Icon!")
     }
 }
 

@@ -31,7 +31,8 @@ class SettingsTest {
         "TestPersistedRefreshIntervalBounds",
         "TestSavingRequiresMicrophoneNameWhenSwapEnabled",
         "TestSaveFailureKeepsDialogOpenAndFileUnchanged",
-        "TestChangeListenerMustBeCallable"
+        "TestChangeListenerMustBeCallable",
+        "TestStaleRevisionRaisesSettingsConflictError"
     ]
 
     Setup() {
@@ -365,6 +366,20 @@ class SettingsTest {
         Assert.False(dialog.destroyed)
         Assert.Equal("Save Failed", TestRunner.dialogs[1].title)
         Assert.Equal(60, Settings.Get("RefreshInterval"))
+    }
+
+    TestStaleRevisionRaisesSettingsConflictError() {
+        staleRevision := Settings.revision
+        SetTestSetting("AutoUpdate", false)
+        try {
+            Settings.SaveValuesAtRevision(Map("AutoUpdate", true), staleRevision)
+            raised := ""
+        } catch Any as err {
+            raised := err
+        }
+
+        Assert.True(raised is SettingsConflictError, "A stale revision must raise SettingsConflictError")
+        Assert.False(Settings.Get("AutoUpdate"))
     }
 
     TestChangeListenerMustBeCallable() {
