@@ -17,12 +17,14 @@ class TestRunnerTest {
         "UnlistedTestMethodIsAFailure",
         "ClassWithoutTestListIsAFailure",
         "ThrowsAcceptsAFalsyThrownValue",
-        "DialogsAreRecordedPerTest"
+        "DialogsAreRecordedPerTest",
+        "HarnessExitCodesReachTheProcess"
     ]
 
     ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
     static helpers := [
-        "RunProbe"
+        "RunProbe",
+        "RunChildScript"
     ]
 
     ThrowsRejectsAFunctionThatReturnsNormally() {
@@ -197,6 +199,52 @@ class TestRunnerTest {
             Assert.Equal(1, DialogProbe.observed[1], "A MsgBox call must be recorded")
             Assert.Equal(0, DialogProbe.observed[2], "Each test must start with an empty dialog record")
         } finally TestRunner.dialogs := priorDialogs
+    }
+
+    ; The exit codes the README documents for CI, observed from a separate process:
+    ; 10 for an uncaught error, 11 for a run that exits before every test ran.
+    HarnessExitCodesReachTheProcess() {
+        SplitPath(A_LineFile, , &testsDir)
+        root := TestTempPath("pacs-harness-exit")
+        DirCreate(root)
+        preamble := "
+        (
+        #Requires AutoHotkey v2.0
+        #Warn All, StdOut
+        #Include %TESTS%\HarnessErrors.ahk
+        OnError(OnError_StdErr)
+        )"
+        try {
+            uncaught := this.RunChildScript(root "\uncaught.ahk", preamble "`n" "
+            (
+            throw Error("probe uncaught error")
+            )", testsDir)
+            incomplete := this.RunChildScript(root "\incomplete.ahk", preamble "`n" "
+            (
+            #Include %TESTS%\IsolatedStorage.ahk
+            UseIsolatedDataRoot("pacs-harness-exit-probe")
+            #Include %TESTS%\TestRunner.ahk
+            class ExitingProbe {
+                static tests := ["ExitsMidRun"]
+                ExitsMidRun() {
+                    ExitApp(0)
+                }
+            }
+            TestRunner.AddTest(ExitingProbe)
+            TestRunner.RunAll()
+            ExitApp(0)
+            )", testsDir)
+        } finally DirDelete(root, true)
+
+        Assert.Equal(10, uncaught)
+        Assert.Equal(11, incomplete)
+    }
+
+    ; Writes a script that includes harness files from testsDir and runs it in a new
+    ; interpreter. Returns the process exit code.
+    RunChildScript(path, text, testsDir) {
+        FileAppend(StrReplace(text, "%TESTS%", testsDir), path, "UTF-8")
+        return RunWait(Format('"{1}" /ErrorStdOut "{2}"', A_AhkPath, path), , "Hide")
     }
 
     RunProbe(testClass) {
