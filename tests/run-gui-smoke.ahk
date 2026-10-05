@@ -193,6 +193,9 @@ Main() {
     ))
     AssertClosingDestroys(settingsHwnd, "closing the settings dialog with X destroys it")
 
+    ; The dialog offers only a newer version, so the run must not depend on the
+    ; version of the build it runs in (a tag build may be v2.1.0 or later).
+    AppVersion.current := "v0.0.1-test"
     updateInfo := {
         hasUpdate: true,
         currentVersion: "v2.0.0",
