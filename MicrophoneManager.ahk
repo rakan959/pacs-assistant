@@ -61,6 +61,9 @@ class MicrophoneManager {
     static maxAttempts := 3
     static failureNotified := false
     static lastError := ""
+    ; Why SelectMicrophone stops when PowerScribe rerenders the login screen under it
+    static selectorChangedReason := "the microphone selector changed before the selection could be made"
+    static listChangedReason := "the microphone list changed before the selection could be made"
     static notifier := (text, title, options) => TrayTip(text, title, options)
 
     static Start() {
@@ -403,17 +406,18 @@ class MicrophoneManager {
 
     /**
      * Selects a real list item. Exact names win; a configured substring is accepted
-     * only when it identifies exactly one full device name.
+     * only when it identifies exactly one full device name. Every way it stops
+     * short records why in lastError, except a name that matches no device.
      * @returns true if the microphone ended up selected
      */
     static SelectMicrophone(session, combo, micName) {
         micName := Trim(micName)
         if (micName = "")
-            return false
+            return this.SelectionStopped("no microphone name is configured")
 
         current := this.RevalidateCombo(session, combo)
         if !current
-            return false
+            return this.SelectionStopped(this.selectorChangedReason)
         try {
             current.combo.ExpandCollapsePattern.Expand()
         } catch as err {
@@ -423,7 +427,7 @@ class MicrophoneManager {
 
         current := this.RevalidateCombo(session, combo)
         if !current
-            return false
+            return this.SelectionStopped(this.selectorChangedReason)
         itemResult := this.ResolveMicrophoneItemResult(current.root, current.combo, micName)
         if (itemResult.error != "")
             this.RecordOperationalError(itemResult.error)
@@ -442,20 +446,20 @@ class MicrophoneManager {
         ; rerender after expansion; a saved wrapper is not sufficient proof.
         current := this.RevalidateCombo(session, combo)
         if !current
-            return false
+            return this.SelectionStopped(this.selectorChangedReason)
         liveResult := this.ResolveMicrophoneItemResult(current.root, current.combo, micName)
-        if (liveResult.error != "")
-            this.RecordOperationalError(liveResult.error)
         if !(liveResult.status == "found") {
             this.CollapseVerifiedCombo(session, combo)
-            return false
+            return this.SelectionStopped(
+                liveResult.error != "" ? liveResult.error : this.listChangedReason
+            )
         }
         liveResolved := liveResult.selection
         if (!liveResolved
             || !(liveResolved.name == resolved.name)
             || !UIAElementIdentity.Same(liveResolved.item, resolved.item)) {
             this.CollapseVerifiedCombo(session, combo)
-            return false
+            return this.SelectionStopped(this.listChangedReason)
         }
 
         ; Item enumeration can yield while PowerScribe rerenders. Reacquire the
@@ -465,7 +469,7 @@ class MicrophoneManager {
         if (!finalCombo
             || !UIAElementIdentity.Same(finalCombo.combo, current.combo)) {
             this.CollapseVerifiedCombo(session, combo)
-            return false
+            return this.SelectionStopped(this.selectorChangedReason)
         }
         try readable := UIAValue.TryRead(finalCombo.combo).supported
         catch as err {
@@ -475,7 +479,7 @@ class MicrophoneManager {
         }
         if !readable {
             this.CollapseVerifiedCombo(session, combo)
-            return false
+            return this.SelectionStopped("the microphone selector's value could not be read")
         }
 
         ; The final ComboBox read can itself rerender the dropdown. Reacquire the
@@ -486,11 +490,11 @@ class MicrophoneManager {
             finalCombo.combo,
             liveResolved.name
         )
-        if (finalItemResult.error != "")
-            this.RecordOperationalError(finalItemResult.error)
         if !(finalItemResult.status == "found") {
             this.CollapseVerifiedCombo(session, combo)
-            return false
+            return this.SelectionStopped(
+                finalItemResult.error != "" ? finalItemResult.error : this.listChangedReason
+            )
         }
         finalResolved := finalItemResult.selection
         try itemIsExpected := finalResolved
@@ -503,11 +507,12 @@ class MicrophoneManager {
             )
         catch as err {
             this.RecordOperationalError(err)
-            itemIsExpected := false
+            this.CollapseVerifiedCombo(session, combo)
+            return false
         }
         if !itemIsExpected {
             this.CollapseVerifiedCombo(session, combo)
-            return false
+            return this.SelectionStopped(this.listChangedReason)
         }
 
         try finalResolved.item.SelectionItemPattern.Select()
@@ -523,7 +528,15 @@ class MicrophoneManager {
             1000
         )
         this.CollapseVerifiedCombo(session, combo)
-        return succeeded
+        if !succeeded
+            return this.SelectionStopped("PowerScribe did not confirm the selection within 1 second")
+        return true
+    }
+
+    ; Records why SelectMicrophone stopped short and returns its false result.
+    static SelectionStopped(reason) {
+        this.RecordOperationalError(reason)
+        return false
     }
 
     static WaitForSelection(session, fullName, timeoutMs) {

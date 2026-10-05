@@ -34,6 +34,7 @@ class MicrophoneManagerTest {
         "RecycledWindowHandleWithNewProcessStartsANewLoginSession",
         "MonitoringStartsOnlyWithSwapEnabledAndANamedMicrophone",
         "ApplyNowNamesEachFailureAndKeepsTheResolutionError",
+        "UnconfirmedSelectionNamesTheTimeoutNotTheName",
         "AmbiguousNameReasonReachesBothNotices"
     ]
 
@@ -80,6 +81,24 @@ class MicrophoneManagerTest {
         Assert.Equal("PowerScribe Not Verified", TestRunner.dialogs[2].title)
         Assert.True(InStr(TestRunner.dialogs[2].text, "simulated provider uncertainty"), TestRunner.dialogs[2].text)
         Assert.Equal("PowerScribe Not Running", TestRunner.dialogs[3].title)
+    }
+
+    ; Select() ran on the one exact match, but PowerScribe never showed it selected.
+    UnconfirmedSelectionNamesTheTimeoutNotTheName() {
+        fixture := MicrophoneFixture(["PowerMic III"])
+        fixture.items[1].updatesComboOnSelect := false
+        MicrophoneManager.sessionDriver := fixture.driver
+        originalName := Settings.Get("MicrophoneName")
+        try {
+            SetTestSetting("MicrophoneName", "PowerMic III")
+            Assert.False(MicrophoneManager.ApplyNow())
+        } finally SetTestSetting("MicrophoneName", originalName)
+
+        Assert.Equal(1, fixture.items[1].selectCalls)
+        Assert.Equal(
+            "Could not select microphone 'PowerMic III': PowerScribe did not confirm the selection within 1 second.",
+            TestRunner.dialogs[1].text
+        )
     }
 
     ; "PowerMic" matches two devices: the advice must not blame the name's spelling.
