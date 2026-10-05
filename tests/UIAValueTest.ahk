@@ -6,8 +6,10 @@
  * Stands in for a UIA element.
  *
  * A real element with no ValuePattern cannot be used in a deterministic unit test.
- * The stub reports the same capability properties and records whether .Value was
- * touched, which verifies that the adapter checks support before invoking a pattern.
+ * The stub reports the same capability properties, exposes ValuePattern and the
+ * legacy pattern, and models UIA-v2's combined Value setter, which falls back to
+ * the legacy pattern when the ValuePattern write fails. writeAttempts records each
+ * pattern written through.
  */
 class FakeElement {
     __New(value := "", legacyValue := "", hasValuePattern := true, hasLegacyPattern := false, writeErrorAfterMutation := "") {
@@ -17,7 +19,11 @@ class FakeElement {
         this.hasLegacyPattern := hasLegacyPattern
         this.valueWasWritten := false
         this.writeErrorAfterMutation := writeErrorAfterMutation
+        this.writeAttempts := []
     }
+
+    ValuePattern => FakeValuePattern(this)
+    LegacyIAccessiblePattern => FakeLegacyPattern(this)
 
     GetPropertyValue(propertyId) {
         switch propertyId {
@@ -32,11 +38,35 @@ class FakeElement {
     Value {
         get => this.storedValue
         set {
-            this.valueWasWritten := true
-            this.storedValue := value
-            if (this.writeErrorAfterMutation != "")
-                throw Error(this.writeErrorAfterMutation)
+            try return this.ValuePattern.SetValue(value)
+            try return this.LegacyIAccessiblePattern.SetValue(value)
+            throw Error("Setting the value failed! Is ValuePattern, RangeValuePattern or LegacyIAccessiblePattern supported?")
         }
+    }
+}
+
+class FakeValuePattern {
+    __New(element) {
+        this.element := element
+    }
+
+    SetValue(text) {
+        this.element.writeAttempts.Push("Value")
+        this.element.valueWasWritten := true
+        this.element.storedValue := text
+        if (this.element.writeErrorAfterMutation != "")
+            throw Error(this.element.writeErrorAfterMutation)
+    }
+}
+
+class FakeLegacyPattern {
+    __New(element) {
+        this.element := element
+    }
+
+    SetValue(text) {
+        this.element.writeAttempts.Push("Legacy")
+        this.element.storedValue := text
     }
 }
 
@@ -119,14 +149,18 @@ class UIAValueTest {
         Assert.Equal("wet read", el.storedValue)
     }
 
+    ; One write through ValuePattern and its own error: UIA-v2's combined setter would
+    ; write again through another pattern and replace the error.
     TestWritePropagatesPostMutationError() {
-        el := FakeElement("existing", "", true, false, "provider failed after mutation")
+        el := FakeElement("existing", "", true, true, "provider failed after mutation")
 
         Assert.Throws(
             () => UIAValue.Write(el, "wet read"),
             "provider failed after mutation"
         )
         Assert.Equal("wet read", el.storedValue)
+        Assert.Equal(1, el.writeAttempts.Length)
+        Assert.Equal("Value", el.writeAttempts[1])
     }
 }
 

@@ -4,14 +4,14 @@
 /**
  * Safe access to a UIA element's value.
  *
- * Reading or writing `element.Value` goes through UIA-v2's ValuePattern accessor,
- * which throws when an element does not support the pattern. Pattern support is a
- * capability boundary rather than an application failure: the Sticky Notes field,
- * for example, does not support ValuePattern.
+ * UIA-v2's `element.Value` accessor tries ValuePattern, then RangeValuePattern, then
+ * the legacy accessibility pattern, and on a failed write replaces the error with a
+ * generic one. Pattern support is a capability boundary rather than an application
+ * failure: the Sticky Notes field, for example, does not support ValuePattern.
  *
- * Reads therefore go through plain property lookups, and writes are gated on the
- * pattern actually being available. This also keeps the clinical adapter stable if
- * UIA-v2 changes its unsupported-pattern error behavior again.
+ * Reads therefore go through plain property lookups. A write is gated on
+ * ValuePattern being available and calls ValuePattern.SetValue directly: one write
+ * through the pattern the caller chose, and that pattern's own error if it fails.
  */
 class UIAValue {
     /**
@@ -63,7 +63,7 @@ class UIAValue {
     }
 
     /**
-     * Writes a value only when the element supports it.
+     * Writes a value through ValuePattern only, when the element supports it.
      * @returns true if the write was attempted and did not throw; false when the
      * element has no ValuePattern, so the caller can pick another strategy instead
      * of retrying something that cannot work.
@@ -72,7 +72,7 @@ class UIAValue {
         if !this.CanWrite(element)
             return false
 
-        element.Value := text
+        element.ValuePattern.SetValue(text)
         return true
     }
 }

@@ -877,14 +877,13 @@ class PostMutationFailingWetReadElement {
         return ""
     }
 
-    Value {
-        get => this.storedValue
-        set {
-            this.writeCalls++
-            this.storedValue := value
-            if (value = this.failingValue)
-                throw Error("provider failed after mutation")
-        }
+    ValuePattern => FakeWetReadValuePattern(this)
+
+    WriteValue(text) {
+        this.writeCalls++
+        this.storedValue := text
+        if (text = this.failingValue)
+            throw Error("provider failed after mutation")
     }
 }
 
@@ -898,12 +897,23 @@ class FakeWritableWetReadElement {
         return property = UIA.Property.IsValuePatternAvailable
     }
 
-    Value {
-        get => this.storedValue
-        set {
-            this.writeCalls++
-            this.storedValue := value
-        }
+    ValuePattern => FakeWetReadValuePattern(this)
+
+    WriteValue(text) {
+        this.writeCalls++
+        this.storedValue := text
+    }
+}
+
+; The ValuePattern of a fake note field: SetValue writes through the field's
+; WriteValue, as UIAValue.Write calls it.
+class FakeWetReadValuePattern {
+    __New(element) {
+        this.element := element
+    }
+
+    SetValue(text) {
+        this.element.WriteValue(text)
     }
 }
 
