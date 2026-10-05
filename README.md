@@ -310,7 +310,8 @@ don't name a stable release with one.
 
 Source runs report `v0.0.0-dev` and untagged CI builds report `v0.0.0-dev+<commit>`
 (the first seven hex digits). Both skip update checks entirely, so running from source
-never offers to overwrite `main.ahk` with an EXE.
+never offers to overwrite `main.ahk` with an EXE. Check for Updates names the running
+version in its result, which is the version to give in a bug report.
 
 ## License
 

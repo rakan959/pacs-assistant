@@ -392,8 +392,10 @@ class UpdateCheckerTest {
                 Assert.Equal(testCase.eligible, UpdateChecker.BeginManualCheck(), testCase.label)
                 if testCase.eligible
                     transport.Resolve({status: 404, body: ""})
-                else
+                else {
                     Assert.Equal("Development Build", this.manualNotifications[-1].title, testCase.label)
+                    Assert.True(InStr(this.manualNotifications[-1].text, "This is v0.0.1-test,") = 1, testCase.label)
+                }
                 Assert.Equal(requests + (testCase.eligible ? 2 : 0), transport.asyncCalls, testCase.label)
             }
         } finally AppVersion.isDevBuild := originalDevBuild
@@ -549,7 +551,8 @@ class UpdateCheckerTest {
 
         Assert.Equal(0, UpdateChecker.activeRequest)
         Assert.Equal(1, this.manualNotifications.Length)
-        Assert.True(InStr(this.manualNotifications[1].text, "up to date") > 0)
+        ; Check for Updates is where a user finds the version to report.
+        Assert.Equal("PACS Assistant v0.0.1-test is up to date.", this.manualNotifications[1].text)
     }
 
     TestSettingsChangeDoesNotSilentlyCancelManualCheck() {

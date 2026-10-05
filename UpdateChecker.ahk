@@ -552,7 +552,7 @@ class UpdateChecker {
         }
         if !this.updateCheckEligibleProbe.Call() {
             this.manualResultNotifier.Call(
-                "Update checks are available in tagged release builds.",
+                "This is " this.currentVersion ", a development build. Update checks are available in tagged release builds.",
                 "Development Build",
                 "Iconi"
             )
@@ -592,7 +592,7 @@ class UpdateChecker {
             }
             if !updateInfo.hasUpdate {
                 this.manualResultNotifier.Call(
-                    "PACS Assistant is up to date.",
+                    "PACS Assistant " this.currentVersion " is up to date.",
                     "No Update Available",
                     "Iconi"
                 )

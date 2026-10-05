@@ -31,7 +31,7 @@ Describe the intended behavior.
 
 ## Environment
 
-- PACS Assistant version:
+- PACS Assistant version (Check for Updates shows it, such as `v2.1.0-beta.1`):
 - Install type: release executable / running from source
 - Windows version:
 - PACS product and version:
