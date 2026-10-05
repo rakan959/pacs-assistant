@@ -741,10 +741,19 @@ class PreconditionChangingWetReadDriver extends FakeWetReadDriver {
 class FakeNativeWetReadValueDriver extends NativeWetReadDriver {
     __New(currentValue) {
         this.currentValue := currentValue
+        this.now := 0
     }
 
     Read(*) {
         return this.currentValue
+    }
+
+    NowMilliseconds() {
+        return this.now
+    }
+
+    Pause(milliseconds) {
+        this.now += milliseconds
     }
 }
 

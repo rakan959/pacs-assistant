@@ -480,13 +480,17 @@ class NativeWetReadDriver {
             try current := this.Read(field)
             if (current == expected)
                 return true
-            Sleep(100)
+            this.Pause(100)
         }
         return false
     }
 
     NowMilliseconds() {
         return DllCall("GetTickCount64", "UInt64")
+    }
+
+    Pause(milliseconds) {
+        Sleep(milliseconds)
     }
 }
 

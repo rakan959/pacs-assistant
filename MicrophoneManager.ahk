@@ -38,6 +38,14 @@ class NativeMicrophoneSessionDriver {
             : 0
         return 0
     }
+
+    NowMilliseconds() {
+        return DllCall("GetTickCount64", "UInt64")
+    }
+
+    Pause(milliseconds) {
+        Sleep(milliseconds)
+    }
 }
 
 /**
@@ -568,7 +576,7 @@ class MicrophoneManager {
     }
 
     static WaitForSelection(session, fullName, timeoutMs) {
-        started := DllCall("GetTickCount64", "UInt64")
+        started := this.sessionDriver.NowMilliseconds()
         loop {
             try current := this.sessionDriver.Root(session)
             catch
@@ -584,9 +592,9 @@ class MicrophoneManager {
                     && StrCompare(Trim(value.value), Trim(fullName), false) = 0)
                     return true
             }
-            if (DllCall("GetTickCount64", "UInt64") - started >= timeoutMs)
+            if (this.sessionDriver.NowMilliseconds() - started >= timeoutMs)
                 return false
-            Sleep(50)
+            this.sessionDriver.Pause(50)
         }
     }
 

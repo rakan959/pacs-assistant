@@ -731,7 +731,7 @@ class ClinicalAutomationTest {
         originalLifecycleDriver := AppControl.lifecycleDriver
         trustedPath := A_Temp "\Philips\Vue\mp.exe"
         try {
-            native := NativePacsRestartDriver()
+            native := SimulatedClockRestartDriver()
             native.trustedVueExecutablePath := trustedPath
             AppControl.lifecycleDriver := FakeProcessInventoryLifecycleDriver(
                 Map(
@@ -1624,5 +1624,22 @@ class SameTitleWindowLifecycleDriver {
     StopProcess(*) {
         this.stopProcessCalls++
         return true
+    }
+}
+
+; Runs the real launch-stability loop against a simulated clock, so the required
+; two stable polls never depend on real 100 ms sleeps fitting a 350 ms budget.
+class SimulatedClockRestartDriver extends NativePacsRestartDriver {
+    __New() {
+        super.__New()
+        this.now := 0
+    }
+
+    NowMilliseconds() {
+        return this.now
+    }
+
+    Pause(milliseconds) {
+        this.now += milliseconds
     }
 }

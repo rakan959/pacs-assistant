@@ -471,6 +471,16 @@ class FakeMicrophoneSessionDriver {
         this._root := root
         this.rootError := ""
         this.captureCalls := 0
+        ; Simulated clock: selection waits advance it instead of sleeping.
+        this.now := 0
+    }
+
+    NowMilliseconds() {
+        return this.now
+    }
+
+    Pause(milliseconds) {
+        this.now += milliseconds
     }
 
     CaptureResult() {

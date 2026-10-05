@@ -813,6 +813,10 @@ class NativePacsRestartDriver {
         Sleep(milliseconds)
     }
 
+    NowMilliseconds() {
+        return DllCall("GetTickCount64", "UInt64")
+    }
+
     VerifyQuiescence() {
         try {
             if AppControl.ResolveExactWindows(AppControl.PowerScribeWindowSpec()).Length
@@ -849,10 +853,10 @@ class NativePacsRestartDriver {
     }
 
     WaitForLaunch(timeoutMs := 15000) {
-        deadline := DllCall("GetTickCount64", "UInt64") + timeoutMs
+        deadline := this.NowMilliseconds() + timeoutMs
         stableReads := 0
         stableSession := 0
-        while (DllCall("GetTickCount64", "UInt64") < deadline) {
+        while (this.NowMilliseconds() < deadline) {
             try sessions := AppControl.ResolveExactWindows(AppControl.VuePacsWindowSpec())
             catch
                 return false
@@ -881,7 +885,7 @@ class NativePacsRestartDriver {
                 stableReads := 0
                 stableSession := 0
             }
-            Sleep(100)
+            this.Pause(100)
         }
         return false
     }
