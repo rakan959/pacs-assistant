@@ -353,9 +353,17 @@ class UpdateCheckerTest {
         Assert.Equal(1, transport.asyncCalls)
         Assert.Equal(0, transport.syncCalls)
         Assert.True(UpdateChecker.activeRequest != 0)
+        Assert.Equal(UpdateChecker.latestStableUrl, transport.url)
+        Assert.Equal(UpdateChecker.maxMetadataSizeBytes, transport.maximumSize)
 
         transport.Resolve({status: 404, body: ""})
         Assert.Equal(0, UpdateChecker.activeRequest)
+
+        ; With betas offered, the newest release of any kind is queried instead.
+        SetTestSetting("SkipBetaVersions", false)
+        Assert.True(UpdateChecker.BeginAutoCheck())
+        Assert.Equal(UpdateChecker.newestReleaseUrl, transport.url)
+        transport.Resolve({status: 404, body: ""})
     }
 
     ; An offline workstation fails the hourly check every time: one log entry per
@@ -759,6 +767,8 @@ class UpdateCheckerTest {
         ; Its buttons would otherwise run against the shutdown lease mid-download.
         Assert.True(transport.downloads[1].guiDisabled)
         Assert.Equal(updateInfo.downloadUrl, transport.downloads[1].url)
+        ; The transport requires the response to be exactly this size.
+        Assert.Equal(updateInfo.downloadSize, transport.downloads[1].expectedSize)
         Assert.Equal(newExe, transport.downloads[1].destination)
         Assert.True(FileExist(newExe), "the verified download must stay staged for the updater")
         Assert.Equal(1, launches.Length)
@@ -952,6 +962,8 @@ class FakeAsyncUpdateTransport {
         this.syncCalls := 0
         this.onComplete := 0
         this.onError := 0
+        this.url := ""
+        this.maximumSize := 0
         this.handle := FakeAsyncUpdateHandle()
     }
 
@@ -962,6 +974,8 @@ class FakeAsyncUpdateTransport {
 
     GetTextAsync(url, onComplete, onError, maximumSize := 0) {
         this.asyncCalls++
+        this.url := url
+        this.maximumSize := maximumSize
         this.onComplete := onComplete
         this.onError := onError
         return this.handle
