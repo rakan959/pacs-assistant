@@ -129,9 +129,8 @@ jobs:
             }
           }
 
-      # The hotkey and GUI smoke suites interact with the real desktop and remain local-only.
-      # A harness that blocks on a desktop dialog must fail fast rather than hold the
-      # runner for the whole job timeout.
+      # Its own timeout: a harness that blocks on a desktop dialog must fail fast rather
+      # than hold the runner for the whole job timeout.
       - name: Run unit tests
         timeout-minutes: 10
         shell: pwsh

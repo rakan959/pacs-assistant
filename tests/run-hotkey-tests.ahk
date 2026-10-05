@@ -100,10 +100,9 @@ Main() {
     HotkeyManager.DisableAllHotkeys()
     AssertEqual(0, Press(), "a disabled bind does not fire")
 
-    ; Regression for issue #22. ApplyBinds disables everything and re-registers it,
-    ; which happens on every profile load and every keybind edit. Hotkey() updates an
-    ; existing variant's action but leaves it disabled, so without the explicit "On"
-    ; the re-registered bind stayed dead and binds "broke" for no visible reason.
+    ; Issue #22. ApplyBinds disables everything and re-registers it on every profile
+    ; load and keybind edit. Hotkey() updates an existing variant's action but leaves
+    ; it disabled, so re-registration must pass "On" or the bind stays dead.
     HotkeyManager.Register("Test", "^F13", Bump)
     AssertEqual(1, Press(), "a bind re-registered after being disabled fires again")
 

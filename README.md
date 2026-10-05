@@ -257,8 +257,7 @@ prerelease suffix such as `v2.1.0-beta.1`.
 
 **The git tag is the only place a version is stated.** CI generates `Version.ahk` from
 the tag before compiling, and the app reads `AppVersion.current` from it. Nothing is
-hand-edited to bump a release — hand-syncing a constant to a tag is what previously let
-the shipped build report `v2.0b4` while `v2.0b7` was published.
+hand-edited to bump a release, so the version a build reports always matches its tag.
 
 To cut a release:
 

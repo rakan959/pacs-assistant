@@ -174,9 +174,9 @@ class KeybindGUITest {
         Assert.Equal("", this.gui.SelectedFunction({Text: ""}, {Text: ""}))
     }
 
-    ; The custom-function list is only created when the profile has custom functions.
-    ; Reading it unconditionally raised an unset-variable error inside the GUI
-    ; callback whenever a profile had none and nothing was selected.
+    ; The custom-function list exists only when the profile has custom functions, so
+    ; reading the selection must not assume it; otherwise the GUI callback raises an
+    ; unset-variable error for a profile without any.
     TestSelectedFunctionSurvivesMissingCustomList() {
         Assert.Equal("Sign Report", this.gui.SelectedFunction({Text: "Sign Report"}, ""))
         Assert.Equal("", this.gui.SelectedFunction({Text: ""}, ""))

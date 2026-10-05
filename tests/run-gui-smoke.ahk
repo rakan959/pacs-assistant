@@ -105,7 +105,7 @@ Main() {
     SetWorkingDir(tempDir)
 
     ; A profile with a built-in bind, a scoped bind and a custom function.
-    ; F13/F14 do not exist on a normal keyboard, so applying these binds cannot
+    ; F13-F15 do not exist on a normal keyboard, so applying these binds cannot
     ; swallow a key the user might actually press.
     path := tempDir "\profiles\Smoke.ini"
     IniWrite("Sign Report|Draft Report|Custom: Smoke|", path, "Functions", "Order")
