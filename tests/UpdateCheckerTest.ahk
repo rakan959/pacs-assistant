@@ -129,6 +129,8 @@ class UpdateCheckerTest {
             ["v2.0.1", "v2.0.2"],
             ["v2.0.1", "v2.0.9"],
             ["v2.0.9", "v2.0.10"],
+            ; 2^64 + 1, which Integer() alone would wrap to 1
+            ["v2.0.0", "v18446744073709551617.0.0"],
             ; A prerelease ranks below its release
             ["v2.1.0-beta.1", "v2.1.0"],
             ["v2.1.0-beta.1", "v2.1.0-beta.2"],

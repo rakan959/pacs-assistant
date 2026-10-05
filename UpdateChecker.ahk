@@ -250,11 +250,12 @@ class UpdateChecker {
         return true
     }
 
-    ; Leading integer of a version field, 0 if there isn't one
+    ; Leading integer of a version field, 0 if there isn't one. Integer() wraps
+    ; beyond the 64-bit range, so a longer number saturates instead.
     static ToInt(text) {
-        if RegExMatch(text, "^\d+", &m)
-            return Integer(m[0])
-        return 0
+        if !RegExMatch(text, "^\d+", &m)
+            return 0
+        return StrLen(LTrim(m[0], "0")) > 18 ? 0x7FFFFFFFFFFFFFFF : Integer(m[0])
     }
 
     static Sign(a, b) {
