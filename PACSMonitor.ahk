@@ -83,31 +83,21 @@ class PACSMonitor {
     static notifier := (text, title, options) => TrayTip(text, title, options)
 
     static Start() {
-        ; Clear known accessions
         this.knownAccessions := Map()
-
-        ; Start monitoring if enabled
-        if Settings.Get("AutoRefreshPACS") {
-            this.StartMonitoring()
-        }
+        this.StartMonitoring()
     }
 
+    ; Restarts the refresh timer from the current settings, with an immediate
+    ; first refresh; without auto-refresh it only stops the timer.
     static StartMonitoring() {
-        ; Clear any existing timer
-        if this.refreshTimer {
-            this.timerDriver.Stop(this.refreshTimer)
-            this.refreshTimer := 0
-        }
+        this.StopMonitoring()
+        if !Settings.Get("AutoRefreshPACS")
+            return
 
-        ; Set up new timer if auto-refresh is enabled
-        if Settings.Get("AutoRefreshPACS") {
-            interval := Settings.Get("RefreshInterval") * 1000  ; Convert to milliseconds
-            this.refreshTimer := ObjBindMethod(this, "RefreshAndCheck")
-            this.timerDriver.Start(this.refreshTimer, interval)
-
-            ; Do an initial refresh
-            this.RefreshAndCheck()
-        }
+        interval := Settings.Get("RefreshInterval") * 1000  ; Convert to milliseconds
+        this.refreshTimer := ObjBindMethod(this, "RefreshAndCheck")
+        this.timerDriver.Start(this.refreshTimer, interval)
+        this.RefreshAndCheck()
     }
 
     static StopMonitoring() {
