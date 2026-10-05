@@ -18,6 +18,7 @@ class ProfileManagerTest {
         "TestProfileCaseOnlyRename",
         "TestLoadCanonicalizesCaseDriftedDefaultProfile",
         "TestCaseOnlyRenameDoubleMoveFailureRemainsReloadable",
+        "TestCaseOnlyRenameRollbackFailureFollowsTheStoredName",
         "TestInterruptedCaseOnlyRenameIsRecoveredOnStartup",
         "TestInterruptedCaseOnlyRenameNeverOverwritesConflictingProfile",
         "TestProfileDeletionRules",
@@ -207,6 +208,32 @@ class ProfileManagerTest {
         ProfileManager.LoadProfiles()
         Assert.True(ProfileManager.profiles.Has("Night"))
         Assert.Equal("^s", ProfileManager.profiles["Night"].binds["Sign Report"])
+    }
+
+    TestCaseOnlyRenameRollbackFailureFollowsTheStoredName() {
+        ; Publishing the new default fails and so does the first move back, so the
+        ; file keeps the new casing. Memory must follow the name Windows stored.
+        profile := ProfileManager.NewProfile()
+        ProfileManager.profiles["Night"] := profile
+        ProfileManager.currentProfile := "Night"
+        ProfileManager.SaveProfile("Night", profile)
+        Assert.True(ProfileManager.SetDefaultProfile("Night"))
+        driver := FaultInjectingProfileStorageDriver()
+        driver.failWriteValues["night"] := true
+        driver.failMoveCalls[3] := true
+        ProfileManager.storageDriver := driver
+
+        Assert.False(ProfileManager.RenameProfile("Night", "night"))
+
+        diskName := ""
+        loop files ProfileManager.profilesPath "\*.ini"
+            diskName := A_LoopFileName
+        Assert.True(diskName == "night.ini", diskName)
+        Assert.True(ProfileManager.recoveryRequired)
+        Assert.True(ProfileManager.profiles.Has("night"))
+        Assert.False(ProfileManager.profiles.Has("Night"))
+        Assert.True(ProfileManager.currentProfile == "night")
+        Assert.True(ProfileManager.defaultProfile == "night")
     }
 
     TestInterruptedCaseOnlyRenameIsRecoveredOnStartup() {

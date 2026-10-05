@@ -710,7 +710,7 @@ class ProfileManager {
                         rollbackError := err.Message
                 }
                 if (rollbackError != "") {
-                    this.ReconcileCaseOnlyProfileName(oldName, newName, oldPath, newPath)
+                    this.ReconcileCaseOnlyProfileName(oldName, newName, newPath)
                     refreshError := this.RefreshDefaultProfileFromStorage()
                     message := "Default-profile case rename failed: " configError.Message
                         . "; restoring the original profile state also failed: " rollbackError
@@ -824,8 +824,10 @@ class ProfileManager {
         return ""
     }
 
-    static ReconcileCaseOnlyProfileName(oldName, newName, oldPath, newPath) {
-        if (!FileExist(oldPath) && FileExist(newPath) && this.profiles.Has(oldName)) {
+    static ReconcileCaseOnlyProfileName(oldName, newName, newPath) {
+        ; Both names resolve to the same file on Windows, so only its stored casing
+        ; shows which name the failed rollback left on disk.
+        if (this.StoredFileName(newPath) == newName ".ini" && this.profiles.Has(oldName)) {
             profile := this.profiles[oldName]
             revision := this.GetProfileRevision(oldName)
             this.profiles.Delete(oldName)
@@ -836,5 +838,12 @@ class ProfileManager {
             if (this.currentProfile == oldName)
                 this.currentProfile := newName
         }
+    }
+
+    ; The file's name as stored on disk, in its stored casing; "" when absent.
+    static StoredFileName(path) {
+        loop files path, "F"
+            return A_LoopFileName
+        return ""
     }
 }
