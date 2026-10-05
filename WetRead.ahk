@@ -759,7 +759,7 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
         try noteField := sticky.ElementFromPath("YY0/")
     }
     if (!noteField) {
-        MsgBox("Could not locate Sticky Notes text field.", "Sticky Note Target Not Verified", "Icon!")
+        MsgBox("Could not locate the Sticky Notes text field. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
         return false
     }
     if !NativeWetReadDriver.IsExpectedNoteField(sticky, noteField) {
