@@ -698,7 +698,7 @@ WetRead() {
     ; Use clipboard contents; bail out if empty to avoid blank notes
     clipText := A_Clipboard
     if (clipText = "") {
-        MsgBox("No text in clipboard to paste as wet read.")
+        MsgBox("No text in clipboard to paste as wet read.", "No Clipboard Text", "Icon!")
         return
     }
 
@@ -756,7 +756,7 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
         try noteField := sticky.ElementFromPath("YY0/")
     }
     if (!noteField) {
-        MsgBox("Could not locate Sticky Notes text field.")
+        MsgBox("Could not locate Sticky Notes text field.", "Sticky Note Target Not Verified", "Icon!")
         return
     }
     if !NativeWetReadDriver.IsExpectedNoteField(sticky, noteField) {
@@ -793,7 +793,7 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
         }
     }
 
-    Return
+    return
 }
 
 PromptWetReadMode() {
