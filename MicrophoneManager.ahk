@@ -613,8 +613,10 @@ class MicrophoneManager {
         )
     }
 
-    ; ApplyNow runs from the user's own hotkey, so its result is a dialog.
+    ; ApplyNow runs from the user's own hotkey, so its result is a dialog; the log
+    ; keeps it for later diagnosis.
     static ApplyNowFailed(message, title) {
+        AppLog.Write(title ": " StrReplace(message, "`n`n", " "))
         MsgBox(message, title, "Icon!")
         return false
     }

@@ -99,6 +99,7 @@ class MicrophoneManagerTest {
     ApplyNowNamesEachFailureAndKeepsTheResolutionError() {
         fixture := MicrophoneFixture([])
         originalName := Settings.Get("MicrophoneName")
+        capturedLog := LogCapture()
         try {
             SetTestSetting("MicrophoneName", "")
             Assert.False(MicrophoneManager.ApplyNow())
@@ -108,7 +109,15 @@ class MicrophoneManagerTest {
             Assert.False(MicrophoneManager.ApplyNow())
             MicrophoneManager.sessionDriver := SequencedMicrophoneSessionDriver(fixture.session, fixture.root, ["absent"])
             Assert.False(MicrophoneManager.ApplyNow())
-        } finally SetTestSetting("MicrophoneName", originalName)
+            ; Each dialog is also in error.log, the provider error included.
+            loggedUnverified := capturedLog.Count("PowerScribe Not Verified: PowerScribe window identity could not be verified. simulated provider uncertainty")
+            loggedTotal := capturedLog.Count("Not Running: ") + capturedLog.Count("Not Verified: ") + capturedLog.Count("Microphone Configured: ")
+        } finally {
+            capturedLog.Restore()
+            SetTestSetting("MicrophoneName", originalName)
+        }
+        Assert.Equal(1, loggedUnverified)
+        Assert.Equal(3, loggedTotal)
 
         Assert.Equal(3, TestRunner.dialogs.Length)
         Assert.Equal("No Microphone Configured", TestRunner.dialogs[1].title)

@@ -56,6 +56,7 @@ class WetReadTest {
         "StickyOpenerFailureAlsoReportsAttendingOutcome",
         "ThrowingStickyOpenerStillReportsAttendingOutcome",
         "UnexpectedWorkflowFaultsAreLoggedWithTheirStack",
+        "WetReadStopsBeforePastingAreLogged",
         "ThrowingReportCaptureStillPastesAndReportsAttendingOutcome",
         "StickyTargetIsPinnedBeforePowerScribeRouting"
     ]
@@ -679,6 +680,23 @@ class WetReadTest {
         Assert.Equal(1, routingFaults)
         Assert.Equal(3, loggedEntries)
         Assert.True(stackLines >= 3, "each logged fault carries its call stack")
+    }
+
+    WetReadStopsBeforePastingAreLogged() {
+        notifications := []
+        capturedLog := LogCapture()
+        try {
+            RunPinnedWetReadWorkflow("wet read", "uia",
+                (*) => 0, (*) => {text: "", session: 0}, (*) => true, (*) => true,
+                RecordNotification.Bind(notifications))
+            Assert.False(PerformWetReadPaste("wet read", "uia", 0))
+            openerStops := capturedLog.Count("Wet read stopped: A new Sticky Notes window")
+            pasteStops := capturedLog.Count("Wet read stopped: The pinned Sticky Notes window is no longer the verified target")
+        } finally capturedLog.Restore()
+
+        Assert.Equal(1, openerStops)
+        Assert.Equal(1, pasteStops)
+        Assert.Equal("Sticky Note Target Not Verified", TestRunner.dialogs[TestRunner.dialogs.Length].title)
     }
 
     ThrowingStickyOpenerStillReportsAttendingOutcome() {

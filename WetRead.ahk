@@ -4,8 +4,9 @@
 ;   + NativeWetReadTargetDriver / NativeWetReadControlDriver / NativeWetReadDriver (UIA note field)
 ;   + WetReadPasteEngine (direct write and verification; never retries or rolls back)
 ;   + CheckAttending, AttendingFailureMessage, RunPinnedWetReadWorkflow, WetRead,
-;       PerformWetReadPaste, ConvertWetReadLineEndings, ReportWetReadPasteResult,
-;       WetReadPasteFailureDialog, PromptWetReadMode (file-scope wet-read workflow)
+;       PerformWetReadPaste, ConvertWetReadLineEndings, StopWetRead,
+;       ReportWetReadPasteResult, WetReadPasteFailureDialog, PromptWetReadMode
+;       (file-scope wet-read workflow)
 
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
@@ -652,6 +653,7 @@ RunPinnedWetReadWorkflow(
             return false
         }
         if !stickySession {
+            AppLog.Write("Wet read stopped: " stickyFailure ".")
             notify.Call(stickyFailure ".", "Sticky Note Target Not Verified", "Icon!")
             return false
         }
@@ -727,28 +729,23 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
     if (!IsObject(stickySession)
         || !HasProp(stickySession, "driver")
         || !stickySession.driver.ActivateSticky(stickySession)) {
-        MsgBox("The pinned Sticky Notes window is no longer the verified target. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-        return false
+        return StopWetRead("The pinned Sticky Notes window is no longer the verified target. Nothing was pasted.")
     }
     sticky := stickySession.driver.GetRoot(stickySession.stickyHwnd)
     if (!sticky
         || !NativeWetReadDriver.IsExpectedStickyRoot(stickySession.pacsRoot, sticky)) {
-        MsgBox("The pinned Sticky Notes UI target could not be reacquired. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-        return false
+        return StopWetRead("The pinned Sticky Notes UI target could not be reacquired. Nothing was pasted.")
     }
     try {
         if (sticky.WinId != stickySession.stickyHwnd) {
-            MsgBox("The pinned Sticky Notes UI target changed. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-            return false
+            return StopWetRead("The pinned Sticky Notes UI target changed. Nothing was pasted.")
         }
     } catch {
-        MsgBox("The pinned Sticky Notes UI target could not be verified. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-        return false
+        return StopWetRead("The pinned Sticky Notes UI target could not be verified. Nothing was pasted.")
     }
     try wetReadDriver := NativeWetReadDriver.ForRoot(sticky)
     catch {
-        MsgBox("Sticky Notes window identity could not be pinned. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-        return false
+        return StopWetRead("Sticky Notes window identity could not be pinned. Nothing was pasted.")
     }
     ; Get note input field
     noteField := ""
@@ -759,12 +756,10 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
         try noteField := sticky.ElementFromPath("YY0/")
     }
     if (!noteField) {
-        MsgBox("Could not locate the Sticky Notes text field. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-        return false
+        return StopWetRead("Could not locate the Sticky Notes text field. Nothing was pasted.")
     }
     if !NativeWetReadDriver.IsExpectedNoteField(sticky, noteField) {
-        MsgBox("Sticky Notes returned an unexpected text target. Nothing was pasted; verify the window and try again.", "Sticky Note Target Not Verified", "Icon!")
-        return false
+        return StopWetRead("Sticky Notes returned an unexpected text target. Nothing was pasted; verify the window and try again.")
     }
 
     if Settings.Get("AutoConvertWetReadLineEndings")
@@ -783,6 +778,14 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
 ; Sticky Notes expects CRLF; a bare LF from the clipboard renders as one long line.
 ConvertWetReadLineEndings(text) {
     return RegExReplace(text, "\r?\n", "`r`n")
+}
+
+; Ends a wet read that stopped before anything was pasted: logs the reason, shows
+; it, and returns false.
+StopWetRead(message) {
+    AppLog.Write("Wet read stopped: " message)
+    MsgBox(message, "Sticky Note Target Not Verified", "Icon!")
+    return false
 }
 
 /**
