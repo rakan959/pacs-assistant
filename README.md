@@ -133,7 +133,11 @@ $archive = 'C:\path\to\download.zip'
 All suites exit non-zero on failure. The three AutoHotkey runners use a headless
 preamble (`#ErrorStdOut`, `#Warn All, StdOut`), so warnings print to stdout and an
 uncaught runtime error is written to stderr and exits with code 10 instead of opening a
-dialog that would block an unattended run.
+dialog that would block an unattended run. Two exceptions: the GUI smoke runner reports
+an error that escapes its checks as `FATAL` on stdout and exits 1, and the unit runner
+exits 11 when the process ends before every test has run. Each runner keeps settings
+and profiles in a private temp folder (`tests/IsolatedStorage.ahk`) that is removed on
+exit, so a run never reads or changes the files beside the scripts.
 
 ```powershell
 $ahk = "$Env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe"

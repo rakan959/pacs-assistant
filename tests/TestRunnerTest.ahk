@@ -20,7 +20,7 @@ class TestRunnerTest {
     ThrowsRejectsAFunctionThatReturnsNormally() {
         didThrow := false
         try Assert.Throws(() => 42)
-        catch {
+        catch Error {
             didThrow := true
         }
 
@@ -30,12 +30,12 @@ class TestRunnerTest {
     EqualRejectsCaseOnlyAndTypeOnlyDifferences() {
         caseDifferenceRejected := false
         try Assert.Equal("PACS", "pacs")
-        catch
+        catch Error
             caseDifferenceRejected := true
 
         typeDifferenceRejected := false
         try Assert.Equal(1, "1")
-        catch
+        catch Error
             typeDifferenceRejected := true
 
         Assert.True(caseDifferenceRejected, "Assert.Equal must compare string case exactly")
@@ -45,12 +45,12 @@ class TestRunnerTest {
     NotEqualAcceptsCaseOnlyAndTypeOnlyDifferences() {
         caseDifferenceAccepted := true
         try Assert.NotEqual("PACS", "pacs")
-        catch
+        catch Error
             caseDifferenceAccepted := false
 
         typeDifferenceAccepted := true
         try Assert.NotEqual(1, "1")
-        catch
+        catch Error
             typeDifferenceAccepted := false
 
         Assert.True(caseDifferenceAccepted, "Assert.NotEqual must distinguish string case")
@@ -158,19 +158,14 @@ class TestRunnerTest {
 
         try {
             TestRunner.RunTestClass(testClass, false)
-            result := {
+            return {
                 successes: TestRunner.successes,
                 failures: TestRunner.failures
             }
-        } catch as err {
+        } finally {
             TestRunner.successes := priorSuccesses
             TestRunner.failures := priorFailures
-            throw err
         }
-
-        TestRunner.successes := priorSuccesses
-        TestRunner.failures := priorFailures
-        return result
     }
 }
 

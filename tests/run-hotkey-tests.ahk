@@ -13,8 +13,8 @@ FileEncoding "UTF-8"
 ; while the hotkey is registered AutoHotkey swallows it, so nothing reaches the
 ; active window.
 ;
-; Run with:
-;   "C:\Program Files\AutoHotkey\v2\AutoHotkey.exe" tests\run-hotkey-tests.ahk
+; Run it with Invoke-AutoHotkeyChecked (README, "Tests"): AutoHotkey is a GUI-subsystem
+; program, so a plain launch neither waits for the run nor reports its exit code.
 
 #Include HarnessErrors.ahk
 OnError(OnError_StdErr)

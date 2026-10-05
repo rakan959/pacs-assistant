@@ -333,7 +333,7 @@ class KeybindGUITest {
             1
         ))
         try editor.BeginListening("Sign Report", listView, prompt)
-        catch as err {
+        catch Error as err {
             threw := true
             caughtMessage := err.Message
         }
@@ -1907,7 +1907,7 @@ class KeybindGUITest {
 
         try {
             try this.gui.DeleteCustomFunction("Custom: Keep", dialog)
-            catch {
+            catch Any {
                 threw := true
             }
             stillConfigured := ProfileManager.profiles["Test"].customFuncs.Has("Custom: Keep")
@@ -1942,7 +1942,7 @@ class KeybindGUITest {
             ProfileManager.currentProfile := "Test"
 
             try result := this.gui.RemoveFunction(listView)
-            catch {
+            catch Any {
                 threw := true
                 result := false
             }
@@ -1992,7 +1992,7 @@ class KeybindGUITest {
             HotkeyManager.activeHotkeys["Draft Report"] := {hotkey: "^F24", scope: "Any"}
 
             try result := this.gui.DeleteCustomFunction("Custom: Keep", dialog)
-            catch {
+            catch Any {
                 threw := true
                 result := false
             }
@@ -2068,7 +2068,7 @@ class KeybindGUITest {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
             try result := editor.DeleteCustomFunction("Custom: Keep", dialog)
-            catch {
+            catch Any {
                 threw := true
                 result := false
             }

@@ -1,12 +1,13 @@
 ; = CONTENTS
 ;   + Preamble
 ;   + UpdateCheckerTest class (version parsing, auto/manual check, download/verify, updater, dialog)
-;   + Test doubles (transports, status operations, shutdown coordinator, presentation lease, json/info helpers)
+;   + Test doubles (transports, status operations, shutdown coordinator, json/info helpers)
 
 #Requires AutoHotkey v2.0
 #Include ../UpdateChecker.ahk
 #Include ../Settings.ahk
 #Include TestRunner.ahk
+#Include FakePresentationLease.ahk
 
 class UpdateCheckerTest {
     static tests := [
@@ -528,7 +529,7 @@ class UpdateCheckerTest {
     }
 
     TestUpdateDialogRequiresPresentationLease() {
-        lease := FakeUpdatePresentationLease(false)
+        lease := FakePresentationLease(false)
         UpdateChecker.dialogAcquire := ObjBindMethod(lease, "Acquire")
         UpdateChecker.dialogRelease := ObjBindMethod(lease, "Release")
 
@@ -692,23 +693,6 @@ class UpdateCheckerTest {
         UpdateChecker.lastRemindTime := 0
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalSettingsFile
-    }
-}
-
-class FakeUpdatePresentationLease {
-    __New(acquireResult := true) {
-        this.acquireResult := acquireResult
-        this.acquireCalls := 0
-        this.releaseCalls := 0
-    }
-
-    Acquire(*) {
-        this.acquireCalls++
-        return this.acquireResult
-    }
-
-    Release(*) {
-        this.releaseCalls++
     }
 }
 

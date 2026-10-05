@@ -596,7 +596,7 @@ class WetReadTest {
             (*) => true,
             RecordWetReadNotification.Bind(notifications)
         )
-        catch
+        catch Any
             escaped := true
 
         Assert.False(escaped)
@@ -624,7 +624,7 @@ class WetReadTest {
             (*) => (pasteCalls++, true),
             RecordWetReadNotification.Bind(notifications)
         )
-        catch
+        catch Any
             escaped := true
 
         Assert.False(escaped)

@@ -8,8 +8,8 @@ FileEncoding "UTF-8"
 ; bad control reference or a broken layout, so this actually constructs each window,
 ; then closes it again. Windows will flash on screen while it runs.
 ;
-; Run with:
-;   "C:\Program Files\AutoHotkey\v2\AutoHotkey.exe" tests\run-gui-smoke.ahk
+; Run it with Invoke-AutoHotkeyChecked (README, "Tests"): AutoHotkey is a GUI-subsystem
+; program, so a plain launch neither waits for the run nor reports its exit code.
 
 #Include HarnessErrors.ahk
 OnError(OnError_StdErr)
@@ -33,12 +33,13 @@ Out(text) {
 Check(label, action) {
     global testsRun, testsFailed
     testsRun++
+    ; catch Any: a thrown non-Error value fails this check rather than the whole run.
     try {
         action()
         Out("  ok   " label)
-    } catch as err {
+    } catch Any as err {
         testsFailed++
-        Out("  FAIL " label " -- " err.Message " (" err.File ":" err.Line ")")
+        Out("  FAIL " label " -- " ErrorText.Describe(err))
     }
 }
 

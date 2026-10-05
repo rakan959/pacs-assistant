@@ -27,17 +27,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Require-Property {
-    param(
-        [Parameter(Mandatory)] [psobject] $Object,
-        [Parameter(Mandatory)] [string] $Name,
-        [Parameter(Mandatory)] [string] $Context
-    )
-
-    if ($Object.PSObject.Properties.Name -cnotcontains $Name) {
-        throw "$Context is missing required property '$Name'."
-    }
-}
+. (Join-Path $PSScriptRoot 'RequireProperty.ps1')
 
 foreach ($property in @('draft', 'prerelease', 'tag_name', 'name', 'assets')) {
     Require-Property -Object $Release -Name $property -Context 'Existing release'

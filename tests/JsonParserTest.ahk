@@ -36,7 +36,9 @@ class JsonParserTest {
     }
 
     TestHandlesEscapesAndUnicode() {
-        parsed := JsonParser.Parse('{"text":"line 1\nquote: \"ok\"; slash: \\n; solidus: \/; tab:\t; smile: ☺; emoji: 😀"}')
+        ; Raw (unescaped) non-ASCII characters, built with Chr so this file stays ASCII.
+        parsed := JsonParser.Parse('{"text":"line 1\nquote: \"ok\"; slash: \\n; solidus: \/; tab:\t; smile: '
+            . Chr(0x263A) '; emoji: ' Chr(0x1F600) '"}')
         Assert.Equal(
             "line 1`nquote: `"ok`"; slash: \n; solidus: /; tab:`t; smile: " Chr(0x263A) "; emoji: " Chr(0x1F600),
             parsed["text"]

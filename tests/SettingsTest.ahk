@@ -1,6 +1,12 @@
+; = CONTENTS
+;   + Preamble
+;   + SettingsTest class (load/save, validation, alert sounds, write conflicts, change listeners, dialog)
+;   + Test helpers and doubles (listener and replace callbacks, settings dialog, reentrant value control)
+
 #Requires AutoHotkey v2.0
 #Include ../Settings.ahk
 #Include TestRunner.ahk
+#Include FakePresentationLease.ahk
 
 class SettingsTest {
     static tests := [
@@ -105,7 +111,7 @@ class SettingsTest {
     }
 
     TestPresentationLeaseRejectsSettingsWindowBeforeCreation() {
-        lease := FakeSettingsPresentationLease(false)
+        lease := FakePresentationLease(false)
         Settings.dialogAcquire := ObjBindMethod(lease, "Acquire")
         Settings.dialogRelease := ObjBindMethod(lease, "Release")
         Settings.dialogUnavailableNotifier := ObjBindMethod(lease, "Notify")
@@ -472,28 +478,6 @@ FailSettingsReplace(*) {
 
 ReentrantSettingsReplace(*) {
     SetTestSetting("SkippedUpdateVersion", "v9.9.9")
-}
-
-class FakeSettingsPresentationLease {
-    __New(acquireResult := true) {
-        this.acquireResult := acquireResult
-        this.acquireCalls := 0
-        this.releaseCalls := 0
-        this.notificationCalls := 0
-    }
-
-    Acquire(*) {
-        this.acquireCalls++
-        return this.acquireResult
-    }
-
-    Release(*) {
-        this.releaseCalls++
-    }
-
-    Notify(*) {
-        this.notificationCalls++
-    }
 }
 
 class FakeSettingsDialog {

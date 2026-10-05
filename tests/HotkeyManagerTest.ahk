@@ -1,3 +1,8 @@
+; = CONTENTS
+;   + Preamble
+;   + HotkeyManagerTest class (registration, reassignment, rollback, scopes, teardown)
+;   + Test doubles (scope window driver, hotkey driver)
+
 #Requires AutoHotkey v2.0
 #Include ../HotkeyManager.ahk
 #Include ../Settings.ahk
