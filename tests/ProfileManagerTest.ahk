@@ -380,15 +380,25 @@ class ProfileManagerTest {
         IniWrite("global", path, "KeybindScopes", "Sign Report")
         IniWrite("default", path, "KeybindScopes", "Draft Report")
 
-        loaded := ProfileManager.LoadProfile(path)
-        Assert.Equal("PACS or PowerScribe", loaded.scopes["Toggle Dictation"])
-        Assert.Equal("Any", loaded.scopes["Sign Report"])
+        ; "default" resolves through the old global setting, so pin that setting in an
+        ; isolated file and check both of its values explicitly.
+        originalSettingsFile := Settings.settingsFile
+        Settings.settingsFile := TestTempPath("legacy-scope-settings", ".ini")
+        try {
+            SetTestSetting("RestrictHotkeysByActiveWindow", true)
+            restricted := ProfileManager.LoadProfile(path)
+            SetTestSetting("RestrictHotkeysByActiveWindow", false)
+            unrestricted := ProfileManager.LoadProfile(path)
+        } finally {
+            if FileExist(Settings.settingsFile)
+                FileDelete(Settings.settingsFile)
+            Settings.settingsFile := originalSettingsFile
+        }
 
-        ; "default" resolves through the old global setting
-        Assert.Equal(
-            Settings.Get("RestrictHotkeysByActiveWindow") ? "PACS or PowerScribe" : "Any",
-            loaded.scopes["Draft Report"]
-        )
+        Assert.Equal("PACS or PowerScribe", restricted.scopes["Toggle Dictation"])
+        Assert.Equal("Any", restricted.scopes["Sign Report"])
+        Assert.Equal("PACS or PowerScribe", restricted.scopes["Draft Report"])
+        Assert.Equal("Any", unrestricted.scopes["Draft Report"])
     }
 
     TestModalityAttendingPersistence() {

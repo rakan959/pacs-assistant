@@ -262,9 +262,12 @@ class KeybindGUITest {
         KeybindGUI.activeInputHook := hook
 
         threw := false
+        caughtMessage := ""
         try this.gui.PrepareForProfileSwitch()
-        catch
+        catch Any as err {
             threw := true
+            caughtMessage := ErrorText.Message(err)
+        }
 
         capturedListening := KeybindGUI.isListening
         capturedControl := KeybindGUI.listeningControl
@@ -279,6 +282,7 @@ class KeybindGUITest {
         KeybindGUI.activeInputHook := originalHook
 
         Assert.True(threw)
+        Assert.True(InStr(caughtMessage, "simulated InputHook stop failure") > 0, caughtMessage)
         Assert.True(capturedListening)
         Assert.True(capturedControl == control)
         Assert.True(capturedHook == hook)
@@ -1085,6 +1089,7 @@ class KeybindGUITest {
             restoreCalls: 0
         }
         threw := false
+        caughtMessage := ""
 
         try {
             ProfileManager.profiles := Map("Test", profile)
@@ -1099,8 +1104,10 @@ class KeybindGUITest {
             Assert.True(editor.BeginListening("Sign Report", listView, prompt))
             hook := KeybindGUI.activeInputHook
             try editor.OnInputEnd("Sign Report", listView, prompt, hook)
-            catch
+            catch Any as err {
                 threw := true
+                caughtMessage := ErrorText.Message(err)
+            }
 
             capturedHook := KeybindGUI.activeInputHook
             capturedListening := KeybindGUI.isListening
@@ -1118,6 +1125,7 @@ class KeybindGUITest {
         }
 
         Assert.True(threw)
+        Assert.True(InStr(caughtMessage, "simulated InputHook stop failure") > 0, caughtMessage)
         Assert.True(capturedHook == hook)
         Assert.True(capturedListening)
         Assert.True(capturedTransaction)
@@ -1150,6 +1158,7 @@ class KeybindGUITest {
             notificationDriver: notifications
         }
         threw := false
+        caughtMessage := ""
 
         try {
             ProfileManager.profiles := Map("Test", profile)
@@ -1174,8 +1183,10 @@ class KeybindGUITest {
                 prompt,
                 FakeCaptureHook("LShift")
             )
-            catch
+            catch Any as err {
                 threw := true
+                caughtMessage := ErrorText.Message(err)
+            }
             capturedListening := KeybindGUI.isListening
         } finally {
             ProfileManager.profiles := originalProfiles
@@ -1189,6 +1200,7 @@ class KeybindGUITest {
         }
 
         Assert.True(threw)
+        Assert.True(InStr(caughtMessage, "simulated modifier hook restart failure") > 0, caughtMessage)
         Assert.False(capturedListening)
         Assert.True(prompt.destroyed)
         Assert.Equal(2, editor.startCalls)
@@ -1223,9 +1235,11 @@ class KeybindGUITest {
         ))
 
         threw := false
+        caughtMessage := ""
         try this.gui.OnInputEnd("Sign Report", KeybindGUI.listeningControl, prompt, hook)
-        catch {
+        catch Any as err {
             threw := true
+            caughtMessage := ErrorText.Message(err)
         }
 
         capturedBind := profile.binds["Sign Report"]
@@ -1244,6 +1258,7 @@ class KeybindGUITest {
         ProfileManager.currentProfile := originalCurrent
 
         Assert.True(threw)
+        Assert.True(InStr(caughtMessage, "simulated ListView failure") > 0, caughtMessage)
         Assert.Equal("^s", capturedBind)
         Assert.False(capturedListening)
         Assert.Equal(0, capturedActiveHook)

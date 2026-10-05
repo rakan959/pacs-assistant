@@ -27,13 +27,17 @@ class PACSCommandsTest {
             "Paste Wet Read",
             "Toggle PowerScribe Window",
             "Toggle EPIC Window",
+            "Next Series",
+            "Previous Series",
             "Set PowerScribe Microphone"
         ]
-        
+
         for name in required {
             Assert.True(PACSCommands.commands.Has(name), "Missing command: " name)
-            Assert.True(IsObject(PACSCommands.commands[name]), "Command not callable: " name)
+            Assert.True(HasMethod(PACSCommands.commands[name], "Call"), "Command not callable: " name)
         }
+        ; Profiles persist these names, so an unlisted addition must be deliberate.
+        Assert.Equal(required.Length, PACSCommands.commands.Count)
     }
     
     TestCreateCustomKeybindStoresConfig() {

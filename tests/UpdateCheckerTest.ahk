@@ -400,8 +400,14 @@ class UpdateCheckerTest {
     TestSettingsChangeRestartsTimer() {
         SetTestSetting("AutoUpdate", true)
         UpdateChecker.StartAutoCheck()
+        previousTimer := UpdateChecker.updateTimer
         UpdateChecker.OnSettingsChanged()
-        Assert.True(UpdateChecker.updateTimer != 0)
+        Assert.True(IsObject(UpdateChecker.updateTimer), "Auto-update must keep a timer armed")
+        Assert.False(UpdateChecker.updateTimer == previousTimer, "A settings change must re-arm the timer")
+
+        SetTestSetting("AutoUpdate", false)
+        UpdateChecker.OnSettingsChanged()
+        Assert.Equal(0, UpdateChecker.updateTimer)
     }
 
     TestAutomaticCheckUsesAsyncTransport() {
@@ -546,7 +552,7 @@ class UpdateCheckerTest {
 
         operation.Cancel()
 
-        Assert.Equal(0, operation.request)
+        Assert.Equal("closed", operation.state)
         Assert.Equal(0, operation.onComplete)
         Assert.Equal(0, operation.onError)
     }
@@ -808,8 +814,8 @@ class CountingDownloadTransport {
     }
 }
 
-UpdateReleaseJson(version, prerelease := false) {
-    return '{"tag_name":"' version '","prerelease":' (prerelease ? 'true' : 'false')
+UpdateReleaseJson(version) {
+    return '{"tag_name":"' version '","prerelease":false'
         . ',"body":"Release notes","assets":['
         . '{"name":"pacs-assistant.exe","size":1550000,'
         . '"digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",'

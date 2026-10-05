@@ -56,21 +56,20 @@ class WetReadTest {
     ]
 
     ClipboardPasteModeIsRejectedWithoutMutation() {
-        driver := FakeWetReadDriver("existing note", "original clipboard")
+        driver := FakeWetReadDriver("existing note")
 
         result := WetReadPasteEngine.Paste(1, "new wet read", "send", driver)
 
         Assert.False(result.success)
         Assert.Equal("invalid-mode", result.reason)
         Assert.Equal("existing note", driver.fieldValue)
-        Assert.Equal("original clipboard", driver.clipboardValue)
         Assert.Equal(0, driver.readCalls)
         Assert.Equal(0, driver.uiaCalls)
         Assert.Equal(0, driver.controlCalls)
     }
 
     UnsupportedUIADoesNotClearTheNote() {
-        driver := FakeWetReadDriver("existing note", "original clipboard")
+        driver := FakeWetReadDriver("existing note")
         driver.uiaSupported := false
 
         result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
@@ -104,7 +103,7 @@ class WetReadTest {
     }
 
     FailedUIAVerificationDoesNotOverwriteChangedValue() {
-        driver := FakeWetReadDriver("existing note", "original clipboard")
+        driver := FakeWetReadDriver("existing note")
         driver.failedText := "new wet read"
 
         result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
@@ -117,7 +116,7 @@ class WetReadTest {
     }
 
     UIAFailureDoesNotRetryWhenCapabilityChanges() {
-        driver := FakeWetReadDriver("existing note", "original clipboard")
+        driver := FakeWetReadDriver("existing note")
         driver.failedText := "new wet read"
         driver.uiaSupportedCalls := 1
 
@@ -131,7 +130,7 @@ class WetReadTest {
     }
 
     FailedControlVerificationDoesNotOverwriteChangedValue() {
-        driver := FakeWetReadDriver("existing note", "original clipboard")
+        driver := FakeWetReadDriver("existing note")
         driver.failedText := "new wet read"
 
         result := WetReadPasteEngine.Paste(1, "new wet read", "control", driver)
@@ -144,7 +143,7 @@ class WetReadTest {
     }
 
     UnsupportedControlDoesNotAttemptRollback() {
-        driver := FakeWetReadDriver("existing note", "original clipboard")
+        driver := FakeWetReadDriver("existing note")
         driver.controlSupported := false
 
         result := WetReadPasteEngine.Paste(1, "new wet read", "control", driver)
@@ -172,7 +171,7 @@ class WetReadTest {
     }
 
     ConcurrentEditAfterWritePreventsRetryAndRollback() {
-        driver := FakeWetReadDriver("existing note", "original clipboard")
+        driver := FakeWetReadDriver("existing note")
         driver.concurrentValueAfterWait := "user's newer note"
 
         result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
@@ -186,7 +185,7 @@ class WetReadTest {
     }
 
     UnreadableNoteDoesNotAttemptPaste() {
-        driver := FakeWetReadDriver("existing note", "original clipboard")
+        driver := FakeWetReadDriver("existing note")
         driver.throwOnRead := true
 
         result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
@@ -670,10 +669,6 @@ class WetReadTest {
 }
 
 class FakeEarlyWetReadExit {
-    static Return(stage) {
-        return stage
-    }
-
     static Throw(message) {
         throw Error(message)
     }
@@ -684,9 +679,8 @@ RecordWetReadNotification(notifications, text, title, options) {
 }
 
 class FakeWetReadDriver {
-    __New(fieldValue, clipboardValue) {
+    __New(fieldValue) {
         this.fieldValue := fieldValue
-        this.clipboardValue := clipboardValue
         this.readCalls := 0
         this.failedText := ""
         this.uiaSupported := true
@@ -733,7 +727,7 @@ class FakeWetReadDriver {
 
 class PreconditionChangingWetReadDriver extends FakeWetReadDriver {
     __New(firstValue, secondValue) {
-        super.__New(firstValue, "")
+        super.__New(firstValue)
         this.firstValue := firstValue
         this.secondValue := secondValue
     }

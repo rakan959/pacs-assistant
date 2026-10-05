@@ -551,14 +551,6 @@ class FakeMicrophoneRoot {
         }
         return []
     }
-
-    ElementExist(*) {
-        return this.combos.Length ? this.combos[1] : 0
-    }
-
-    ElementFromPath(*) {
-        return this.combos.Length ? this.combos[1] : 0
-    }
 }
 
 class FakeMicrophoneCombo {
@@ -598,11 +590,6 @@ class FakeMicrophoneCombo {
 
     FindElements(*) {
         return this.items.Clone()
-    }
-
-    Click(*) {
-        this.ExpandCollapsePattern.Expand()
-        return "Expand"
     }
 }
 
