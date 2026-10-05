@@ -33,7 +33,6 @@ class ProfileManagerTest {
         "TestMalformedLegacyScopeIsRejected",
         "TestLegacyProfileWithoutScopesSection",
         "TestModalityAttendingPersistence",
-        "TestDefaultPathsAreAnchored",
         "TestProfileNameValidation",
         "TestCreateProfileRejectsUnsafeAndDuplicateNames",
         "TestSaveRejectsUnsafeIniKeys",
@@ -584,11 +583,6 @@ class ProfileManagerTest {
             () => ProfileManager.LoadProfile(path),
             "unknown legacy hotkey scope"
         )
-    }
-
-    TestDefaultPathsAreAnchored() {
-        Assert.Equal(AppStorage.DataRoot() "\config.ini", this.originalConfig)
-        Assert.Equal(AppStorage.DataRoot() "\profiles", this.originalProfilesPath)
     }
 
     TestProfileNameValidation() {

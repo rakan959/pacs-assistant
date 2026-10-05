@@ -13,7 +13,6 @@
 class UpdateCheckerTest {
     static tests := [
         "TestVersionParsing",
-        "TestVersionComparison",
         "TestVersionPrecedenceTable",
         "TestVersionEquivalence",
         "TestAutoCheckTimerRespectsSettings",
@@ -118,34 +117,14 @@ class UpdateCheckerTest {
         Assert.Equal("beta.4", v3.prerelease)
     }
 
-    TestVersionComparison() {
-        Assert.Equal(-1, UpdateChecker.CompareVersions("v1.9", "v2.0"))
-        Assert.Equal(1, UpdateChecker.CompareVersions("v2.1", "v2.0"))
-        Assert.Equal(0, UpdateChecker.CompareVersions("v2.0", "v2.0"))
-
-        Assert.Equal(-1, UpdateChecker.CompareVersions("v2.0b1", "v2.0b2"))
-        Assert.Equal(-1, UpdateChecker.CompareVersions("v2.0b", "v2.0"))
-        Assert.Equal(1, UpdateChecker.CompareVersions("v2.0", "v2.0b"))
-
-        ; Patch releases used to compare equal, so nobody was ever offered one
-        Assert.Equal(-1, UpdateChecker.CompareVersions("v2.0.1", "v2.0.2"))
-        Assert.Equal(1, UpdateChecker.CompareVersions("v2.0.9", "v2.0.1"))
-
-        ; SemVer prereleases
-        Assert.Equal(-1, UpdateChecker.CompareVersions("v2.1.0-beta.1", "v2.1.0"))
-        Assert.Equal(-1, UpdateChecker.CompareVersions("v2.1.0-beta.2", "v2.1.0-beta.10"))
-
-        ; An install on the old scheme must see the first SemVer release as an update
-        Assert.Equal(-1, UpdateChecker.CompareVersions("v2.0b7", "v2.1.0"))
-    }
-
     ; Each pair is {older, newer} and is asserted in both directions
     TestVersionPrecedenceTable() {
         ordered := [
             ["v1.9.0", "v2.0.0"],
             ["v2.0.0", "v2.1.0"],
-            ; Patch releases. The previous parser read only major and minor, so these
-            ; compared equal and a patch update was never offered to anyone.
+            ["v1.9", "v2.0"],
+            ["v2.0", "v2.1"],
+            ; Patch releases are distinct versions, compared numerically.
             ["v2.0.1", "v2.0.2"],
             ["v2.0.1", "v2.0.9"],
             ["v2.0.9", "v2.0.10"],
@@ -163,8 +142,10 @@ class UpdateCheckerTest {
             ["v2.1.0-1", "v2.1.0-alpha"],
             ; Legacy tags order among themselves
             ["v2.0b4", "v2.0b7"],
+            ["v2.0b1", "v2.0b2"],
             ["v2.0b9", "v2.0b10"],
             ["v2.0b", "v2.0b1"],
+            ["v2.0b", "v2.0"],
             ["v2.0b7", "v2.0"],
             ["v1.0", "v2.0b1"],
             ; ... and against the SemVer tags replacing them, so an install on the old

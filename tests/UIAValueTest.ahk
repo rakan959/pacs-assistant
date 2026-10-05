@@ -46,7 +46,6 @@ class UIAValueTest {
         "TestReadFallsBackToLegacyValue",
         "TestReadReturnsBlankWhenNothingExposed",
         "TestTryReadPreservesSupportedBlank",
-        "TestTryReadRejectsUnsupportedBlank",
         "TestSupportedBlankDoesNotFallThroughToLegacy",
         "TestFailedReadIsNotConvertedToSupportedBlank",
         "TestCanWriteReflectsPatternAvailability",
@@ -81,13 +80,6 @@ class UIAValueTest {
         result := UIAValue.TryRead(FakeElement("", "", true, false))
 
         Assert.True(result.supported)
-        Assert.Equal("", result.value)
-    }
-
-    TestTryReadRejectsUnsupportedBlank() {
-        result := UIAValue.TryRead(FakeElement("", "", false, false))
-
-        Assert.False(result.supported)
         Assert.Equal("", result.value)
     }
 

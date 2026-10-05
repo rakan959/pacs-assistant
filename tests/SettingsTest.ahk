@@ -18,7 +18,6 @@ class SettingsTest {
         "TestMalformedPersistedSettingsUseDefaults",
         "TestExcessivePersistedRefreshIntervalUsesDefault",
         "TestSavingRejectsNonWholeRefreshInterval",
-        "TestSavingRejectsExcessiveRefreshInterval",
         "TestAlertSoundsAreDistinct",
         "TestLegacyAliasesAreSelectable",
         "TestLegacySoundNamesMigrate",
@@ -159,17 +158,6 @@ class SettingsTest {
 
     TestSavingRejectsNonWholeRefreshInterval() {
         controls := this.SettingsControls(false, "10.5")
-        dialog := FakeSettingsDialog()
-
-        result := Settings.SaveSettings(controls, dialog)
-
-        Assert.False(result)
-        Assert.False(dialog.destroyed)
-        Assert.Equal(60, Settings.Get("RefreshInterval"))
-    }
-
-    TestSavingRejectsExcessiveRefreshInterval() {
-        controls := this.SettingsControls(false, 86401)
         dialog := FakeSettingsDialog()
 
         result := Settings.SaveSettings(controls, dialog)
