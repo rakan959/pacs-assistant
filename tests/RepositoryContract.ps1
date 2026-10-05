@@ -630,6 +630,9 @@ if (-not (Test-Path -LiteralPath $releaseValidatorPath -PathType Leaf)) {
                     $expectedDraft = $true
                 }
                 'wrong-prerelease' { $release.prerelease = $true }
+                # Each compares equal to $false in PowerShell, but is not a JSON boolean.
+                'string-draft' { $release.draft = 'false' }
+                'zero-prerelease' { $release.prerelease = 0 }
                 'wrong-tag' { $release.tag_name = 'v9.9.9' }
                 'wrong-name' { $release.name = 'Unexpected title' }
                 'wrong-commit' { $actualCommit = 'ffffffffffffffffffffffffffffffffffffffff' }
@@ -678,6 +681,8 @@ if (-not (Test-Path -LiteralPath $releaseValidatorPath -PathType Leaf)) {
     $expectedRejections = [ordered]@{
         'draft' = 'must be published'
         'wrong-prerelease' = 'wrong prerelease classification'
+        'string-draft' = 'must be published'
+        'zero-prerelease' = 'wrong prerelease classification'
         'wrong-tag' = 'does not exactly match'
         'wrong-name' = 'exact title'
         'wrong-commit' = 'not workflow commit'
