@@ -5,6 +5,7 @@
 
 #Requires AutoHotkey v2.0
 
+#Include ExclusiveOperations.ahk
 #Include HotkeyManager.ahk
 #Include ProfileManager.ahk
 #Include PACSCommands.ahk
@@ -18,26 +19,9 @@ class KeybindGUI {
     static listeningControl := ""
     static activeInputHook := 0
     static captureRuntimeProfile := 0
-    static captureTransactionActive := false
     static captureOwnerGui := 0
     static profileMutationRevisions := Map()
-    static profileMutationTransactionActive := false
-    static profileMutationTransactionAction := ""
-    static shutdownTransactionActive := false
     static shutdownAuthorized := false
-    static shutdownAction := ""
-    static uiPresentationTransactionActive := false
-    static uiPresentationTransactionAction := ""
-    ; Mutually exclusive app-wide operations, in user-facing priority order. See
-    ; ActiveExclusiveOperation.
-    static exclusiveOperationKinds := [
-        "clinical",
-        "capture",
-        "profileMutation",
-        "settingsWrite",
-        "uiPresentation",
-        "shutdown"
-    ]
     ; The V option would pass the selected key through to the foreground application.
     ; Capture is intentionally suppressing: the key is configuration data only.
     static inputHookOptions := ""
@@ -154,16 +138,8 @@ class KeybindGUI {
         if !this.ProfileMutationAllowed(action)
             return false
 
-        acquired := false
-        Critical("On")
-        try {
-            if (KeybindGUI.ActiveExclusiveOperation() = "") {
-                KeybindGUI.shutdownTransactionActive := true
-                KeybindGUI.shutdownAction := action
-                acquired := true
-            }
-        } finally Critical("Off")
-        if !acquired {
+        if !ExclusiveOperations.TryBegin("shutdown", action) {
+            ; Another operation won the race since the check above; report it.
             this.ProfileMutationAllowed(action)
             return false
         }
@@ -184,13 +160,12 @@ class KeybindGUI {
         Critical("On")
         try {
             KeybindGUI.shutdownAuthorized := false
-            KeybindGUI.shutdownAction := ""
-            KeybindGUI.shutdownTransactionActive := false
+            ExclusiveOperations.End("shutdown")
         } finally Critical("Off")
     }
 
     CompleteShutdown(exitCode := 0) {
-        if !KeybindGUI.shutdownTransactionActive
+        if !ExclusiveOperations.shutdownActive
             return false
         KeybindGUI.shutdownAuthorized := true
         ExitApp(exitCode)
@@ -283,7 +258,7 @@ class KeybindGUI {
         ; identity gate is the data-integrity backstop for queued callbacks or any
         ; dialog that outlives a profile switch.
         message := "The active profile changed while this dialog was open. Reopen it before saving changes."
-        if KeybindGUI.captureTransactionActive
+        if ExclusiveOperations.captureActive
             return this.AbortStaleCapture(dialog, message, "Profile Changed")
         this.StopListening()
         try dialog.Destroy()
@@ -363,7 +338,7 @@ class KeybindGUI {
         if valid
             return true
 
-        if KeybindGUI.captureTransactionActive {
+        if ExclusiveOperations.captureActive {
             return this.AbortStaleCapture(
                 dialog,
                 "The selected function changed while this dialog was open. Reopen it before applying changes.",
@@ -1272,8 +1247,8 @@ class KeybindGUI {
 
     ApplyBinds(showErrors := true) {
         ownsTransaction := false
-        if (!KeybindGUI.captureTransactionActive
-            && !KeybindGUI.profileMutationTransactionActive) {
+        if (!ExclusiveOperations.captureActive
+            && !ExclusiveOperations.profileMutationActive) {
             if !this.BeginProfileMutationTransaction("apply profile keybinds")
                 return false
             ownsTransaction := true
@@ -1359,7 +1334,7 @@ class KeybindGUI {
     }
 
     ProfileMutationAllowed(action, allowDuringShutdown := false) {
-        active := KeybindGUI.ActiveExclusiveOperation(KeybindGUI.ShutdownExemption(allowDuringShutdown)*)
+        active := ExclusiveOperations.Active(ExclusiveOperations.ShutdownExemption(allowDuringShutdown)*)
         switch active, true {
             case "":
                 return true
@@ -1371,7 +1346,7 @@ class KeybindGUI {
                 title := "Keybind In Progress"
             case "profileMutation":
                 message := "Wait for the current profile operation ('"
-                    . KeybindGUI.profileMutationTransactionAction
+                    . ExclusiveOperations.profileMutationAction
                     . "') to finish before you " action "."
                 title := "Profile Operation In Progress"
             case "settingsWrite":
@@ -1379,11 +1354,11 @@ class KeybindGUI {
                 title := "Settings Operation In Progress"
             case "uiPresentation":
                 message := "Wait for the current dialog operation ('"
-                    . KeybindGUI.uiPresentationTransactionAction
+                    . ExclusiveOperations.uiPresentationAction
                     . "') to finish before you " action "."
                 title := "Dialog Operation In Progress"
             case "shutdown":
-                message := "PACS Assistant is preparing to " KeybindGUI.shutdownAction
+                message := "PACS Assistant is preparing to " ExclusiveOperations.shutdownAction
                     . ". Wait for that operation to finish before you " action "."
                 title := "Shutdown In Progress"
         }
@@ -1391,85 +1366,26 @@ class KeybindGUI {
         return false
     }
 
-    /**
-     * The first active app-wide exclusive operation, or "" when none is active.
-     * Clinical automation, key capture, profile mutation, settings writes, dialog
-     * presentation and shutdown are mutually exclusive; every acquisition and the
-     * composition-root guards in main.ahk check them through this one list, in the
-     * order ProfileMutationAllowed explains them to the user.
-     * @param ignoredKinds Kinds the caller tracks itself, such as its own lease
-     * @returns One of exclusiveOperationKinds, or ""
-     */
-    static ActiveExclusiveOperation(ignoredKinds*) {
-        for kind in KeybindGUI.exclusiveOperationKinds {
-            ignored := false
-            for ignoredKind in ignoredKinds {
-                if (ignoredKind == kind) {
-                    ignored := true
-                    break
-                }
-            }
-            if (!ignored && KeybindGUI.ExclusiveOperationIsActive(kind))
-                return kind
-        }
-        return ""
-    }
-
-    static ExclusiveOperationIsActive(kind) {
-        switch kind, true {
-            case "clinical": return PACSCommands.clinicalCommandActive
-            case "capture": return KeybindGUI.captureTransactionActive
-            case "profileMutation": return KeybindGUI.profileMutationTransactionActive
-            case "settingsWrite": return Settings.writeTransactionActive
-            case "uiPresentation": return KeybindGUI.uiPresentationTransactionActive
-            case "shutdown": return KeybindGUI.shutdownTransactionActive
-        }
-        throw ValueError("Unknown exclusive operation kind: " kind)
-    }
-
-    ; Profile saves during shutdown resolve dirty state on the way out, so the
-    ; shutdown lease is the one exclusion they may ignore.
-    static ShutdownExemption(allowDuringShutdown) {
-        return allowDuringShutdown ? ["shutdown"] : []
-    }
-
     BeginProfileMutationTransaction(action, allowDuringShutdown := false) {
         if !this.ProfileMutationAllowed(action, allowDuringShutdown)
             return false
-        acquired := false
-        Critical("On")
-        try {
-            if (KeybindGUI.ActiveExclusiveOperation(KeybindGUI.ShutdownExemption(allowDuringShutdown)*) = "") {
-                KeybindGUI.profileMutationTransactionActive := true
-                KeybindGUI.profileMutationTransactionAction := action
-                acquired := true
-            }
-        } finally Critical("Off")
-        if !acquired
-            this.ProfileMutationAllowed(action, allowDuringShutdown)
-        return acquired
+        exemption := ExclusiveOperations.ShutdownExemption(allowDuringShutdown)
+        if ExclusiveOperations.TryBegin("profileMutation", action, exemption*)
+            return true
+        ; Another operation won the race since the check above; report it.
+        this.ProfileMutationAllowed(action, allowDuringShutdown)
+        return false
     }
 
     EndProfileMutationTransaction() {
-        Critical("On")
-        try {
-            KeybindGUI.profileMutationTransactionAction := ""
-            KeybindGUI.profileMutationTransactionActive := false
-        } finally Critical("Off")
+        ExclusiveOperations.End("profileMutation")
     }
 
     BeginCaptureTransaction(action := "start key capture") {
         if !this.ProfileMutationAllowed(action)
             return false
-        acquired := false
-        Critical("On")
-        try {
-            if (KeybindGUI.ActiveExclusiveOperation() = "") {
-                KeybindGUI.captureTransactionActive := true
-                acquired := true
-            }
-        } finally Critical("Off")
-        if !acquired {
+        if !ExclusiveOperations.TryBegin("capture", action) {
+            ; Another operation won the race since the check above; report it.
             this.ProfileMutationAllowed(action)
             return false
         }
@@ -1492,28 +1408,7 @@ class KeybindGUI {
             KeybindGUI.captureOwnerGui := 0
             ; This is the terminal publication step: callbacks can enter only after
             ; the owner/UI/runtime/dirty state has already been finalized.
-            KeybindGUI.captureTransactionActive := false
-        } finally Critical("Off")
-    }
-
-    static TryBeginUiPresentation(action) {
-        acquired := false
-        Critical("On")
-        try {
-            if (KeybindGUI.ActiveExclusiveOperation() = "") {
-                KeybindGUI.uiPresentationTransactionActive := true
-                KeybindGUI.uiPresentationTransactionAction := action
-                acquired := true
-            }
-        } finally Critical("Off")
-        return acquired
-    }
-
-    static EndUiPresentation() {
-        Critical("On")
-        try {
-            KeybindGUI.uiPresentationTransactionAction := ""
-            KeybindGUI.uiPresentationTransactionActive := false
+            ExclusiveOperations.End("capture")
         } finally Critical("Off")
     }
 
@@ -2359,7 +2254,7 @@ class KeybindGUI {
         }
 
         if !this.BeginListening(funcName, listView, promptGui) {
-            if !KeybindGUI.captureTransactionActive
+            if !ExclusiveOperations.captureActive
                 try promptGui.Destroy()
             return false
         }

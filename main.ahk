@@ -3,6 +3,7 @@
 #Warn All, StdOut
 FileEncoding "UTF-8"
 
+#Include ExclusiveOperations.ahk
 #Include KeybindGUI.ahk
 #Include Settings.ahk
 #Include UpdateChecker.ahk
@@ -39,12 +40,12 @@ UpdateChecker.clinicalActivityProbe := (*) => PACSCommands.clinicalCommandActive
 ; Compose every cross-module lease before showing the main window or registering
 ; callbacks, so even the first user action observes the same serialization policy.
 ; Each guard ignores only the lease its own module tracks and reports separately.
-PACSCommands.commandAvailabilityProbe := (*) => KeybindGUI.ActiveExclusiveOperation("clinical") = ""
-Settings.mutationGuard := (*) => KeybindGUI.ActiveExclusiveOperation("settingsWrite") = ""
-Settings.dialogAcquire := ObjBindMethod(KeybindGUI, "TryBeginUiPresentation")
-Settings.dialogRelease := ObjBindMethod(KeybindGUI, "EndUiPresentation")
-UpdateChecker.dialogAcquire := ObjBindMethod(KeybindGUI, "TryBeginUiPresentation")
-UpdateChecker.dialogRelease := ObjBindMethod(KeybindGUI, "EndUiPresentation")
+PACSCommands.commandAvailabilityProbe := (*) => ExclusiveOperations.Active("clinical") = ""
+Settings.mutationGuard := (*) => ExclusiveOperations.Active("settingsWrite") = ""
+Settings.dialogAcquire := ObjBindMethod(ExclusiveOperations, "TryBegin", "uiPresentation")
+Settings.dialogRelease := ObjBindMethod(ExclusiveOperations, "End", "uiPresentation")
+UpdateChecker.dialogAcquire := ObjBindMethod(ExclusiveOperations, "TryBegin", "uiPresentation")
+UpdateChecker.dialogRelease := ObjBindMethod(ExclusiveOperations, "End", "uiPresentation")
 
 ; Initialize the GUI when the script starts
 kbGUI := KeybindGUI()

@@ -6,6 +6,7 @@
 #Requires AutoHotkey v2.0
 #Include ../KeybindGUI.ahk
 #Include TestRunner.ahk
+#Include ExclusiveOperationsFixture.ahk
 
 class KeybindGUITest {
     static tests := [
@@ -75,8 +76,6 @@ class KeybindGUITest {
         "TestProfileSelectorCloseCannotInterruptDefaultProfileTransaction",
         "TestProfileCreationCloseCannotInterruptStorageTransaction",
         "TestDestroyedNewProfileDialogCannotDispatchQueuedActions",
-        "TestExclusiveOperationClassifierReportsTheFirstActiveKind",
-        "TestUiPresentationLeaseBlocksClinicalEntry",
         "TestDestroyedProfileSelectorCannotDispatchQueuedActions",
         "TestProfileDeletionOwnsSelectorAcrossConfirmation"
     ]
@@ -85,40 +84,17 @@ class KeybindGUITest {
         ; Build an instance without running the constructor, which would check GitHub
         ; for updates and load profiles
         this.gui := {base: KeybindGUI.Prototype, gui: ""}
+        this.originalLeases := ExclusiveOperationsFixture.ReleaseAll()
         this.originalCaptureRuntimeProfile := KeybindGUI.captureRuntimeProfile
-        this.originalCaptureTransactionActive := KeybindGUI.captureTransactionActive
         this.originalCaptureOwnerGui := KeybindGUI.captureOwnerGui
         this.originalProfileMutationRevisions := KeybindGUI.profileMutationRevisions
-        this.originalProfileMutationTransactionActive := KeybindGUI.profileMutationTransactionActive
-        this.originalProfileMutationTransactionAction := KeybindGUI.profileMutationTransactionAction
-        this.originalShutdownTransactionActive := KeybindGUI.shutdownTransactionActive
         this.originalShutdownAuthorized := KeybindGUI.shutdownAuthorized
-        this.originalShutdownAction := KeybindGUI.shutdownAction
-        this.originalUiPresentationTransactionActive := KeybindGUI.HasOwnProp("uiPresentationTransactionActive")
-            ? KeybindGUI.uiPresentationTransactionActive
-            : false
-        this.originalUiPresentationTransactionAction := KeybindGUI.HasOwnProp("uiPresentationTransactionAction")
-            ? KeybindGUI.uiPresentationTransactionAction
-            : ""
-        this.originalClinicalCommandActive := PACSCommands.clinicalCommandActive
-        this.originalActiveClinicalCommand := PACSCommands.activeClinicalCommand
         this.originalCommandAvailabilityProbe := PACSCommands.commandAvailabilityProbe
-        this.originalSettingsWriteTransactionActive := Settings.writeTransactionActive
         KeybindGUI.captureRuntimeProfile := 0
-        KeybindGUI.captureTransactionActive := false
         KeybindGUI.captureOwnerGui := 0
         KeybindGUI.profileMutationRevisions := Map()
-        KeybindGUI.profileMutationTransactionActive := false
-        KeybindGUI.profileMutationTransactionAction := ""
-        KeybindGUI.shutdownTransactionActive := false
         KeybindGUI.shutdownAuthorized := false
-        KeybindGUI.shutdownAction := ""
-        KeybindGUI.uiPresentationTransactionActive := false
-        KeybindGUI.uiPresentationTransactionAction := ""
-        PACSCommands.clinicalCommandActive := false
-        PACSCommands.activeClinicalCommand := ""
         PACSCommands.commandAvailabilityProbe := (*) => true
-        Settings.writeTransactionActive := false
 
         ; Tests replace the loaded profiles and the listening state freely; Teardown
         ; restores them even when a test fails partway through.
@@ -143,21 +119,12 @@ class KeybindGUITest {
     }
 
     Teardown() {
+        ExclusiveOperationsFixture.Restore(this.originalLeases)
         KeybindGUI.captureRuntimeProfile := this.originalCaptureRuntimeProfile
-        KeybindGUI.captureTransactionActive := this.originalCaptureTransactionActive
         KeybindGUI.captureOwnerGui := this.originalCaptureOwnerGui
         KeybindGUI.profileMutationRevisions := this.originalProfileMutationRevisions
-        KeybindGUI.profileMutationTransactionActive := this.originalProfileMutationTransactionActive
-        KeybindGUI.profileMutationTransactionAction := this.originalProfileMutationTransactionAction
-        KeybindGUI.shutdownTransactionActive := this.originalShutdownTransactionActive
         KeybindGUI.shutdownAuthorized := this.originalShutdownAuthorized
-        KeybindGUI.shutdownAction := this.originalShutdownAction
-        KeybindGUI.uiPresentationTransactionActive := this.originalUiPresentationTransactionActive
-        KeybindGUI.uiPresentationTransactionAction := this.originalUiPresentationTransactionAction
-        PACSCommands.clinicalCommandActive := this.originalClinicalCommandActive
-        PACSCommands.activeClinicalCommand := this.originalActiveClinicalCommand
         PACSCommands.commandAvailabilityProbe := this.originalCommandAvailabilityProbe
-        Settings.writeTransactionActive := this.originalSettingsWriteTransactionActive
         ProfileManager.profiles := this.originalProfiles
         ProfileManager.currentProfile := this.originalCurrentProfile
         ProfileManager.defaultProfile := this.originalDefaultProfile
@@ -383,7 +350,7 @@ class KeybindGUITest {
         Assert.True(prompt.destroyed)
         Assert.True(hook.stopped)
         Assert.Equal(1, editor.restoreCalls)
-        Assert.False(KeybindGUI.captureTransactionActive)
+        Assert.False(ExclusiveOperations.captureActive)
         Assert.False(owner.disabled)
     }
 
@@ -601,70 +568,6 @@ class KeybindGUITest {
         Assert.Equal(0, editor.exitCalls)
     }
 
-    TestExclusiveOperationClassifierReportsTheFirstActiveKind() {
-        flags := [
-            {kind: "clinical", owner: PACSCommands, name: "clinicalCommandActive"},
-            {kind: "capture", owner: KeybindGUI, name: "captureTransactionActive"},
-            {kind: "profileMutation", owner: KeybindGUI, name: "profileMutationTransactionActive"},
-            {kind: "settingsWrite", owner: Settings, name: "writeTransactionActive"},
-            {kind: "uiPresentation", owner: KeybindGUI, name: "uiPresentationTransactionActive"},
-            {kind: "shutdown", owner: KeybindGUI, name: "shutdownTransactionActive"}
-        ]
-        originals := []
-        for flag in flags
-            originals.Push(flag.owner.%flag.name%)
-        try {
-            for flag in flags
-                flag.owner.%flag.name% := false
-            Assert.Equal("", KeybindGUI.ActiveExclusiveOperation())
-
-            for flag in flags {
-                flag.owner.%flag.name% := true
-                Assert.Equal(flag.kind, KeybindGUI.ActiveExclusiveOperation())
-                Assert.Equal("", KeybindGUI.ActiveExclusiveOperation(flag.kind), "Ignoring the only active kind")
-                flag.owner.%flag.name% := false
-            }
-
-            ; With several active, the user hears about the highest-priority one,
-            ; and an ignored kind does not hide the next one.
-            PACSCommands.clinicalCommandActive := true
-            KeybindGUI.shutdownTransactionActive := true
-            Assert.Equal("clinical", KeybindGUI.ActiveExclusiveOperation())
-            Assert.Equal("shutdown", KeybindGUI.ActiveExclusiveOperation("clinical"))
-            Assert.Equal("", KeybindGUI.ActiveExclusiveOperation("clinical", "shutdown"))
-            Assert.Throws(ObjBindMethod(KeybindGUI, "ExclusiveOperationIsActive", "Clinical"), "Unknown exclusive operation kind")
-        } finally {
-            for index, flag in flags
-                flag.owner.%flag.name% := originals[index]
-        }
-    }
-
-    TestUiPresentationLeaseBlocksClinicalEntry() {
-        callbackCalls := 0
-        ; The same composition main.ahk uses for clinical entry.
-        PACSCommands.commandAvailabilityProbe := (*) =>
-            KeybindGUI.ActiveExclusiveOperation("clinical") = ""
-
-        try {
-            Assert.True(KeybindGUI.TryBeginUiPresentation("open Settings"))
-            blocked := PACSCommands.RunClinicalCommand(
-                "Sign Report",
-                (*) => callbackCalls++
-            )
-            Assert.False(blocked)
-            Assert.Equal(0, callbackCalls)
-
-            KeybindGUI.EndUiPresentation()
-            Assert.True(PACSCommands.RunClinicalCommand(
-                "Sign Report",
-                (*) => (callbackCalls++, true)
-            ))
-            Assert.Equal(1, callbackCalls)
-        } finally {
-            KeybindGUI.EndUiPresentation()
-        }
-    }
-
     TestDestroyedProfileSelectorCannotDispatchQueuedActions() {
         selector := ReentrantSelectorDialog()
         confirmation := CountingRejectConfirmationDriver()
@@ -760,15 +663,15 @@ class KeybindGUITest {
 
             PACSCommands.clinicalCommandActive := false
             PACSCommands.activeClinicalCommand := ""
-            KeybindGUI.captureTransactionActive := true
+            ExclusiveOperations.captureActive := true
             captureResult := editor.HandleProcessExit("Menu", 0)
 
-            KeybindGUI.captureTransactionActive := false
+            ExclusiveOperations.captureActive := false
             cleanResult := editor.HandleProcessExit("Menu", 0)
             authorized := KeybindGUI.shutdownAuthorized
         } finally {
             editor.CancelShutdown()
-            KeybindGUI.captureTransactionActive := false
+            ExclusiveOperations.captureActive := false
         }
 
         Assert.Equal(1, clinicalResult)
@@ -847,13 +750,13 @@ class KeybindGUITest {
 
             result := editor.BeginListening("Sign Report", listView, prompt)
 
-            captureActive := KeybindGUI.captureTransactionActive
+            captureActive := ExclusiveOperations.captureActive
             captureOwner := KeybindGUI.captureOwnerGui
             ownerDisabled := editor.gui.disabled
             runtimeStillTracked := HotkeyManager.activeHotkeys.Has("Sign Report")
         } finally {
             KeybindGUI.captureRuntimeProfile := 0
-            KeybindGUI.captureTransactionActive := false
+            ExclusiveOperations.captureActive := false
             KeybindGUI.captureOwnerGui := 0
             KeybindGUI.isListening := false
             KeybindGUI.activeInputHook := 0
@@ -964,12 +867,12 @@ class KeybindGUITest {
             KeybindGUI.listeningControl := {}
             KeybindGUI.activeInputHook := hook
             KeybindGUI.captureRuntimeProfile := ProfileManager.CloneProfile(profile)
-            KeybindGUI.captureTransactionActive := true
+            ExclusiveOperations.captureActive := true
 
             result := editor.CancelKeybindPrompt(prompt)
             hookRetained := KeybindGUI.activeInputHook = hook
             listeningRetained := KeybindGUI.isListening
-            transactionRetained := KeybindGUI.captureTransactionActive
+            transactionRetained := ExclusiveOperations.captureActive
         } finally {
             KeybindGUI.activeInputHook := 0
         }
@@ -1017,14 +920,14 @@ class KeybindGUITest {
 
             capturedHook := KeybindGUI.activeInputHook
             capturedListening := KeybindGUI.isListening
-            capturedTransaction := KeybindGUI.captureTransactionActive
+            capturedTransaction := ExclusiveOperations.captureActive
             capturedBind := profile.binds["Sign Report"]
         } finally {
             KeybindGUI.activeInputHook := 0
             KeybindGUI.isListening := false
             KeybindGUI.listeningControl := ""
             KeybindGUI.captureRuntimeProfile := 0
-            KeybindGUI.captureTransactionActive := false
+            ExclusiveOperations.captureActive := false
         }
 
         Assert.True(threw)
@@ -2278,7 +2181,7 @@ class KeybindGUITest {
             storedHasConcurrent := stored.modalityAttendings.Has("Concurrent")
             memoryValue := profile.modalityAttendings["Concurrent"]
             dirty := editor.IsProfileDirty("Test")
-            transactionReleased := !KeybindGUI.profileMutationTransactionActive
+            transactionReleased := !ExclusiveOperations.profileMutationActive
         } finally {
             try DirDelete(tempRoot, true)
         }
@@ -2301,10 +2204,10 @@ class KeybindGUITest {
         editor := {base: InterruptingProfileApplyGUI.Prototype}
         editor.callback := (*) => callbackCalls++
         PACSCommands.commandAvailabilityProbe := (*) =>
-            !KeybindGUI.profileMutationTransactionActive
-            && !KeybindGUI.captureTransactionActive
+            !ExclusiveOperations.profileMutationActive
+            && !ExclusiveOperations.captureActive
             && !Settings.writeTransactionActive
-            && !KeybindGUI.shutdownTransactionActive
+            && !ExclusiveOperations.shutdownActive
         PACSCommands.busyNotifier := (text, title, options) => notifications.Push(text)
 
         try {

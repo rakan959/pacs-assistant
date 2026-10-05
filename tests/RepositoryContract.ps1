@@ -68,6 +68,7 @@ $winHttpTextRequest = Get-Content -Raw (Join-Path $repoRoot 'WinHttpTextRequest.
 $updateNetworking = $updateChecker + $winHttpTransport + $winHttpTextRequest
 $appControl = Get-Content -Raw (Join-Path $repoRoot 'AppControl.ahk')
 $keybindGui = Get-Content -Raw (Join-Path $repoRoot 'KeybindGUI.ahk')
+$exclusiveOperations = Get-Content -Raw (Join-Path $repoRoot 'ExclusiveOperations.ahk')
 $guiSmoke = Get-Content -Raw (Join-Path $repoRoot 'tests/run-gui-smoke.ahk')
 $runTests = Get-Content -Raw (Join-Path $repoRoot 'tests/RunTests.ahk')
 $testRunner = Get-Content -Raw (Join-Path $repoRoot 'tests/TestRunner.ahk')
@@ -374,15 +375,15 @@ Assert-Matches $main '(?m)^#SingleInstance\s+Ignore\s*$' 'A second launch must n
 Assert-NotMatches $main '(?m)^#SingleInstance\s+Force\s*$' 'Force replacement bypasses shutdown and clinical transaction gates.'
 Assert-Matches $main 'OnExit\(\(exitReason, exitCode\) => kbGUI\.HandleProcessExit\(exitReason, exitCode\)\)' 'Tray and external exits must use the authoritative shutdown coordinator.'
 Assert-Matches $main 'UpdateChecker\.shutdownCoordinator\s*:=\s*kbGUI' 'Self-update must use the same shutdown coordinator as normal exit.'
-Assert-Matches $main 'PACSCommands\.commandAvailabilityProbe\s*:=\s*\(\*\)\s*=>\s*KeybindGUI\.ActiveExclusiveOperation\("clinical"\)\s*=\s*""' 'Clinical commands must be gated by every other exclusive operation through the shared classifier.'
-Assert-Matches $main 'Settings\.mutationGuard\s*:=\s*\(\*\)\s*=>\s*KeybindGUI\.ActiveExclusiveOperation\("settingsWrite"\)\s*=\s*""' 'Settings writes must be gated by every other exclusive operation through the shared classifier.'
-Assert-Matches $keybindGui '(?s)static exclusiveOperationKinds := \[\s*"clinical",\s*"capture",\s*"profileMutation",\s*"settingsWrite",\s*"uiPresentation",\s*"shutdown"\s*\]' 'The exclusive-operation classifier must cover clinical, capture, profile, settings, dialog presentation and shutdown leases.'
+Assert-Matches $main 'PACSCommands\.commandAvailabilityProbe\s*:=\s*\(\*\)\s*=>\s*ExclusiveOperations\.Active\("clinical"\)\s*=\s*""' 'Clinical commands must be gated by every other exclusive operation through the shared classifier.'
+Assert-Matches $main 'Settings\.mutationGuard\s*:=\s*\(\*\)\s*=>\s*ExclusiveOperations\.Active\("settingsWrite"\)\s*=\s*""' 'Settings writes must be gated by every other exclusive operation through the shared classifier.'
+Assert-Matches $exclusiveOperations '(?s)static kinds := \[\s*"clinical",\s*"capture",\s*"profileMutation",\s*"settingsWrite",\s*"uiPresentation",\s*"shutdown"\s*\]' 'The exclusive-operation classifier must cover clinical, capture, profile, settings, dialog presentation and shutdown leases.'
 Assert-NotMatches $guiSmoke '\{\s*base:\s*KeybindGUI\.Prototype' 'The GUI smoke test must construct a real KeybindGUI instance so instance-property initialization is exercised.'
 Assert-Matches $guiSmoke '(?s)ExitApp\(RunSmoke\(\)\).*?RunSmoke\(\)\s*\{.*?try\s+exitCode\s*:=\s*Main\(\).*?catch Any as err\s*\{.*?return exitCode' 'The GUI smoke test must convert fatal harness errors into a nonzero process exit.'
-Assert-Matches $main 'Settings\.dialogAcquire\s*:=\s*ObjBindMethod\(KeybindGUI,\s*"TryBeginUiPresentation"\)' 'Settings presentation must acquire the shared UI transaction.'
-Assert-Matches $main 'Settings\.dialogRelease\s*:=\s*ObjBindMethod\(KeybindGUI,\s*"EndUiPresentation"\)' 'Settings presentation must release the shared UI transaction.'
-Assert-Matches $main 'UpdateChecker\.dialogAcquire\s*:=\s*ObjBindMethod\(KeybindGUI,\s*"TryBeginUiPresentation"\)' 'Update presentation must acquire the shared UI transaction.'
-Assert-Matches $main 'UpdateChecker\.dialogRelease\s*:=\s*ObjBindMethod\(KeybindGUI,\s*"EndUiPresentation"\)' 'Update presentation must release the shared UI transaction.'
+Assert-Matches $main 'Settings\.dialogAcquire\s*:=\s*ObjBindMethod\(ExclusiveOperations,\s*"TryBegin",\s*"uiPresentation"\)' 'Settings presentation must acquire the shared UI transaction.'
+Assert-Matches $main 'Settings\.dialogRelease\s*:=\s*ObjBindMethod\(ExclusiveOperations,\s*"End",\s*"uiPresentation"\)' 'Settings presentation must release the shared UI transaction.'
+Assert-Matches $main 'UpdateChecker\.dialogAcquire\s*:=\s*ObjBindMethod\(ExclusiveOperations,\s*"TryBegin",\s*"uiPresentation"\)' 'Update presentation must acquire the shared UI transaction.'
+Assert-Matches $main 'UpdateChecker\.dialogRelease\s*:=\s*ObjBindMethod\(ExclusiveOperations,\s*"End",\s*"uiPresentation"\)' 'Update presentation must release the shared UI transaction.'
 Assert-Matches $updateChecker 'manualResultNotifier\s*:=\s*\(text, title, options\) => TrayTip' 'Asynchronous update results must use a nonactivating notification by default.'
 foreach ($subscriber in @('UpdateChecker', 'PACSMonitor', 'MicrophoneManager')) {
     Assert-Matches $main ("Settings\.AddChangeListener\(ObjBindMethod\(" + $subscriber) ("main.ahk must explicitly subscribe " + $subscriber + " to settings changes.")
