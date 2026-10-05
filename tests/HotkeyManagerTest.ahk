@@ -315,9 +315,11 @@ class HotkeyManagerTest {
         }
         HotkeyManager.activeHotkeys["ActionTwo"] := {hotkey: "^F24", scope: "Any"}
 
+        ; Each failed function is named with the native reason, which is all a
+        ; later diagnosis of a "restart required" notice has to go on.
         Assert.Throws(
             () => HotkeyManager.DisableAllHotkeys(),
-            "could not be disabled"
+            "These hotkeys could not be disabled: ActionOne (^F23: simulated native Off failure)"
         )
         Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
         Assert.False(HotkeyManager.activeHotkeys.Has("ActionTwo"))

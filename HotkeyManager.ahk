@@ -211,9 +211,11 @@ class HotkeyManager {
 
     ; Turn off a single registration, re-entering the context it was created in.
     ; Hotkey(name, "Off") only affects the variant of the *current* HotIf context, so
-    ; the scope has to be restored before the hotkey can be turned off.
-    static Unregister(funcName) {
+    ; the scope has to be restored before the hotkey can be turned off. On failure,
+    ; failureDetail lists each variant that stayed on with its reason.
+    static Unregister(funcName, &failureDetail := "") {
         this.lastError := ""
+        failureDetail := ""
         failures := []
 
         if this.activeHotkeys.Has(funcName) {
@@ -241,10 +243,9 @@ class HotkeyManager {
         }
 
         if failures.Length {
-            detail := ""
             for failure in failures
-                detail .= (detail = "" ? "" : "; ") failure
-            this.lastError := "the hotkey could not be disabled: " detail
+                failureDetail .= (failureDetail = "" ? "" : "; ") failure
+            this.lastError := "the hotkey could not be disabled: " failureDetail
             return false
         }
         return true
@@ -259,17 +260,13 @@ class HotkeyManager {
         for _, entry in this.additionalActiveHotkeys
             functionNames[entry.funcName] := true
 
-        failed := []
+        failed := ""
         for funcName, _ in functionNames {
-            if !this.Unregister(funcName)
-                failed.Push(funcName)
+            if !this.Unregister(funcName, &failureDetail)
+                failed .= (failed = "" ? "" : ", ") funcName " (" failureDetail ")"
         }
-        if failed.Length {
-            names := ""
-            for funcName in failed
-                names .= (names = "" ? "" : ", ") funcName
-            throw Error("These hotkeys could not be disabled: " names)
-        }
+        if (failed != "")
+            throw Error("These hotkeys could not be disabled: " failed)
         return true
     }
 }
