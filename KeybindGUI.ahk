@@ -882,8 +882,10 @@ class KeybindGUI {
             this.StopListening()
             promptGui.Destroy()
 
-            ; Reapply all binds
-            if !this.ApplyBinds() {
+            ; Reapply all binds. A key that cannot register is left out of an apply
+            ; (ApplyProfileBinds), so a new one must also be checked to be live.
+            if (!this.ApplyBinds()
+                || newBind != "" && !HotkeyManager.activeHotkeys.Has(funcName)) {
                 if hadBinding
                     currentProfile.binds[funcName] := oldBind
                 else
@@ -1269,16 +1271,18 @@ class KeybindGUI {
      * Registers every bind of a profile. On failure, failureText lists each bind that
      * failed with its reason, as "Name (reason); Name (reason)".
      *
-     * A bind for a command this version does not have (a renamed or retired
-     * built-in, or a hand-edited name) can never register. It stays in the profile
-     * but is left out of the runtime, and is reported when showErrors is set, so it
-     * cannot fail every later apply, restore and save.
+     * A bind that can never register (one for a command this version does not
+     * have, or one whose key AutoHotkey rejects, as after a hand edit or on another
+     * keyboard layout) stays in the profile but is left out of the runtime, and is
+     * reported when showErrors is set, so it cannot fail every later apply,
+     * restore and save. A newly captured key is checked separately (OnInputEnd).
      */
     ApplyProfileBinds(currentProfile, showErrors := true, &failureText := "") {
         failureText := ""
         HotkeyManager.DisableAllHotkeys()
         failed := []
         unavailable := ""
+        rejected := ""
 
         for funcName, bind in currentProfile.binds {
             if (!currentProfile.customFuncs.Has(funcName)
@@ -1297,22 +1301,29 @@ class KeybindGUI {
                     result := HotkeyManager.RegisterHotkey(funcName, bind, scope)
                 }
 
-                if !result {
+                if (!result && HotkeyManager.lastErrorKind == "invalidHotkey")
+                    rejected .= (rejected = "" ? "" : ", ") funcName " (" bind ")"
+                else if !result
                     failed.Push(funcName (HotkeyManager.lastError != "" ? " (" HotkeyManager.lastError ")" : ""))
-                }
             } catch as err {
                 failed.Push(funcName " (" err.Message ")")
             }
         }
 
-        if (showErrors && unavailable != "") {
-            AppLog.Write("Keybinds for commands this version does not have were not registered: " unavailable)
-            this.NotifyUser(
-                "These keybinds are for commands this version of PACS Assistant does not have, so they were not registered: "
-                    . unavailable ". Remove them from the profile.",
-                "Keybinds Not Registered",
-                "Icon!"
-            )
+        if (showErrors && (unavailable != "" || rejected != "")) {
+            reasons := []
+            if (unavailable != "")
+                reasons.Push("for commands this version of PACS Assistant does not have: " unavailable)
+            if (rejected != "")
+                reasons.Push("with keys AutoHotkey does not accept on this computer: " rejected)
+            details := ""
+            for reason in reasons
+                details .= (A_Index > 1 ? "; " : "") reason
+            AppLog.Write("Keybinds were not registered, " details)
+            notice := "These keybinds were not registered:"
+            for reason in reasons
+                notice .= "`n- " reason
+            this.NotifyUser(notice "`n`nReassign or remove them in the profile.", "Keybinds Not Registered", "Icon!")
         }
         if !failed.Length
             return true

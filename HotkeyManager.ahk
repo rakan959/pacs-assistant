@@ -21,6 +21,10 @@ class HotkeyManager {
     ; rather than a dialog, so KeybindGUI.ApplyProfileBinds can collect every failure
     ; and show one message instead of a dialog per bind.
     static lastError := ""
+    ; "invalidHotkey" when AutoHotkey rejected the hotkey text itself (a key name
+    ; this keyboard layout lacks, or malformed text). Such a bind can never
+    ; register, unlike a native failure that a retry might not repeat.
+    static lastErrorKind := ""
 
     ; One persistent predicate per scope. AutoHotkey identifies a hotkey *variant* by
     ; the exact function object handed to HotIf, so these are created once and reused:
@@ -91,6 +95,7 @@ class HotkeyManager {
 
     static Register(funcName, hotkeyStr, callback, scope := "Any") {
         this.lastError := ""
+        this.lastErrorKind := ""
 
         ; Skip registration if the hotkey is unassigned
         if (hotkeyStr = "") {
@@ -135,6 +140,8 @@ class HotkeyManager {
             )
         } catch as err {
             this.lastError := err.Message
+            if (err is ValueError)
+                this.lastErrorKind := "invalidHotkey"
             return false
         } finally {
             this.ExitScope()

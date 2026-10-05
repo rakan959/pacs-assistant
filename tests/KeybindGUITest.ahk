@@ -34,6 +34,7 @@ class KeybindGUITest {
         "TestTrayExitUsesTheSameClinicalAndCaptureGate",
         "TestCaptureThatNeedsARestartDoesNotBlockExit",
         "TestBindForAMissingCommandIsReportedNotFailed",
+        "TestBindAutoHotkeyRejectsIsReportedNotFailed",
         "TestStaleRealCaptureRestoresCurrentProfileNotSnapshot",
         "TestProfileBoundDialogRejectsSameNameReplacement",
         "TestCapturedBindPublishesDirtyStateBeforeReleasingOwner",
@@ -845,7 +846,7 @@ class KeybindGUITest {
         try {
             shownResult := editor.ApplyProfileBinds(profile, true)
             quietResult := editor.ApplyProfileBinds(profile, false)
-            logged := capturedLog.Count("were not registered: Retired Command")
+            logged := capturedLog.Count("does not have: Retired Command")
         } finally capturedLog.Restore()
 
         Assert.True(shownResult)
@@ -854,8 +855,50 @@ class KeybindGUITest {
         Assert.False(HotkeyManager.activeHotkeys.Has("Retired Command"))
         Assert.Equal(1, notifications.Length)
         Assert.Equal("Keybinds Not Registered", notifications[1].title)
-        Assert.True(InStr(notifications[1].message, "not registered: Retired Command. "), notifications[1].message)
+        Assert.True(InStr(notifications[1].message, "does not have: Retired Command`n"), notifications[1].message)
         Assert.Equal(1, logged)
+    }
+
+    ; A bind whose key AutoHotkey rejects (a hand edit, another keyboard layout) is
+    ; left out and reported the same way, and a capture of another function then
+    ; completes instead of keeping its lease.
+    TestBindAutoHotkeyRejectsIsReportedNotFailed() {
+        notifications := []
+        HotkeyManager.hotkeyFunctions := Map("Sign Report", (*) => 0, "Draft Report", (*) => 0)
+        HotkeyManager.hotkeyDriver.invalidKeys["^NoSuchKey"] := true
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        profile.binds["Draft Report"] := "^NoSuchKey"
+        profile.scopes["Draft Report"] := "Any"
+        this.gui.notificationDriver := ArrayNotificationDriver(notifications)
+
+        capturedLog := LogCapture()
+        try {
+            applied := this.gui.ApplyProfileBinds(profile, true)
+            logged := capturedLog.Count("does not accept on this computer: Draft Report (^NoSuchKey)")
+        } finally capturedLog.Restore()
+
+        Assert.True(applied)
+        Assert.True(HotkeyManager.activeHotkeys.Has("Sign Report"))
+        Assert.False(HotkeyManager.activeHotkeys.Has("Draft Report"))
+        Assert.Equal(1, notifications.Length)
+        Assert.True(InStr(notifications[1].message, "Draft Report (^NoSuchKey)"), notifications[1].message)
+        Assert.Equal(1, logged)
+
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
+        prompt := FakeProfileDialog("Test")
+        hook := FakeCaptureHook("F14", "^")
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        Assert.True(this.gui.CaptureFunctionDialogState(prompt, "Sign Report", listView, 1))
+        KeybindGUI.isListening := true
+        KeybindGUI.activeInputHook := hook
+
+        Assert.True(this.gui.OnInputEnd("Sign Report", listView, prompt, hook))
+        Assert.Equal("^F14", profile.binds["Sign Report"])
+        Assert.Equal("^F14", HotkeyManager.activeHotkeys["Sign Report"].hotkey)
+        Assert.False(ExclusiveOperations.captureActive)
     }
 
     TestTrayExitUsesTheSameClinicalAndCaptureGate() {
@@ -1264,7 +1307,7 @@ class KeybindGUITest {
         prompt := FakeProfileDialog()
         ; Stands in for AutoHotkey rejecting the key name; HotkeyManagerTest covers
         ; the native rejection itself.
-        HotkeyManager.hotkeyDriver.failEnableCounts["DefinitelyNotARealKeyName"] := 1
+        HotkeyManager.hotkeyDriver.invalidKeys["DefinitelyNotARealKeyName"] := true
 
         try {
             ProfileManager.profiles := Map("Test", profile)
@@ -2687,12 +2730,19 @@ class CaptureMutationGuardGUI extends KeybindGUI {
         return false
     }
 
-    ApplyProfileBinds(*) {
+    ApplyProfileBinds(profile, *) {
+        CaptureMutationGuardGUI.TrackRuntime(profile)
         return true
     }
 
     RestoreRuntimeProfile(profile, &failureText) {
         failureText := ""
+        CaptureMutationGuardGUI.TrackRuntime(profile)
+        return true
+    }
+
+    ; Records every assigned bind of the profile as live, as a successful apply would.
+    static TrackRuntime(profile) {
         HotkeyManager.activeHotkeys := Map()
         for funcName, bind in profile.binds {
             if (bind != "")
@@ -2703,7 +2753,6 @@ class CaptureMutationGuardGUI extends KeybindGUI {
                         : "Any"
                 }
         }
-        return true
     }
 
     NotifyUser(message, title, options := "") {
@@ -3093,9 +3142,13 @@ class TransactionalHotkeyDriver {
     __New() {
         this.failDisable := Map()
         this.failEnableCounts := Map()
+        ; Keys AutoHotkey rejects outright, as it does with ValueError.
+        this.invalidKeys := Map()
     }
 
     Enable(hotkeyStr, callback) {
+        if this.invalidKeys.Has(hotkeyStr)
+            throw ValueError("Invalid key name.", , hotkeyStr)
         if (this.failEnableCounts.Has(hotkeyStr)
             && this.failEnableCounts[hotkeyStr] > 0) {
             this.failEnableCounts[hotkeyStr]--
