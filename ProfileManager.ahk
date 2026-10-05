@@ -74,8 +74,8 @@ class ProfileManager {
         if DirExist(this.profilesPath) {
             this.RecoverInterruptedCaseRenames()
             loop files this.profilesPath "\*.ini" {
-                ; Remove only the enumerated extension. StrReplace removed embedded
-                ; occurrences too, so reading.ini.room.ini reloaded as reading.room.
+                ; Strip only the trailing ".ini": a profile name may itself contain
+                ; ".ini" (reading.ini.room.ini is profile "reading.ini.room").
                 profileName := SubStr(A_LoopFileName, 1, -4)
                 try {
                     this.profiles[profileName] := this.LoadProfile(A_LoopFilePath)

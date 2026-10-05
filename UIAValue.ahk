@@ -5,10 +5,9 @@
  * Safe access to a UIA element's value.
  *
  * Reading or writing `element.Value` goes through UIA-v2's ValuePattern accessor,
- * which throws when an element does not support the pattern. UIA-v2 v1.1.3 fixed
- * the destructor failure that originally made this unsafe (issue #32), but pattern
- * support is still a capability boundary rather than an exceptional application
- * failure. The Sticky Notes field, for example, does not support ValuePattern.
+ * which throws when an element does not support the pattern. Pattern support is a
+ * capability boundary rather than an application failure: the Sticky Notes field,
+ * for example, does not support ValuePattern.
  *
  * Reads therefore go through plain property lookups, and writes are gated on the
  * pattern actually being available. This also keeps the clinical adapter stable if
@@ -18,8 +17,8 @@ class UIAValue {
     /**
      * Reads an element's value without instantiating a pattern and reports whether
      * an empty value is supported or merely UIA's default for an absent pattern.
-     * Falls back to the legacy accessibility value, mirroring what UIA-v2's own
-     * Value getter tries, minus the unsafe pattern construction.
+     * Falls back to the legacy accessibility value. Unlike UIA-v2's Value getter it
+     * uses property lookups only and does not try RangeValuePattern.
      * @returns {supported, value}
      */
     static TryRead(element) {

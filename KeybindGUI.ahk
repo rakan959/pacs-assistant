@@ -37,10 +37,6 @@ class KeybindGUI {
     ]
 
     __New() {
-        ; The launch-time update check belongs to UpdateChecker.Start(), called from
-        ; main.ahk under the same AutoUpdate setting. Repeating it here meant a second
-        ; GitHub request every launch for a dialog that had already been offered.
-
         ProfileManager.LoadProfiles()
         if (ProfileManager.loadErrors.Length > 0)
             MsgBox(KeybindGUI.LoadErrorSummary(ProfileManager.loadErrors), "Profile Load Error", "Icon!")
@@ -823,8 +819,8 @@ class KeybindGUI {
 
     OnInputEnd(funcName, control, promptGui, ih) {
         ; Stop(), timeout, and replacement by another InputHook all raise OnEnd too.
-        ; Only a real end key is input to bind; treating a stopped hook's blank EndKey
-        ; as data silently unassigned the command while cancelling the dialog.
+        ; Only a real end key is input to bind: a stopped hook's EndKey is blank and
+        ; must not unassign the command.
         if (ih.EndReason != "EndKey")
             return false
 
@@ -953,10 +949,9 @@ class KeybindGUI {
     /**
      * Ends key capture and tears down the hook.
      *
-     * Stopping the hook is the important part. A hook left running after its dialog
-     * went away kept listening, so the next key pressed anywhere fired OnInputEnd and
-     * silently rebound whichever function had been open - binds "breaking" with no
-     * apparent cause.
+     * Stopping the hook is the important part: a hook left running after its dialog
+     * closes would capture the next key pressed anywhere and rebind whichever
+     * function had been open.
      */
     StopListening() {
         if KeybindGUI.activeInputHook {
@@ -1879,9 +1874,8 @@ class KeybindGUI {
         lbBuiltIn := selectorGui.Add("ListBox", "w200 h150", builtInFunctions)
 
         ; Custom functions get their own list when the profile has any. lbCustom stays
-        ; defined either way: the Add Selected handler reads it, and an unassigned
-        ; local raised an unset-variable error whenever a profile had no custom
-        ; functions and nothing was selected in the built-in list.
+        ; defined either way, because the Add Selected handler reads it even when
+        ; there is no custom list.
         lbCustom := ""
         if (customFunctions.Length > 0) {
             selectorGui.Add("Text", "xm y+10", "Custom Functions:")

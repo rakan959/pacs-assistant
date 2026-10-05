@@ -149,9 +149,8 @@ class HotkeyManager {
         try {
             this.EnterScope(scope)
             ; "On" is load-bearing. Hotkey() updates an existing variant's action but
-            ; leaves its enabled state alone, so a bind that DisableAllHotkeys turned
-            ; off stayed dead after being re-registered - which is how binds silently
-            ; stopped working after editing a keybind or switching profiles.
+            ; leaves its enabled state alone, so without it a bind that
+            ; DisableAllHotkeys turned off would stay off after re-registration.
             this.hotkeyDriver.Enable(
                 hotkeyStr,
                 this.CallbackForScope(callback, scope)

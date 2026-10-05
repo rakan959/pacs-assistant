@@ -7,9 +7,8 @@
  * .github/workflows/ahk2exe.yml. The value committed here is the placeholder used for
  * local and untagged builds.
  *
- * Do not hand-edit this to bump a release. The tag is the source of truth. Hand-syncing
- * a version constant to a tag is exactly what let the shipped build report v2.0b4 while
- * v2.0b7 was the published release.
+ * Do not hand-edit this to bump a release. The tag is the source of truth; a hand-synced
+ * constant can drift from it, and the build then reports the wrong version.
  */
 class AppVersion {
     ; Full version string, matching the git tag on a tagged build

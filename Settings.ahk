@@ -60,20 +60,16 @@ class Settings {
      * distinct file shipped in %WinDir%\Media.
      *
      * This is the only place a sound is declared: alertSounds and soundFiles are
-     * derived from it in __New. Keeping a name list and a name-to-file map by hand
-     * meant adding a sound to one and not the other silently dropped the option or
-     * broke it.
+     * derived from it in __New, so the dropdown and the file lookup cannot disagree.
      *
      * A blank file means the entry is not backed by one - "Default Beep" is a
      * synthesised tone, so it works even where the Media folder has been stripped,
      * and "Custom File" defers to the user's own file.
      *
-     * The previous implementation used SoundPlay's "*N" aliases (MessageBeep). Those
-     * do not name sounds, they name *sound scheme events*, and the stock Windows
-     * scheme points several events at one file - Asterisk, Exclamation and the
-     * default beep all resolve to Windows Background.wav, and Question resolves to
-     * nothing at all. Every option therefore played the same thing. Naming the files
-     * directly is what makes the choices audibly different.
+     * Sounds are named by file rather than by SoundPlay's "*N" aliases (MessageBeep).
+     * Those name sound-scheme events, and the stock Windows scheme points Asterisk,
+     * Exclamation and the default beep at one file (Windows Background.wav) and
+     * Question at none, so the choices would not sound different.
      */
     static soundCatalogue := [
         {name: "Default Beep", file: ""},
@@ -92,7 +88,7 @@ class Settings {
     static soundFiles := Map()
 
     ; Sound names written by versions <= v2.0b4, mapped onto their closest replacement
-    ; so an existing settings.ini keeps working (and finally sounds distinct).
+    ; so an existing settings.ini keeps working.
     static legacySoundAliases := Map(
         "Default",     "Default Beep",
         "Asterisk",    "Notification",
