@@ -53,15 +53,13 @@ class PACSMonitorTest {
     ]
 
     Setup() {
-        this.originalSettings := Settings.settingsFile
         this.originalNotifier := PACSMonitor.notifier
         this.originalApprovedRefreshIds := PACSMonitor.approvedRefreshAutomationIds
         this.originalAutomationAcquire := PACSMonitor.automationAcquire
         this.originalAutomationRelease := PACSMonitor.automationRelease
         this.originalDriver := PACSMonitor.driver
         this.originalTimerDriver := PACSMonitor.timerDriver
-        this.tempSettings := TestTempPath("pacs-monitor-settings", ".ini")
-        Settings.settingsFile := this.tempSettings
+        this.savedSettings := UseTestSettings("pacs-monitor-settings")
         Settings.SaveAllSettings()
 
         PACSMonitor.driver := CountingPortalResolutionDriver()
@@ -635,8 +633,7 @@ class PACSMonitorTest {
         PACSMonitor.scanFailureNotified := false
         PACSMonitor.refreshUnavailableNoted := false
         PACSMonitor.lastError := ""
-        try FileDelete(Settings.settingsFile)
-        Settings.settingsFile := this.originalSettings
+        RestoreTestSettings(this.savedSettings)
     }
 }
 

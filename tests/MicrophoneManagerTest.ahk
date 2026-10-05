@@ -43,15 +43,28 @@ class MicrophoneManagerTest {
         "AmbiguousNameReasonReachesBothNotices"
     ]
 
+    Setup() {
+        this.savedSettings := UseTestSettings("microphone-settings")
+        this.originalNotifier := MicrophoneManager.notifier
+        this.originalSessionDriver := MicrophoneManager.sessionDriver
+        this.originalAutomationAcquire := MicrophoneManager.automationAcquire
+        this.originalAutomationRelease := MicrophoneManager.automationRelease
+        this.notifications := []
+        MicrophoneManager.notifier := RecordNotification.Bind(this.notifications)
+        MicrophoneManager.attempts := 0
+        MicrophoneManager.failureNotified := false
+        MicrophoneManager.lastError := ""
+        MicrophoneManager.attemptedWindow := 0
+        MicrophoneManager.attemptedProcessId := 0
+    }
+
     MonitoringStartsOnlyWithSwapEnabledAndANamedMicrophone() {
-        originalSettingsFile := Settings.settingsFile
-        Settings.settingsFile := TestTempPath("microphone-monitoring", ".ini")
+        cases := [
+            {swap: false, name: "PowerMic", armed: false},
+            {swap: true, name: "   ", armed: false},
+            {swap: true, name: "PowerMic", armed: true}
+        ]
         try {
-            cases := [
-                {swap: false, name: "PowerMic", armed: false},
-                {swap: true, name: "   ", armed: false},
-                {swap: true, name: "PowerMic", armed: true}
-            ]
             for expected in cases {
                 Settings.SaveValues(Map("SwapMicrophoneOnLogin", expected.swap, "MicrophoneName", expected.name))
                 MicrophoneManager.StartMonitoring()
@@ -59,22 +72,15 @@ class MicrophoneManagerTest {
                 MicrophoneManager.StopMonitoring()
                 Assert.Equal(expected.armed, armed, "swap=" expected.swap " name='" expected.name "'")
             }
-        } finally {
-            MicrophoneManager.StopMonitoring()
-            if FileExist(Settings.settingsFile)
-                FileDelete(Settings.settingsFile)
-            Settings.settingsFile := originalSettingsFile
-        }
+        } finally MicrophoneManager.StopMonitoring()
     }
 
     ApplyNowSelectsTheConfiguredMicrophone() {
         fixture := MicrophoneFixture(["Internal Microphone", "PowerMic III"])
         MicrophoneManager.sessionDriver := fixture.driver
-        originalName := Settings.Get("MicrophoneName")
-        try {
-            SetTestSetting("MicrophoneName", "PowerMic III")
-            Assert.True(MicrophoneManager.ApplyNow())
-        } finally SetTestSetting("MicrophoneName", originalName)
+        SetTestSetting("MicrophoneName", "PowerMic III")
+
+        Assert.True(MicrophoneManager.ApplyNow())
 
         Assert.Equal(0, TestRunner.dialogs.Length)
         Assert.Equal(0, fixture.items[1].selectCalls)
@@ -86,12 +92,10 @@ class MicrophoneManagerTest {
     LoginCheckSelectsOnceAndStaysQuiet() {
         fixture := MicrophoneFixture(["PowerMic III"])
         MicrophoneManager.sessionDriver := fixture.driver
-        originalName := Settings.Get("MicrophoneName")
-        try {
-            SetTestSetting("MicrophoneName", "PowerMic III")
-            MicrophoneManager.CheckForLogin()
-            MicrophoneManager.CheckForLogin()
-        } finally SetTestSetting("MicrophoneName", originalName)
+        SetTestSetting("MicrophoneName", "PowerMic III")
+
+        MicrophoneManager.CheckForLogin()
+        MicrophoneManager.CheckForLogin()
 
         Assert.Equal(MicrophoneManager.maxAttempts, MicrophoneManager.attempts)
         Assert.Equal(1, fixture.items[1].selectCalls)
@@ -100,7 +104,6 @@ class MicrophoneManagerTest {
 
     ApplyNowNamesEachFailureAndKeepsTheResolutionError() {
         fixture := MicrophoneFixture([])
-        originalName := Settings.Get("MicrophoneName")
         capturedLog := LogCapture()
         try {
             SetTestSetting("MicrophoneName", "")
@@ -114,10 +117,7 @@ class MicrophoneManagerTest {
             ; Each dialog is also in error.log, the provider error included.
             loggedUnverified := capturedLog.Count("PowerScribe Not Verified: PowerScribe window identity could not be verified. simulated provider uncertainty")
             loggedTotal := capturedLog.Count("Not Running: ") + capturedLog.Count("Not Verified: ") + capturedLog.Count("Microphone Configured: ")
-        } finally {
-            capturedLog.Restore()
-            SetTestSetting("MicrophoneName", originalName)
-        }
+        } finally capturedLog.Restore()
         Assert.Equal(1, loggedUnverified)
         Assert.Equal(3, loggedTotal)
 
@@ -133,12 +133,9 @@ class MicrophoneManagerTest {
         fixture := MicrophoneFixture(["PowerMic III"])
         fixture.items[1].updatesComboOnSelect := false
         MicrophoneManager.sessionDriver := fixture.driver
-        originalName := Settings.Get("MicrophoneName")
-        try {
-            SetTestSetting("MicrophoneName", "PowerMic III")
-            Assert.False(MicrophoneManager.ApplyNow())
-        } finally SetTestSetting("MicrophoneName", originalName)
+        SetTestSetting("MicrophoneName", "PowerMic III")
 
+        Assert.False(MicrophoneManager.ApplyNow())
         Assert.Equal(1, fixture.items[1].selectCalls)
         Assert.Equal(
             "Could not select microphone 'PowerMic III': PowerScribe did not confirm the selection within 1 second.",
@@ -151,14 +148,12 @@ class MicrophoneManagerTest {
         empty := MicrophoneFixture([])
         disabled := MicrophoneFixture(["PowerMic III"])
         disabled.items[1].IsEnabled := false
-        originalName := Settings.Get("MicrophoneName")
-        try {
-            SetTestSetting("MicrophoneName", "PowerMic III")
-            MicrophoneManager.sessionDriver := empty.driver
-            Assert.False(MicrophoneManager.ApplyNow())
-            MicrophoneManager.sessionDriver := disabled.driver
-            Assert.False(MicrophoneManager.ApplyNow())
-        } finally SetTestSetting("MicrophoneName", originalName)
+        SetTestSetting("MicrophoneName", "PowerMic III")
+
+        MicrophoneManager.sessionDriver := empty.driver
+        Assert.False(MicrophoneManager.ApplyNow())
+        MicrophoneManager.sessionDriver := disabled.driver
+        Assert.False(MicrophoneManager.ApplyNow())
 
         Assert.Equal(
             "Could not select microphone 'PowerMic III': the microphone list exposed no items.",
@@ -175,12 +170,9 @@ class MicrophoneManagerTest {
     AmbiguousNameReasonReachesBothNotices() {
         fixture := MicrophoneFixture(["PowerMic II", "PowerMic III"])
         MicrophoneManager.sessionDriver := fixture.driver
-        originalName := Settings.Get("MicrophoneName")
-        try {
-            SetTestSetting("MicrophoneName", "PowerMic")
-            Assert.False(MicrophoneManager.ApplyNow())
-        } finally SetTestSetting("MicrophoneName", originalName)
+        SetTestSetting("MicrophoneName", "PowerMic")
 
+        Assert.False(MicrophoneManager.ApplyNow())
         Assert.Equal("Microphone Not Selected", TestRunner.dialogs[1].title)
         Assert.Equal(
             "Could not select microphone 'PowerMic': the microphone name matches multiple devices.",
@@ -190,20 +182,6 @@ class MicrophoneManagerTest {
         MicrophoneManager.attempts := MicrophoneManager.maxAttempts
         MicrophoneManager.RecordSelectionFailure("PowerMic")
         Assert.True(InStr(this.notifications[1].text, "Last error: the microphone name matches multiple devices"), this.notifications[1].text)
-    }
-
-    Setup() {
-        this.originalNotifier := MicrophoneManager.notifier
-        this.originalSessionDriver := MicrophoneManager.sessionDriver
-        this.originalAutomationAcquire := MicrophoneManager.automationAcquire
-        this.originalAutomationRelease := MicrophoneManager.automationRelease
-        this.notifications := []
-        MicrophoneManager.notifier := RecordNotification.Bind(this.notifications)
-        MicrophoneManager.attempts := 0
-        MicrophoneManager.failureNotified := false
-        MicrophoneManager.lastError := ""
-        MicrophoneManager.attemptedWindow := 0
-        MicrophoneManager.attemptedProcessId := 0
     }
 
     WaitForSelectionRequiresTheExactResolvedValue() {
@@ -600,6 +578,7 @@ class MicrophoneManagerTest {
     }
 
     Teardown() {
+        RestoreTestSettings(this.savedSettings)
         MicrophoneManager.notifier := this.originalNotifier
         MicrophoneManager.sessionDriver := this.originalSessionDriver
         MicrophoneManager.automationAcquire := this.originalAutomationAcquire

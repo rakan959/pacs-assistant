@@ -86,6 +86,26 @@ class ClinicalAutomationTest {
         "PowerScribeSession"
     ]
 
+    Setup() {
+        this.originalDriver := AppControl.windowDriver
+        this.originalLifecycleDriver := AppControl.lifecycleDriver
+        this.originalPowerScribeSessionDriver := PowerScribe.sessionDriver
+        this.originalProfiles := ProfileManager.profiles
+        this.originalCurrentProfile := ProfileManager.currentProfile
+        this.originalClinicalCommandActive := PACSCommands.clinicalCommandActive
+        this.originalActiveClinicalCommand := PACSCommands.activeClinicalCommand
+        this.originalBusyNotifier := PACSCommands.busyNotifier
+        this.originalCommandAvailabilityProbe := PACSCommands.commandAvailabilityProbe
+        this.busyNotifications := []
+        PowerScribe.sessionDriver := FakePowerScribeSessionDriver()
+        ProfileManager.profiles := Map()
+        ProfileManager.currentProfile := ""
+        PACSCommands.clinicalCommandActive := false
+        PACSCommands.activeClinicalCommand := ""
+        PACSCommands.busyNotifier := RecordNotification.Bind(this.busyNotifications)
+        PACSCommands.commandAvailabilityProbe := (*) => true
+    }
+
     ExactWindowStatusDistinguishesAbsenceAmbiguityAndFailure() {
         spec := AppControl.ExplorerPortalWindowSpec()
         portal := {hwnd: 100, pid: 42, exe: "msedge.exe", title: "Explorer Portal", active: false}
@@ -106,26 +126,6 @@ class ClinicalAutomationTest {
         failed := AppControl.ResolveUniqueExactWindowStatus(spec)
         Assert.Equal("error", failed.status)
         Assert.True(InStr(failed.error, "simulated title failure"), failed.error)
-    }
-
-    Setup() {
-        this.originalDriver := AppControl.windowDriver
-        this.originalLifecycleDriver := AppControl.lifecycleDriver
-        this.originalPowerScribeSessionDriver := PowerScribe.sessionDriver
-        this.originalProfiles := ProfileManager.profiles
-        this.originalCurrentProfile := ProfileManager.currentProfile
-        this.originalClinicalCommandActive := PACSCommands.clinicalCommandActive
-        this.originalActiveClinicalCommand := PACSCommands.activeClinicalCommand
-        this.originalBusyNotifier := PACSCommands.busyNotifier
-        this.originalCommandAvailabilityProbe := PACSCommands.commandAvailabilityProbe
-        this.busyNotifications := []
-        PowerScribe.sessionDriver := FakePowerScribeSessionDriver()
-        ProfileManager.profiles := Map()
-        ProfileManager.currentProfile := ""
-        PACSCommands.clinicalCommandActive := false
-        PACSCommands.activeClinicalCommand := ""
-        PACSCommands.busyNotifier := RecordNotification.Bind(this.busyNotifications)
-        PACSCommands.commandAvailabilityProbe := (*) => true
     }
 
     ActivationFailureDoesNotSend() {

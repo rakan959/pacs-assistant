@@ -64,9 +64,7 @@ class UpdateCheckerTest {
     ]
 
     Setup() {
-        this.originalSettingsFile := Settings.settingsFile
-        this.tempSettings := TestTempPath("update-settings", ".ini")
-        Settings.settingsFile := this.tempSettings
+        this.savedSettings := UseTestSettings("update-settings")
         Settings.SaveAllSettings()
         this.originalTransport := UpdateChecker.transport
         this.originalClinicalActivityProbe := UpdateChecker.clinicalActivityProbe
@@ -830,8 +828,7 @@ class UpdateCheckerTest {
         }
         UpdateChecker.skippedVersion := ""
         UpdateChecker.lastRemindTime := 0
-        try FileDelete(Settings.settingsFile)
-        Settings.settingsFile := this.originalSettingsFile
+        RestoreTestSettings(this.savedSettings)
     }
 
     ; Points the installer at a private folder standing in for the app folder, and

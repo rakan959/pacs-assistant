@@ -507,18 +507,13 @@ class ProfileManagerTest {
 
         ; "default" resolves through the old global setting, so pin that setting in an
         ; isolated file and check both of its values explicitly.
-        originalSettingsFile := Settings.settingsFile
-        Settings.settingsFile := TestTempPath("legacy-scope-settings", ".ini")
+        savedSettings := UseTestSettings("legacy-scope-settings")
         try {
             SetTestSetting("RestrictHotkeysByActiveWindow", true)
             restricted := ProfileManager.LoadProfile(path)
             SetTestSetting("RestrictHotkeysByActiveWindow", false)
             unrestricted := ProfileManager.LoadProfile(path)
-        } finally {
-            if FileExist(Settings.settingsFile)
-                FileDelete(Settings.settingsFile)
-            Settings.settingsFile := originalSettingsFile
-        }
+        } finally RestoreTestSettings(savedSettings)
 
         Assert.Equal("PACS or PowerScribe", restricted.scopes["Toggle Dictation"])
         Assert.Equal("Any", restricted.scopes["Sign Report"])
