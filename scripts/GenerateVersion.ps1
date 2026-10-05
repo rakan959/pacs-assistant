@@ -22,7 +22,8 @@ $minor = 0
 $patch = 0
 
 if ($RefType -eq 'tag') {
-    $semVerPattern = '^v(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-(?<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+(?<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
+    # [0-9], not \d: .NET \d also matches non-ASCII decimal digits.
+    $semVerPattern = '^v(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)(?:-(?<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+(?<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
     $match = [regex]::Match($RefName, $semVerPattern)
     if (-not $match.Success) {
         throw "Release tag is not valid SemVer: $RefName"
@@ -30,7 +31,7 @@ if ($RefType -eq 'tag') {
 
     if ($match.Groups['prerelease'].Success) {
         foreach ($identifier in $match.Groups['prerelease'].Value.Split('.')) {
-            if ($identifier -match '^\d+$' -and $identifier.Length -gt 1 -and $identifier.StartsWith('0')) {
+            if ($identifier -match '^[0-9]+$' -and $identifier.Length -gt 1 -and $identifier.StartsWith('0')) {
                 throw "Release tag has a leading-zero numeric prerelease identifier: $RefName"
             }
         }

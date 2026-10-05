@@ -1,9 +1,10 @@
 # Third-party notices
 
 PACS Assistant release executables contain the following third-party software.
-Corresponding source for PACS Assistant and its bundled UIA-v2 library is available
-from the PACS Assistant tag that produced the release. The embedded AutoHotkey
-runtime source is published alongside each executable release.
+Corresponding source for PACS Assistant is available from the PACS Assistant tag that
+produced the release. GitHub's tag archives omit submodule contents, so the bundled
+UIA-v2 library's source is the pinned upstream v1.1.3 tag linked below. The embedded
+AutoHotkey runtime source is published alongside each executable release.
 
 ## AutoHotkey v2.0.26
 

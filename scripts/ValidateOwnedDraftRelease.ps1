@@ -32,7 +32,8 @@ function Require-Property {
 foreach ($property in @('id', 'draft', 'prerelease', 'tag_name', 'name', 'author')) {
     Require-Property -Object $Release -Name $property -Context 'Interrupted release'
 }
-if ($Release.id -isnot [ValueType] -or [long] $Release.id -le 0) {
+# ConvertFrom-Json yields Int64 for JSON integers; accept only integral IDs.
+if (-not ($Release.id -is [long] -or $Release.id -is [int]) -or $Release.id -le 0) {
     throw "Interrupted release '$ReleaseTag' has an invalid database ID."
 }
 if ($Release.draft -isnot [bool] -or -not $Release.draft) {

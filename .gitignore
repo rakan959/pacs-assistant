@@ -1,20 +1,16 @@
-# Profile directory containing user-specific keybind profiles
-/**profiles/
-
-# Cursor directory containing user-specific cursor profiles
-/**.cursor/
-
-# History
-/**.history/
-
-# Config file containing user settings
+# User data written beside the script by source runs. Compiled builds keep it in
+# %APPDATA%\PACS Assistant instead (AppStorage.ahk). Test runs write into tests/.
+/profiles/
+/tests/profiles/
 config.ini
 settings.ini
 settings.ini.tmp-*
+/error.log
+.migration-v1-complete
 
-# Test scratch: Settings creates its ini next to whichever script runs
-tests/settings.ini
-tests/last_results.txt
+# Editor and tool state
+.cursor/
+.history/
 
 # Generated release and updater artifacts
 /pacs-assistant.exe

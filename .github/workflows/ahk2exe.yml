@@ -27,6 +27,9 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
+          # Downloaded build tools run later in this job; do not leave the token
+          # in the checkout's git config for them.
+          persist-credentials: false
 
       - name: Verify repository contract
         shell: pwsh
@@ -80,16 +83,16 @@ jobs:
           New-Item -ItemType Directory -Path $toolRoot -Force | Out-Null
 
           $ahkUrl = "https://github.com/AutoHotkey/AutoHotkey/releases/download/v$($env:AUTOHOTKEY_VERSION)/AutoHotkey_$($env:AUTOHOTKEY_VERSION).zip"
-          Invoke-WebRequest -Uri $ahkUrl -OutFile $ahkZip
+          Invoke-WebRequest -Uri $ahkUrl -OutFile $ahkZip -MaximumRetryCount 3 -RetryIntervalSec 5
           Assert-Sha256 -Path $ahkZip -Expected $env:AUTOHOTKEY_SHA256
           Expand-Archive -LiteralPath $ahkZip -DestinationPath $ahkDir -Force
 
           $ahkSourceUrl = "https://github.com/AutoHotkey/AutoHotkey/archive/refs/tags/v$($env:AUTOHOTKEY_VERSION).zip"
-          Invoke-WebRequest -Uri $ahkSourceUrl -OutFile $ahkSourceZip
+          Invoke-WebRequest -Uri $ahkSourceUrl -OutFile $ahkSourceZip -MaximumRetryCount 3 -RetryIntervalSec 5
           Assert-Sha256 -Path $ahkSourceZip -Expected $env:AUTOHOTKEY_SOURCE_SHA256
 
           $ahk2ExeUrl = "https://github.com/AutoHotkey/Ahk2Exe/releases/download/Ahk2Exe$($env:AHK2EXE_VERSION)/Ahk2Exe$($env:AHK2EXE_VERSION).zip"
-          Invoke-WebRequest -Uri $ahk2ExeUrl -OutFile $ahk2ExeZip
+          Invoke-WebRequest -Uri $ahk2ExeUrl -OutFile $ahk2ExeZip -MaximumRetryCount 3 -RetryIntervalSec 5
           Assert-Sha256 -Path $ahk2ExeZip -Expected $env:AHK2EXE_SHA256
           Expand-Archive -LiteralPath $ahk2ExeZip -DestinationPath $ahk2ExeDir -Force
 
@@ -229,7 +232,7 @@ jobs:
             }
           }
 
-          $expectedPrerelease = $env:RELEASE_TAG -match '^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-'
+          $expectedPrerelease = $env:RELEASE_TAG -match '^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)-'
 
           function Invoke-GitHubJson {
             param([Parameter(Mandatory)][string] $Endpoint)

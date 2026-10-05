@@ -74,11 +74,21 @@ $autoHotkeyLicensePath = Join-Path $repoRoot 'licenses/AutoHotkey-v2.0.26.txt'
 
 Assert-Matches $gitmodules '(?m)^\s*url\s*=\s*https://github\.com/Descolada/UIA-v2\.git\s*$' 'UIA-v2 must use a public HTTPS submodule URL.'
 
-$uiaCommit = (& git -C (Join-Path $repoRoot 'UIA-v2') rev-parse HEAD 2>$null).Trim()
-if ($LASTEXITCODE -ne 0) {
-    $failures.Add('UIA-v2 must be initialized before repository checks run.')
-} elseif ($uiaCommit -ne '9f5a181c5d56d0cbc04e0a709fb875ab0059f762') {
-    $failures.Add("UIA-v2 must be pinned to v1.1.3 (found $uiaCommit).")
+$uiaPinnedCommit = '9f5a181c5d56d0cbc04e0a709fb875ab0059f762'
+$uiaPath = Join-Path $repoRoot 'UIA-v2'
+$uiaTreeEntry = [string] (& git -C $repoRoot ls-tree HEAD -- UIA-v2 2>$null)
+if ($uiaTreeEntry -notmatch "^160000 commit $uiaPinnedCommit\tUIA-v2$") {
+    $failures.Add("UIA-v2 must be pinned to v1.1.3 in the repository tree (found '$uiaTreeEntry').")
+}
+# Without its own .git entry, git -C UIA-v2 would silently report the parent
+# repository's HEAD instead of the submodule's.
+if (-not (Test-Path -LiteralPath (Join-Path $uiaPath '.git'))) {
+    $failures.Add('UIA-v2 must be initialized before repository checks run (git submodule update --init).')
+} else {
+    $uiaCommit = [string] (& git -C $uiaPath rev-parse HEAD 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $uiaCommit.Trim() -ne $uiaPinnedCommit) {
+        $failures.Add("The UIA-v2 checkout must be at the pinned v1.1.3 commit (found '$($uiaCommit.Trim())').")
+    }
 }
 
 Assert-Matches $workflow '(?m)^\s*AUTOHOTKEY_VERSION:\s*2\.0\.26\s*$' 'CI must pin AutoHotkey v2.0.26.'
@@ -106,13 +116,41 @@ Assert-Matches $workflow 'https://github\.com/AutoHotkey/AutoHotkey/archive/refs
 Assert-Matches $workflow '(?m)^\s*AutoHotkey-v2\.0\.26-source\.zip\s*$' 'Build artifacts must include the AutoHotkey corresponding-source archive.'
 Assert-Matches $workflow "Join-Path \`$PWD 'release/AutoHotkey-v2\.0\.26-source\.zip'" 'Tagged releases must publish the AutoHotkey corresponding-source archive.'
 Assert-NotMatches $workflow '\$env:RELEASE_TAG\.Contains\(''-''\)' 'Release publication must not classify build-metadata hyphens as prerelease markers.'
-Assert-Matches $workflow "\`$env:RELEASE_TAG\s+-match\s+'\^v\(\?:0\|\[1-9\]\\d\*\).*-'" 'Release publication must detect a prerelease marker only between the core version and build metadata.'
-Assert-NotMatches $workflow '(?m)^\s*''--clobber''\s*$' 'Published release assets must never be replaced in place.'
+$prereleaseMatch = [regex]::Match($workflow, "\`$expectedPrerelease\s*=\s*\`$env:RELEASE_TAG\s+-match\s+'(?<pattern>[^']+)'")
+if (-not $prereleaseMatch.Success) {
+    $failures.Add('Release publication must classify prereleases with one -match expression on RELEASE_TAG.')
+} else {
+    # Evaluate the workflow's own expression: only a hyphen directly after the
+    # numeric core marks a prerelease, and only ASCII digits form that core.
+    $prereleasePattern = $prereleaseMatch.Groups['pattern'].Value
+    $classifications = [ordered]@{
+        'v2.1.0-beta.1' = $true
+        'v2.1.0-rc.1+build.5' = $true
+        'v2.1.0' = $false
+        'v2.1.0+build-5' = $false
+        ('v2.1.1' + [char]0x0663 + '-beta.1') = $false
+    }
+    foreach ($tag in $classifications.Keys) {
+        if (($tag -match $prereleasePattern) -ne $classifications[$tag]) {
+            $failures.Add("Release prerelease classification is wrong for tag '$tag'.")
+        }
+    }
+}
+Assert-NotMatches $workflow '--clobber' 'Published release assets must never be replaced in place.'
 Assert-Matches $releaseValidator 'Get-FileHash\s+-LiteralPath\s+\$localFile\.FullName\s+-Algorithm\s+SHA256' 'Existing releases must compare each local asset SHA-256.'
 Assert-Matches $releaseValidator '\$remoteAsset\.digest' 'Existing releases must compare the API-provided asset digest.'
 Assert-Matches $releaseValidator '\$remoteAsset\.size\s+-ne\s+\$localFile\.Length' 'Existing releases must compare asset sizes before becoming a no-op.'
 Assert-Matches $workflow '& scripts/ValidateExistingRelease\.ps1' 'Existing releases must pass the complete release object through the tested validator.'
-Assert-Matches $workflow 'ActualTagCommitSha' 'Existing release validation must bind the release tag to the workflow commit.'
+$existingReleaseCalls = [regex]::Matches($workflow, '& scripts/ValidateExistingRelease\.ps1(?<arguments>(?:[ \t]*`\r?\n[ \t]*-[^\r\n`]*)+)')
+if ($existingReleaseCalls.Count -lt 2) {
+    $failures.Add('Both existing-release and uploaded-draft validation must call scripts/ValidateExistingRelease.ps1.')
+}
+foreach ($call in $existingReleaseCalls) {
+    $arguments = $call.Groups['arguments'].Value
+    if ($arguments -notmatch '-ExpectedCommitSha \$env:EXPECTED_COMMIT' -or $arguments -notmatch '-ActualTagCommitSha \$actualTagCommit') {
+        $failures.Add('Every existing-release validation must bind the resolved tag commit to the workflow commit.')
+    }
+}
 if ([regex]::Matches($workflow, '& scripts/AssertReleaseTagCommit\.ps1').Count -lt 2) {
     $failures.Add('Release publication must verify the tag commit both before release handling and immediately before publishing a new draft.')
 }
@@ -165,6 +203,18 @@ if (-not (Test-Path -LiteralPath $ownedDraftValidatorPath -PathType Leaf)) {
         -Release $ownedDraft `
         -ReleaseTag 'v2.0.0' `
         -ExpectedPrerelease $false
+    foreach ($invalidId in @($true, 1.5, '22', 0, -1)) {
+        $invalidDraft = $ownedDraft.PSObject.Copy()
+        $invalidDraft.id = $invalidId
+        try {
+            & $ownedDraftValidatorPath -Release $invalidDraft -ReleaseTag 'v2.0.0' -ExpectedPrerelease $false
+            $failures.Add("Draft reconciliation must reject the release ID '$invalidId'.")
+        } catch {
+            if ($_.Exception.Message -notmatch 'invalid database ID') {
+                $failures.Add("Release ID '$invalidId' was rejected for the wrong reason: $($_.Exception.Message)")
+            }
+        }
+    }
     $foreignDraft = $ownedDraft.PSObject.Copy()
     $foreignDraft.author = [pscustomobject]@{ login = 'human-maintainer' }
     try {
@@ -251,8 +301,8 @@ Assert-Matches $readme '(?i)immutable releases' 'Release documentation must requ
 Assert-Matches $readme '(?i)tag ruleset.*restrict.*updates.*deletions' 'Release documentation must require protected release tags because ref comparison and publication are not atomic.'
 Assert-NotMatches ($appControl + $keybindGui) '``n``n' 'User-facing diagnostics must use real AHK newline escapes, not render literal backtick-n text.'
 
-$actionReferencePattern = '(?m)^\s*uses:\s*(?<reference>\S+?)(?:\s+#.*)?\s*$'
-$usesLineCount = [regex]::Matches($workflow, '(?m)^\s*uses:\s*').Count
+$actionReferencePattern = '(?m)^\s*(?:-\s+)?uses:\s*(?<reference>\S+?)(?:\s+#.*)?\s*$'
+$usesLineCount = [regex]::Matches($workflow, '(?m)^\s*(?:-\s+)?uses:\s*').Count
 $validatedActionCount = 0
 foreach ($match in [regex]::Matches($workflow, $actionReferencePattern)) {
     $validatedActionCount++
@@ -274,7 +324,8 @@ if ($validatedActionCount -ne $usesLineCount) {
 # when an inline human-readable version comment follows it.
 foreach ($fixture in @(
     'uses: actions/checkout@v4',
-    'uses: actions/checkout@v4 # v4'
+    'uses: actions/checkout@v4 # v4',
+    '      - uses: actions/checkout@v4'
 )) {
     $fixtureMatches = [regex]::Matches($fixture, $actionReferencePattern)
     if ($fixtureMatches.Count -ne 1 -or $fixtureMatches[0].Groups['reference'].Value -ne 'actions/checkout@v4') {
@@ -285,6 +336,9 @@ foreach ($fixture in @(
 }
 
 Assert-NotMatches $workflow '(?m)^\s*packages:\s*write\s*$' 'The workflow must not request unused packages: write permission.'
+if ([regex]::Matches($workflow, '(?m)^\s*persist-credentials:\s*false\s*$').Count -ne 2) {
+    $failures.Add('Both checkouts must set persist-credentials: false; the build job runs downloaded tools.')
+}
 Assert-NotMatches $workflow '(?i)benmusson/ahk2exe-action|softprops/action-gh-release' 'Build and release must not delegate downloaded binaries or release authority to third-party actions.'
 Assert-NotMatches $workflow 'Ahk2Exe-SetCopyright\s+MIT' 'Executable copyright metadata must not mislabel the GPL-3.0 project as MIT.'
 
@@ -345,7 +399,11 @@ foreach ($generatedArtifact in @(
 
 foreach ($privateSettingsArtifact in @(
     'settings.ini.tmp-123-456',
-    'tests/settings.ini.tmp-123-456'
+    'tests/settings.ini.tmp-123-456',
+    'tests/settings.ini',
+    'tests/profiles/Night.ini',
+    'profiles/Night.ini',
+    'error.log'
 )) {
     & git -C $repoRoot check-ignore --quiet -- $privateSettingsArtifact
     if ($LASTEXITCODE -ne 0) {
@@ -402,6 +460,11 @@ if (-not (Test-Path -LiteralPath $releaseValidatorPath -PathType Leaf)) {
                         digest = 'sha256:' + ('0' * 64)
                     }
                 }
+                'missing-asset' { $release.assets = @($remoteAssets | Select-Object -Skip 1) }
+                'renamed-asset' { $remoteAssets[0].name = 'pacs-assistant-renamed.exe' }
+                'size-mismatch' { $remoteAssets[0].size = $remoteAssets[0].size + 1 }
+                'digest-mismatch' { $remoteAssets[0].digest = 'sha256:' + ('0' * 64) }
+                'null-digest' { $remoteAssets[0].digest = $null }
             }
 
             try {
@@ -413,24 +476,44 @@ if (-not (Test-Path -LiteralPath $releaseValidatorPath -PathType Leaf)) {
                     -ExpectedCommitSha $expectedCommit `
                     -ActualTagCommitSha $actualCommit `
                     -Assets $assetPaths
-                return $true
+                return ''
             } catch {
-                return $false
+                return $_.Exception.Message
             }
         } finally {
             Remove-Item -LiteralPath $caseRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 
-    if (-not (Invoke-ReleaseValidationFixture)) {
-        $failures.Add('The matching release fixture must be accepted as an immutable no-op.')
+    $validMessage = Invoke-ReleaseValidationFixture
+    if ($validMessage -ne '') {
+        $failures.Add("The matching release fixture must be accepted as an immutable no-op: $validMessage")
     }
-    if (-not (Invoke-ReleaseValidationFixture -Case 'valid-draft')) {
-        $failures.Add('The matching uploaded draft fixture must be accepted before publication.')
+    $validDraftMessage = Invoke-ReleaseValidationFixture -Case 'valid-draft'
+    if ($validDraftMessage -ne '') {
+        $failures.Add("The matching uploaded draft fixture must be accepted before publication: $validDraftMessage")
     }
-    foreach ($invalidCase in @('draft', 'wrong-prerelease', 'wrong-tag', 'wrong-name', 'wrong-commit', 'extra-asset')) {
-        if (Invoke-ReleaseValidationFixture -Case $invalidCase) {
+    # Each invalid fixture must fail, and for its own reason: a validator that
+    # failed early for an unrelated cause would otherwise hide a removed check.
+    $expectedRejections = [ordered]@{
+        'draft' = 'must be published'
+        'wrong-prerelease' = 'wrong prerelease classification'
+        'wrong-tag' = 'does not exactly match'
+        'wrong-name' = 'exact title'
+        'wrong-commit' = 'not workflow commit'
+        'extra-asset' = 'exactly the approved asset set'
+        'missing-asset' = 'exactly the approved asset set'
+        'renamed-asset' = 'missing approved asset'
+        'size-mismatch' = 'different bytes'
+        'digest-mismatch' = 'different bytes'
+        'null-digest' = 'different bytes'
+    }
+    foreach ($invalidCase in $expectedRejections.Keys) {
+        $message = Invoke-ReleaseValidationFixture -Case $invalidCase
+        if ($message -eq '') {
             $failures.Add("Invalid existing-release fixture was accepted: $invalidCase")
+        } elseif ($message -notmatch [regex]::Escape($expectedRejections[$invalidCase])) {
+            $failures.Add("Existing-release fixture '$invalidCase' failed for the wrong reason: $message")
         }
     }
 }
@@ -518,7 +601,8 @@ if (-not (Test-Path -LiteralPath $versionGeneratorPath -PathType Leaf)) {
         'v1.2.3-01',
         'v1.2.3+',
         'v1.2.3-alpha_1',
-        'v65536.0.0'
+        'v65536.0.0',
+        ('v1.2.' + [char]0x0663)
     )) {
         $invalidResult = Invoke-VersionGenerator -RefType tag -RefName $invalidTag
         if ($invalidResult.Succeeded) {
