@@ -594,7 +594,7 @@ class WetReadPasteEngine {
  * Assigns the current report to the profile's attending for its modality. A blank
  * assignment leaves PowerScribe's default unchanged.
  */
-checkAttending(reportText, powerScribeSession := 0) {
+CheckAttending(reportText, powerScribeSession := 0) {
     return AttendingRouting.Route(
         reportText,
         ObjBindMethod(ProfileManager, "GetModalityAttending"),
@@ -694,7 +694,7 @@ RunPinnedWetReadWorkflow(
     }
 }
 
-wetRead() {
+WetRead() {
     ; Use clipboard contents; bail out if empty to avoid blank notes
     clipText := A_Clipboard
     if (clipText = "") {
@@ -713,7 +713,7 @@ wetRead() {
         pasteMode,
         (*) => StickyNoteOpener().Open({title: "Vue PACS", exe: "mp.exe"}),
         (*) => PowerScribe.CaptureReport(),
-        (reportText, session) => checkAttending(reportText, session),
+        (reportText, session) => CheckAttending(reportText, session),
         PerformWetReadPaste
     )
 }

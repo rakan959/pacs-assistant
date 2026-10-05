@@ -391,7 +391,7 @@ class ClinicalAutomationTest {
         AppControl.windowDriver := FakeWindowDriver(false)
 
         Assert.Throws(
-            () => checkAttending("EXAMINATION: CT CHEST"),
+            () => CheckAttending("EXAMINATION: CT CHEST"),
             "could not safely assign attending 'Smith'"
         )
     }
@@ -558,7 +558,7 @@ class ClinicalAutomationTest {
             processId: 77
         }], 77, false)
 
-        Assert.False(restartPACS(driver))
+        Assert.False(RestartPACS(driver))
         Assert.Equal(1, driver.closeCalls)
         Assert.Equal(0, driver.stopCalls)
         Assert.Equal(0, driver.launchCalls)
@@ -567,7 +567,7 @@ class ClinicalAutomationTest {
     RestartAbortsForUnverifiedPowerScribeProcess() {
         driver := FakePacsRestartDriver([], 77, true)
 
-        Assert.False(restartPACS(driver))
+        Assert.False(RestartPACS(driver))
         Assert.Equal(0, driver.closeCalls)
         Assert.Equal(0, driver.stopCalls)
         Assert.Equal(0, driver.launchCalls)
@@ -580,7 +580,7 @@ class ClinicalAutomationTest {
             processId: 77
         }], 88, true)
 
-        Assert.False(restartPACS(driver))
+        Assert.False(RestartPACS(driver))
         Assert.Equal(1, driver.closeCalls)
         Assert.Equal(0, driver.stopCalls)
         Assert.Equal(0, driver.launchCalls)
@@ -594,7 +594,7 @@ class ClinicalAutomationTest {
         }], 0, true)
         driver.prepareResult := false
 
-        Assert.False(restartPACS(driver))
+        Assert.False(RestartPACS(driver))
         Assert.Equal(1, driver.prepareCalls)
         Assert.Equal(0, driver.closeCalls)
         Assert.Equal(0, driver.stopCalls)
@@ -668,7 +668,7 @@ class ClinicalAutomationTest {
         driver := FakePacsRestartDriver([], 0, true)
         driver.quiescent := false
 
-        Assert.False(restartPACS(driver))
+        Assert.False(RestartPACS(driver))
         Assert.Equal(1, driver.stopCalls)
         Assert.Equal(1, driver.verifyCalls)
         Assert.Equal(0, driver.launchCalls)
@@ -678,7 +678,7 @@ class ClinicalAutomationTest {
         driver := FakePacsRestartDriver([], 0, true)
         driver.stopError := "simulated stop failure"
 
-        Assert.False(restartPACS(driver))
+        Assert.False(RestartPACS(driver))
         Assert.Equal(1, driver.stopCalls)
         Assert.Equal(0, driver.launchCalls)
     }
@@ -687,7 +687,7 @@ class ClinicalAutomationTest {
         driver := FakePacsRestartDriver([], 0, true)
         driver.stopResult := {anyStopped: false}
 
-        Assert.False(restartPACS(driver))
+        Assert.False(RestartPACS(driver))
         Assert.Equal(1, driver.stopCalls)
         Assert.Equal(0, driver.launchCalls)
     }
@@ -695,19 +695,19 @@ class ClinicalAutomationTest {
     RestartLaunchBoundaryFailuresAreReported() {
         falseDriver := FakePacsRestartDriver([], 0, true)
         falseDriver.launchSucceeded := false
-        Assert.False(restartPACS(falseDriver))
+        Assert.False(RestartPACS(falseDriver))
         Assert.Equal(1, falseDriver.launchCalls)
         Assert.Equal(0, falseDriver.waitForLaunchCalls)
 
         launchDriver := FakePacsRestartDriver([], 0, true)
         launchDriver.launchError := "simulated launch failure"
-        Assert.False(restartPACS(launchDriver))
+        Assert.False(RestartPACS(launchDriver))
         Assert.Equal(1, launchDriver.launchCalls)
         Assert.Equal(0, launchDriver.waitForLaunchCalls)
 
         verifyDriver := FakePacsRestartDriver([], 0, true)
         verifyDriver.waitForLaunchError := "simulated launch verification failure"
-        Assert.False(restartPACS(verifyDriver))
+        Assert.False(RestartPACS(verifyDriver))
         Assert.Equal(1, verifyDriver.launchCalls)
         Assert.Equal(1, verifyDriver.waitForLaunchCalls)
     }
@@ -716,7 +716,7 @@ class ClinicalAutomationTest {
         driver := FakePacsRestartDriver([], 0, true)
         driver.launchVerified := false
 
-        Assert.False(restartPACS(driver))
+        Assert.False(RestartPACS(driver))
         Assert.Equal(1, driver.launchCalls)
         Assert.Equal(1, driver.waitForLaunchCalls)
     }
@@ -766,7 +766,7 @@ class ClinicalAutomationTest {
     GracefulCloseTimesOutAcross32BitTickWrap() {
         driver := FakeGracefulCloseDriver(0xFFFFFFFF - 50, 77)
 
-        Assert.False(closeWithSavePrompt(this.PowerScribeSession(), 300, driver))
+        Assert.False(CloseWithSavePrompt(this.PowerScribeSession(), 300, driver))
         Assert.Equal(1, driver.closeRequests)
         Assert.True(driver.pauseCalls >= 2)
     }
@@ -774,21 +774,21 @@ class ClinicalAutomationTest {
     GracefulCloseRequiresCapturedProcessIdentity() {
         driver := FakeGracefulCloseDriver(1000, 88)
 
-        Assert.False(closeWithSavePrompt(this.PowerScribeSession(), 300, driver))
+        Assert.False(CloseWithSavePrompt(this.PowerScribeSession(), 300, driver))
         Assert.Equal(0, driver.closeRequests)
     }
 
     GracefulCloseRejectsSameProcessWrongTitleBeforeRequest() {
         driver := FakeGracefulCloseDriver(1000, 77, false)
 
-        Assert.False(closeWithSavePrompt(this.PowerScribeSession(), 300, driver))
+        Assert.False(CloseWithSavePrompt(this.PowerScribeSession(), 300, driver))
         Assert.Equal(0, driver.closeRequests)
     }
 
     GracefulCloseRejectsDuplicateExactWindowBeforeRequest() {
         driver := FakeGracefulCloseDriver(1000, 77, false)
 
-        Assert.False(closeWithSavePrompt(this.PowerScribeSession(), 300, driver))
+        Assert.False(CloseWithSavePrompt(this.PowerScribeSession(), 300, driver))
         Assert.Equal(0, driver.closeRequests)
     }
 

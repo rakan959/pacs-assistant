@@ -242,7 +242,7 @@ class ReportModality {
     }
 }
 
-sendPs(x) {
+SendPs(x) {
     return PowerScribe.SendKeys(x)
 }
 

@@ -12,15 +12,15 @@ class PACSCommands {
     static commandAvailabilityProbe := (*) => true
 
     static commands := Map(
-        "Toggle Dictation", (*) => PACSCommands.RunClinicalCommand("Toggle Dictation", (*) => sendPs("{F4}")),
+        "Toggle Dictation", (*) => PACSCommands.RunClinicalCommand("Toggle Dictation", (*) => SendPs("{F4}")),
         "Select Next Field", (*) => PACSCommands.RunClinicalCommand("Select Next Field", (*) => PowerScribe.SendKeys("{Tab}")),
         "Select Previous Field", (*) => PACSCommands.RunClinicalCommand("Select Previous Field", (*) => PowerScribe.SendKeys("+{Tab}")),
         "Delete Previous Word", (*) => PACSCommands.RunClinicalCommand("Delete Previous Word", (*) => PowerScribe.SendKeys("^{Backspace}")),
         "Delete Next Word", (*) => PACSCommands.RunClinicalCommand("Delete Next Word", (*) => PowerScribe.SendKeys("^{Delete}")),
-        "Draft Report", (*) => PACSCommands.RunClinicalCommand("Draft Report", (*) => sendPs("{F9}")),
-        "Sign Report", (*) => PACSCommands.RunClinicalCommand("Sign Report", (*) => sendPs("{F12}")),
-        "Open/Force Restart PACS", (*) => PACSCommands.RunClinicalCommand("Open/Force Restart PACS", (*) => restartPACS()),
-        "Paste Wet Read", (*) => PACSCommands.RunClinicalCommand("Paste Wet Read", (*) => wetRead()),
+        "Draft Report", (*) => PACSCommands.RunClinicalCommand("Draft Report", (*) => SendPs("{F9}")),
+        "Sign Report", (*) => PACSCommands.RunClinicalCommand("Sign Report", (*) => SendPs("{F12}")),
+        "Open/Force Restart PACS", (*) => PACSCommands.RunClinicalCommand("Open/Force Restart PACS", (*) => RestartPACS()),
+        "Paste Wet Read", (*) => PACSCommands.RunClinicalCommand("Paste Wet Read", (*) => WetRead()),
         "Toggle PowerScribe Window", (*) => PACSCommands.RunClinicalCommand("Toggle PowerScribe Window", (*) => AppControl.ToggleExactWindow(PACSCommands.PowerScribeToggleTarget())),
         "Toggle EPIC Window", (*) => PACSCommands.RunClinicalCommand("Toggle EPIC Window", (*) => PACSCommands.ToggleEpicWindow()),
         "Next Series", (*) => PACSCommands.RunClinicalCommand("Next Series", (*) => AppControl.SendKeysToExactWindow(AppControl.VuePacsClientWindowSpec(), "{Right}")),

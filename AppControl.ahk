@@ -61,7 +61,7 @@ class NativeWindowDriver {
 }
 
 /**
- * Process-observation and exact-window lifecycle primitives used by restartPACS.
+ * Process-observation and exact-window lifecycle primitives used by RestartPACS.
  * Production restart never terminates a process discovered only by basename.
  */
 class NativeAppLifecycleDriver {
@@ -409,7 +409,7 @@ class AppControl {
      * the repository has no trustworthy installed full-path/creation identity for
      * the generic PACS executables, so basename termination cannot be made safe.
      * @returns {found, stopped}; stopped is false on lookup uncertainty or when a
-     * target survives, allowing restartPACS to fail closed.
+     * target survives, allowing RestartPACS to fail closed.
      */
     static StopTarget(target, targetKind) {
         if (targetKind = "window")
@@ -673,7 +673,7 @@ class NativeGracefulCloseDriver {
  * @param timeoutMs How long to wait for the user/save flow before giving up
  * @returns true if the owning process exited, false if it is still running
  */
-closeWithSavePrompt(session, timeoutMs := 8000, driver := 0) {
+CloseWithSavePrompt(session, timeoutMs := 8000, driver := 0) {
     driver := driver ? driver : NativeGracefulCloseDriver()
     if (!IsObject(session)
         || !HasProp(session, "hwnd")
@@ -741,7 +741,7 @@ class NativePacsRestartDriver {
     }
 
     ClosePowerScribe(session) {
-        return closeWithSavePrompt(session, 8000)
+        return CloseWithSavePrompt(session, 8000)
     }
 
     PrepareRestart() {
@@ -880,7 +880,7 @@ class NativePacsRestartDriver {
     }
 }
 
-restartPACS(driver := 0) {
+RestartPACS(driver := 0) {
     driver := driver ? driver : NativePacsRestartDriver()
     anyClosed := false
 
