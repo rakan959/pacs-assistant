@@ -154,7 +154,7 @@ class Settings {
             ? this.defaultSettings[settingName]
             : false
         try {
-            value := IniRead(this.settingsFile, "Settings", settingName)
+            value := IniRead(this.settingsFile, "Settings", settingName, fallback)
             ; Handle numeric values
             if (settingName = "RefreshInterval") {
                 if !this.TryParseRefreshInterval(value, &interval)
