@@ -22,6 +22,14 @@ class UpdateVerificationTest {
         "CallbackSubscriptionCoversEveryHandledStatus"
     ]
 
+    ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
+    static helpers := [
+        "CopyRunningInterpreter",
+        "NewMetadataRequest",
+        "Repeat",
+        "TrackTemp"
+    ]
+
     Setup() {
         this.tempPaths := []
     }

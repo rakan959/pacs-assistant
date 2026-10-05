@@ -42,6 +42,11 @@ class SettingsTest {
         "TestStaleRevisionRaisesSettingsConflictError"
     ]
 
+    ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
+    static helpers := [
+        "SettingsControls"
+    ]
+
     Setup() {
         this.originalFile := Settings.settingsFile
         this.originalListeners := Settings.changeListeners

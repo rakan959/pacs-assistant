@@ -168,6 +168,8 @@ Invoke-AutoHotkeyChecked @('/ErrorStdOut', 'tests/run-gui-smoke.ahk')
 The unit runner suppresses MsgBoxes, records them in `TestRunner.dialogs` for the
 current test, and writes results to stdout. Add a new test by
 writing a class with a `static tests` list and registering it in `tests/RunTests.ahk`.
+A method that is neither listed there nor in the class's `static helpers` list fails the
+run, so a forgotten test cannot be skipped silently.
 
 To reproduce the uncompressed release build with the verified archives (this
 regenerates the tracked `Version.ahk`; restore it afterwards with

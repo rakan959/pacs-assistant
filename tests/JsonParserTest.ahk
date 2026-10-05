@@ -12,6 +12,11 @@ class JsonParserTest {
         "TestRejectsMalformedStructure"
     ]
 
+    ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
+    static helpers := [
+        "AssertAllRejected"
+    ]
+
     TestParsesNestedValuesAcrossWhitespace() {
         parsed := JsonParser.Parse(' `r`n`t{ "a" : [ 1 , { "b" : null } , true , false ] ,`n "c" : "" } `n')
         Assert.Equal(1, parsed["a"][1])

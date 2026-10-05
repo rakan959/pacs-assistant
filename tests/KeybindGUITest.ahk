@@ -84,6 +84,14 @@ class KeybindGUITest {
         "TestProfileDeletionOwnsSelectorAcrossConfirmation"
     ]
 
+    ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
+    static helpers := [
+        "PrepareBlockedProfileSave",
+        "PrepareDiscardRenameState",
+        "RestoreBlockedProfileSave",
+        "RestoreDiscardRenameState"
+    ]
+
     Setup() {
         ; Build an instance without running the constructor, which would check GitHub
         ; for updates and load profiles

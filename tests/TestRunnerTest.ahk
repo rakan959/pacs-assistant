@@ -12,9 +12,16 @@ class TestRunnerTest {
         "TeardownFailureCountsAsTheTestFailure",
         "TeardownRunsAfterABodyFailure",
         "NonErrorThrowIsCountedAsAFailure",
+        "FalsyThrowsFromConstructorAndTeardownAreFailures",
+        "UnlistedTestMethodIsAFailure",
         "ClassWithoutTestListIsAFailure",
         "ThrowsAcceptsAFalsyThrownValue",
         "DialogsAreRecordedPerTest"
+    ]
+
+    ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
+    static helpers := [
+        "RunProbe"
     ]
 
     ThrowsRejectsAFunctionThatReturnsNormally() {
@@ -125,6 +132,23 @@ class TestRunnerTest {
         result := this.RunProbe(NonErrorThrowProbe)
 
         Assert.Equal(0, result.successes)
+        Assert.Equal(NonErrorThrowProbe.tests.Length, result.failures)
+    }
+
+    ; A falsy thrown value from a constructor or teardown is still a failure.
+    FalsyThrowsFromConstructorAndTeardownAreFailures() {
+        Assert.Equal(1, this.RunProbe(FalsyConstructorProbe).failures)
+        result := this.RunProbe(FalsyTeardownProbe)
+        Assert.Equal(0, result.successes)
+        Assert.Equal(1, result.failures)
+    }
+
+    UnlistedTestMethodIsAFailure() {
+        result := this.RunProbe(UnlistedMethodProbe)
+
+        ; The listed test and the declared helper are fine; the forgotten test fails
+        ; the class's test list.
+        Assert.Equal(1, result.successes)
         Assert.Equal(1, result.failures)
     }
 
@@ -251,7 +275,7 @@ class BodyFailureProbe {
 }
 
 class NonErrorThrowProbe {
-    static tests := ["ThrowsAString"]
+    static tests := ["ThrowsAString", "ThrowsZero", "ThrowsAnEmptyString"]
 
     static ThrowValue(value) {
         throw value
@@ -259,6 +283,51 @@ class NonErrorThrowProbe {
 
     ThrowsAString() {
         throw "not an Error object"
+    }
+
+    ThrowsZero() {
+        throw 0
+    }
+
+    ThrowsAnEmptyString() {
+        throw ""
+    }
+}
+
+class UnlistedMethodProbe {
+    static tests := ["Listed"]
+    static helpers := ["Helper"]
+
+    Listed() {
+        this.Helper()
+    }
+
+    Forgotten() {
+    }
+
+    Helper() {
+    }
+}
+
+class FalsyConstructorProbe {
+    static tests := ["Body"]
+
+    __New() {
+        throw 0
+    }
+
+    Body() {
+    }
+}
+
+class FalsyTeardownProbe {
+    static tests := ["Body"]
+
+    Body() {
+    }
+
+    Teardown() {
+        throw ""
     }
 }
 

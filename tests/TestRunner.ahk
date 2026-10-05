@@ -59,14 +59,23 @@ class TestRunner {
         ; A registered class without a test list would otherwise contribute nothing
         ; and still leave the suite green.
         if !HasProp(testClass, "tests") {
-            this.RecordResult(className, "(test list)", Error("Test class has no static tests list"), report)
+            this.RecordFailure(className, "(test list)", Error("Test class has no static tests list"), report)
             return
+        }
+
+        ; A test missing from the list would otherwise never run, silently.
+        unlisted := this.UnlistedMethods(testClass)
+        if unlisted.Length {
+            names := ""
+            for name in unlisted
+                names .= (names = "" ? "" : ", ") name
+            this.RecordFailure(className, "(test list)", Error("Methods in neither the tests nor the helpers list: " names), report)
         }
 
         try instance := testClass()
         catch Any as err {
             for methodName in testClass.tests
-                this.RecordResult(className, methodName, err, report)
+                this.RecordFailure(className, methodName, err, report)
             return
         }
 
@@ -75,8 +84,32 @@ class TestRunner {
         }
     }
 
+    ; Instance methods that are neither listed tests, declared helpers (an optional
+    ; static helpers list) nor fixture hooks.
+    static UnlistedMethods(testClass) {
+        known := Map()
+        known.CaseSense := false
+        for name in ["__Init", "__New", "__Delete", "Setup", "Teardown"]
+            known[name] := true
+        for name in testClass.tests
+            known[name] := true
+        if HasProp(testClass, "helpers") {
+            for name in testClass.helpers
+                known[name] := true
+        }
+        unlisted := []
+        for name in testClass.Prototype.OwnProps() {
+            if (!known.Has(name) && HasMethod(testClass.Prototype, name))
+                unlisted.Push(name)
+        }
+        return unlisted
+    }
+
     static RunTest(instance, methodName, report := true) {
-        failure := false
+        ; Track failure separately from the thrown value: a test that throws 0 or ""
+        ; still failed.
+        failed := false
+        failure := ""
         this.dialogs := []
 
         ; catch Any: AutoHotkey can throw non-Error values, and one that escaped here
@@ -86,6 +119,7 @@ class TestRunner {
                 instance.Setup()
             instance.%methodName%()
         } catch Any as err {
+            failed := true
             failure := err
         }
 
@@ -95,31 +129,34 @@ class TestRunner {
         if HasMethod(instance, "Teardown") {
             try instance.Teardown()
             catch Any as teardownError {
-                if (failure) {
-                    failure := Error(Format(
+                failure := failed
+                    ? Error(Format(
                         "{1}; teardown failed: {2}",
                         ErrorText.Describe(failure),
                         ErrorText.Describe(teardownError)
                     ))
-                } else {
-                    failure := teardownError
-                }
+                    : teardownError
+                failed := true
             }
         }
 
-        this.RecordResult(instance.__Class, methodName, failure, report)
+        if failed
+            this.RecordFailure(instance.__Class, methodName, failure, report)
+        else
+            this.RecordPass(instance.__Class, methodName, report)
     }
 
-    static RecordResult(className, methodName, failure := false, report := true) {
-        if (failure) {
-            this.failures++
-            if (report)
-                FileAppend(Format("FAIL {1}.{2}: {3}`n", className, methodName, ErrorText.Describe(failure)), "*")
-        } else {
-            this.successes++
-            if (report)
-                FileAppend(Format("PASS {1}.{2}`n", className, methodName), "*")
-        }
+    static RecordPass(className, methodName, report := true) {
+        this.successes++
+        if (report)
+            FileAppend(Format("PASS {1}.{2}`n", className, methodName), "*")
+    }
+
+    ; thrown is whatever was thrown, which may be falsy (0 or "").
+    static RecordFailure(className, methodName, thrown, report := true) {
+        this.failures++
+        if (report)
+            FileAppend(Format("FAIL {1}.{2}: {3}`n", className, methodName, ErrorText.Describe(thrown)), "*")
     }
 
     static ReportResults() {

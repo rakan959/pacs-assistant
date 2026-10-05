@@ -68,6 +68,11 @@ class ClinicalAutomationTest {
         "ExactWindowStatusDistinguishesAbsenceAmbiguityAndFailure"
     ]
 
+    ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
+    static helpers := [
+        "PowerScribeSession"
+    ]
+
     ExactWindowStatusDistinguishesAbsenceAmbiguityAndFailure() {
         originalWindowDriver := AppControl.windowDriver
         spec := AppControl.ExplorerPortalWindowSpec()
