@@ -17,6 +17,7 @@
 #Include ProfileManager.ahk
 #Include PowerScribe.ahk
 #Include UIAValue.ahk
+#Include UIAElementIdentity.ahk
 #Include ErrorText.ahk
 
 /**
@@ -391,7 +392,7 @@ class NativeWetReadDriver {
      * is an enabled, writable text control owned by the Sticky Notes process before
      * any paste transaction can mutate it.
      */
-    static IsExpectedNoteField(root, field, comparator := 0) {
+    static IsExpectedNoteField(root, field) {
         if !this.HasExpectedNoteCapabilities(root, field)
             return false
 
@@ -409,7 +410,7 @@ class NativeWetReadDriver {
                     eligibleCount++
                     if (eligibleCount > 1)
                         return false
-                    if this.ElementsMatch(field, candidate, comparator)
+                    if UIAElementIdentity.Same(field, candidate)
                         selectedMatch := true
                 }
             }
@@ -442,13 +443,6 @@ class NativeWetReadDriver {
         return field.IsValuePatternAvailable
             || field.IsLegacyIAccessiblePatternAvailable
             || field.NativeWindowHandle
-    }
-
-    static ElementsMatch(left, right, comparator := 0) {
-        if comparator
-            return comparator.Call(left, right) ? true : false
-        try return UIA.CompareElementsEx(left, right)
-        return false
     }
 
     Read(field) {

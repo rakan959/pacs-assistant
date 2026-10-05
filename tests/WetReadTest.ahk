@@ -594,12 +594,11 @@ class WetReadTest {
         wrongWindow := FakeStickyTargetElement(UIA.Type.Edit, 42, true, 200)
         noCapability := FakeStickyTargetElement(UIA.Type.Edit, 42, false)
 
-        same := (left, right) => left == right
-        Assert.True(NativeWetReadDriver.IsExpectedNoteField(root, valid, same))
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongType, same))
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongProcess, same))
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongWindow, same))
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, noCapability, same))
+        Assert.True(NativeWetReadDriver.IsExpectedNoteField(root, valid))
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongType))
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongProcess))
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongWindow))
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, noCapability))
     }
 
     StickyNoteTargetMustBeTheUniqueWritableField() {
@@ -607,11 +606,7 @@ class WetReadTest {
         other := FakeStickyTargetElement(UIA.Type.Edit, 42, true)
         root := FakeStickyTargetRoot(42, [selected, other])
 
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(
-            root,
-            selected,
-            (left, right) => left == right
-        ))
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, selected))
     }
 
     StickyNoteTargetRejectsUnreadableWritableSibling() {
@@ -619,11 +614,7 @@ class WetReadTest {
         unreadable := UnreadableNoteFieldElement()
         root := FakeStickyTargetRoot(42, [selected, unreadable])
 
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(
-            root,
-            selected,
-            (left, right) => left = right
-        ))
+        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, selected))
     }
 
     NativeDirectWriteRefusesStaleStickyTarget() {
