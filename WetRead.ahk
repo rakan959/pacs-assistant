@@ -4,12 +4,13 @@
 ;   + NativeWetReadFocusDriver / NativeWetReadControlDriver / NativeWetReadDriver (UIA note field)
 ;   + WetReadPasteEngine (direct write and verification; never retries or rolls back)
 ;   + CheckAttending, AttendingFailureMessage, RunPinnedWetReadWorkflow, WetRead,
-;       PerformWetReadPaste, ConvertWetReadLineEndings, WetReadPasteFailureDialog,
-;       PromptWetReadMode (file-scope wet-read workflow)
+;       PerformWetReadPaste, ConvertWetReadLineEndings, ReportWetReadPasteResult,
+;       WetReadPasteFailureDialog, PromptWetReadMode (file-scope wet-read workflow)
 
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
 #Include AppControl.ahk
+#Include AppLog.ahk
 #Include Settings.ahk
 #Include ProfileManager.ahk
 #Include PowerScribe.ahk
@@ -765,16 +766,27 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
         wetReadDriver
     )
 
-    failure := WetReadPasteFailureDialog(result, pasteMode)
-    if !failure
-        return true
-    MsgBox(failure.text, failure.title, "Icon!")
-    return false
+    return ReportWetReadPasteResult(result, pasteMode)
 }
 
 ; Sticky Notes expects CRLF; a bare LF from the clipboard renders as one long line.
 ConvertWetReadLineEndings(text) {
     return RegExReplace(text, "\r?\n", "`r`n")
+}
+
+/**
+ * Shows the dialog for a finished paste transaction and records a failure, with its
+ * reason, in error.log. The note text is not logged.
+ * @returns true when the paste was confirmed
+ */
+ReportWetReadPasteResult(result, pasteMode) {
+    failure := WetReadPasteFailureDialog(result, pasteMode)
+    if !failure
+        return true
+    AppLog.Write("Wet read paste not confirmed (" result.reason ")"
+        . (result.error != "" ? ": " result.error : ""))
+    MsgBox(failure.text, failure.title, "Icon!")
+    return false
 }
 
 /**

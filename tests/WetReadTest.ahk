@@ -6,6 +6,7 @@
 #Requires AutoHotkey v2.0
 #Include ../WetRead.ahk
 #Include TestRunner.ahk
+#Include LogCapture.ahk
 
 class WetReadTest {
     static tests := [
@@ -41,6 +42,7 @@ class WetReadTest {
         "NativeStickySessionRejectsIncompleteSessionsAndFailedEnumeration",
         "NativeActivateStickyVerifiesIdentityAroundActivation",
         "PasteFailureDialogNamesEachOutcome",
+        "UnconfirmedPasteIsLoggedWithItsReason",
         "LineEndingConversionProducesCrlfOnly",
         "StickyDriverUsesExactValidatedWindowHandle",
         "StickyNoteTargetRequiresExpectedTypeProcessAndCapability",
@@ -466,6 +468,27 @@ class WetReadTest {
         )
         Assert.True(InStr(unconfirmed.text, "not confirmed"), unconfirmed.text)
         Assert.False(InStr(unconfirmed.text, "restore"), unconfirmed.text)
+    }
+
+    UnconfirmedPasteIsLoggedWithItsReason() {
+        failed := WetReadPasteEngine.NewResult()
+        failed.reason := "verification-error"
+        failed.error := "simulated readback failure"
+        confirmed := WetReadPasteEngine.NewResult()
+        confirmed.success := true
+
+        capturedLog := LogCapture()
+        try {
+            Assert.False(ReportWetReadPasteResult(failed, "uia"))
+            Assert.True(ReportWetReadPasteResult(confirmed, "uia"))
+            loggedFailures := capturedLog.Count("Wet read paste not confirmed (verification-error): simulated readback failure")
+            loggedEntries := capturedLog.Count("Wet read")
+        } finally capturedLog.Restore()
+
+        Assert.Equal(1, loggedFailures)
+        Assert.Equal(1, loggedEntries)
+        Assert.Equal(1, TestRunner.dialogs.Length)
+        Assert.Equal("Sticky Note Not Verified", TestRunner.dialogs[1].title)
     }
 
     LineEndingConversionProducesCrlfOnly() {

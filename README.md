@@ -307,5 +307,6 @@ license, and corresponding-source details are in
 - Make sure PowerScribe and PACS are open.
 - Try restarting PACS Assistant.
 - Check `error.log`, the timestamped record of errors, failed keybinds, profiles that
-  did not load, and monitoring, microphone, restart and update failures. Compiled builds
-  keep it in `%APPDATA%\PACS Assistant\error.log`; source runs keep it beside `main.ahk`.
+  did not load, unconfirmed wet-read pastes, and monitoring, microphone, restart and
+  update failures. Compiled builds keep it in `%APPDATA%\PACS Assistant\error.log`;
+  source runs keep it beside `main.ahk`.
