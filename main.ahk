@@ -8,6 +8,21 @@
 #Include PACSMonitor.ahk
 #Include MicrophoneManager.ahk
 
+; Production error record: append every uncaught runtime error to a timestamped
+; log in the app's data folder so field failures leave a persistent record. The
+; callback returns nothing, so the default error dialog still shows (additive).
+OnError(OnError_Log)
+
+OnError_Log(E, mode) {
+    try {
+        root := AppStorage.DataRoot()
+        DirCreate(root)
+        FileAppend(Format("{1} {2} line {3}: {4}`n", FormatTime(), A_MSec, E.Line, E.Message), root "\error.log")
+    } catch {
+        ; A logging failure must never mask the original error.
+    }
+}
+
 ; The composition root owns cross-module reactions to persisted settings. Settings
 ; itself remains independent of the services that consume it.
 Settings.AddChangeListener(ObjBindMethod(UpdateChecker, "OnSettingsChanged"))
