@@ -236,34 +236,9 @@ class WinHttpTextRequest {
         if (this.state != "receiving")
             return
         try {
-            status := 0
-            statusSize := 4
-            if !DllCall(
-                "winhttp\WinHttpQueryHeaders",
-                "Ptr", this.request,
-                "UInt", WinHttpTransport.WINHTTP_QUERY_STATUS_CODE | WinHttpTransport.WINHTTP_QUERY_FLAG_NUMBER,
-                "Ptr", 0,
-                "UInt*", &status,
-                "UInt*", &statusSize,
-                "Ptr", 0
-            )
-                throw OSError(A_LastError, "WinHttpQueryHeaders(status)")
-
-            contentLength := 0
-            contentLengthSize := 4
-            hasContentLength := DllCall(
-                "winhttp\WinHttpQueryHeaders",
-                "Ptr", this.request,
-                "UInt", WinHttpTransport.WINHTTP_QUERY_CONTENT_LENGTH | WinHttpTransport.WINHTTP_QUERY_FLAG_NUMBER,
-                "Ptr", 0,
-                "UInt*", &contentLength,
-                "UInt*", &contentLengthSize,
-                "Ptr", 0
-            )
-            headerError := A_LastError
-            if (!hasContentLength && headerError != WinHttpTransport.ERROR_WINHTTP_HEADER_NOT_FOUND)
-                throw OSError(headerError, "WinHttpQueryHeaders(Content-Length)")
-            if (hasContentLength && contentLength > this.maximumSize)
+            headers := this.ReadResponseHeaders()
+            status := headers.status
+            if (headers.hasContentLength && headers.contentLength > this.maximumSize)
                 throw Error("Update metadata response exceeded its byte limit")
 
             if (status != 200) {
@@ -277,6 +252,37 @@ class WinHttpTextRequest {
         } catch as err {
             this.Fail(err)
         }
+    }
+
+    ReadResponseHeaders() {
+        status := 0
+        statusSize := 4
+        if !DllCall(
+            "winhttp\WinHttpQueryHeaders",
+            "Ptr", this.request,
+            "UInt", WinHttpTransport.WINHTTP_QUERY_STATUS_CODE | WinHttpTransport.WINHTTP_QUERY_FLAG_NUMBER,
+            "Ptr", 0,
+            "UInt*", &status,
+            "UInt*", &statusSize,
+            "Ptr", 0
+        )
+            throw OSError(A_LastError, "WinHttpQueryHeaders(status)")
+
+        contentLength := 0
+        contentLengthSize := 4
+        hasContentLength := DllCall(
+            "winhttp\WinHttpQueryHeaders",
+            "Ptr", this.request,
+            "UInt", WinHttpTransport.WINHTTP_QUERY_CONTENT_LENGTH | WinHttpTransport.WINHTTP_QUERY_FLAG_NUMBER,
+            "Ptr", 0,
+            "UInt*", &contentLength,
+            "UInt*", &contentLengthSize,
+            "Ptr", 0
+        )
+        headerError := A_LastError
+        if (!hasContentLength && headerError != WinHttpTransport.ERROR_WINHTTP_HEADER_NOT_FOUND)
+            throw OSError(headerError, "WinHttpQueryHeaders(Content-Length)")
+        return {status: status, hasContentLength: !!hasContentLength, contentLength: contentLength}
     }
 
     ReadNext() {

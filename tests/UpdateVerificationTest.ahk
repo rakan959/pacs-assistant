@@ -33,6 +33,9 @@ class UpdateVerificationTest {
         "MetadataRequestRejectsInvalidConstruction",
         "MetadataRequestTimesOutOnlyPastItsBudget",
         "MetadataRequestReportsAsyncWinHttpErrors",
+        "MetadataStatusesScheduleEachSuccessStep",
+        "MetadataCompletionDeliversUtf8BodyOnce",
+        "MetadataHeadersEnforceSizeAndStatusBeforeReading",
         "MetadataResponsesAreStreamBoundedBeforeParsing",
         "AsyncRequestCancelBreaksCallbackOwnership",
         "StaleCallbackContextNeverFallsBackToReusedHandle",
@@ -285,6 +288,74 @@ class UpdateVerificationTest {
         Assert.True(InStr(request.scheduled[2].params[1].Message, "asynchronous request failed"))
     }
 
+    MetadataStatusesScheduleEachSuccessStep() {
+        request := RecordingMetadataRequest()
+        chunk := Buffer(4)
+        StrPut("abc", chunk, "UTF-8")
+        request.state := "sending"
+        request.HandleNativeStatus(0, 0x00400000, 0, 0)
+        request.state := "receiving"
+        request.HandleNativeStatus(0, 0x00020000, 0, 0)
+        request.state := "reading"
+        request.HandleNativeStatus(0, 0x00080000, chunk.Ptr, 3)
+        request.HandleNativeStatus(0, 0x00080000, chunk.Ptr, 0)
+        methods := ""
+        for call in request.scheduled
+            methods .= call.method "|"
+        Assert.Equal("ReceiveResponse|HandleHeaders|ReadNext|CompleteRead|", methods)
+        Assert.Equal(3, request.totalBytes)
+    }
+
+    MetadataCompletionDeliversUtf8BodyOnce() {
+        received := []
+        failed := []
+        request := RecordingMetadataRequest()
+        request.onComplete := (response) => received.Push(response)
+        request.onError := (err) => failed.Push(err)
+        text := '{"body":"' Chr(0x2192) '"}'
+        size := StrPut(text, "UTF-8") - 1
+        body := Buffer(size + 1)
+        StrPut(text, body, "UTF-8")
+        request.state := "reading"
+        request.responseStatus := 200
+        request.ConsumeReadChunk(body.Ptr, size)
+        request.CompleteRead()
+        Assert.Equal("closing", request.state)
+        Assert.Equal("Finalize", request.scheduled[1].method)
+        request.Finalize()
+        request.Finalize()
+        Assert.Equal(0, failed.Length)
+        Assert.Equal(1, received.Length)
+        Assert.Equal(200, received[1].status)
+        Assert.Equal(text, received[1].body)
+        Assert.Equal(0, request.onComplete)
+        Assert.Equal(0, request.onError)
+    }
+
+    MetadataHeadersEnforceSizeAndStatusBeforeReading() {
+        for testCase in [
+            {status: 200, length: 16, hasLength: true, reads: 1, failures: 0, completions: 0},
+            {status: 200, length: 17, hasLength: true, reads: 0, failures: 1, completions: 0},
+            {status: 200, length: 99, hasLength: false, reads: 1, failures: 0, completions: 0},
+            {status: 404, length: 0, hasLength: true, reads: 0, failures: 0, completions: 1}
+        ] {
+            request := HeaderMetadataRequest(testCase)
+            request.state := "receiving"
+            request.HandleHeaders()
+            Assert.Equal(testCase.reads, request.reads)
+            Assert.Equal(testCase.failures, request.failures.Length)
+            Assert.Equal(testCase.completions, request.responses.Length)
+            if testCase.reads {
+                Assert.Equal(200, request.responseStatus)
+                Assert.Equal("reading", request.state)
+            }
+            if testCase.completions {
+                Assert.Equal(404, request.responses[1].status)
+                Assert.Equal("", request.responses[1].body)
+            }
+        }
+    }
+
     CallbackSubscriptionCoversEveryHandledStatus() {
         ; The mask is derived from the named statuses; pinning its value keeps a
         ; dropped or renamed status from silently changing the subscription.
@@ -522,5 +593,26 @@ class FakeWinHttpStatusOperation {
     }
 
     Schedule(*) {
+    }
+}
+
+class HeaderMetadataRequest extends RecordingMetadataRequest {
+    __New(headers) {
+        super.__New()
+        this.headers := headers
+        this.reads := 0
+        this.responses := []
+    }
+
+    ReadResponseHeaders() {
+        return {status: this.headers.status, contentLength: this.headers.length, hasContentLength: this.headers.hasLength}
+    }
+
+    ReadNext() {
+        this.reads++
+    }
+
+    Succeed(response) {
+        this.responses.Push(response)
     }
 }
