@@ -177,11 +177,23 @@ class JsonParser {
     }
 
     ParseNumber() {
-        if !RegExMatch(this.text, JsonParser.numberPattern, &match, this.position)
-            throw ValueError("Expected a JSON value", , this.position)
+        start := this.position
+        if !RegExMatch(this.text, JsonParser.numberPattern, &match, start)
+            throw ValueError("Expected a JSON value", , start)
         token := match[0]
         this.position += StrLen(token)
-        return RegExMatch(token, "[.eE]") ? Float(token) : Integer(token)
+        ; Integer() wraps past the 64-bit range and Float() overflows to infinity;
+        ; either would silently become a different number.
+        if RegExMatch(token, "[.eE]") {
+            value := Float(token)
+            if !(Abs(value) <= 1.7976931348623157e308)
+                throw ValueError("JSON number is outside the floating-point range", , start)
+            return value
+        }
+        value := Integer(token)
+        if (String(value) != token && token != "-0")
+            throw ValueError("JSON number is outside the 64-bit integer range", , start)
+        return value
     }
 
     SkipWhitespace() {

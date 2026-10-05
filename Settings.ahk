@@ -136,14 +136,14 @@ class Settings {
             interval := value
             return true
         }
-        ; Integer() intentionally truncates decimal strings and accepts exponent or
-        ; signed forms. Persisted/user-entered seconds must be literal whole decimal
-        ; digits so malformed text cannot silently become a different timer period.
+        ; Integer() truncates decimal strings, accepts exponent or signed forms, and
+        ; wraps values beyond the 64-bit range. Persisted/user-entered seconds must
+        ; be literal whole decimal digits so malformed text cannot silently become a
+        ; different timer period; a value too long to convert saturates instead of
+        ; wrapping, so the range check rejects it as too large.
         if (Type(value) != "String" || !RegExMatch(value, "^\d+$"))
             return false
-        try interval := Integer(value)
-        catch TypeError
-            return false
+        interval := StrLen(LTrim(value, "0")) > 18 ? 0x7FFFFFFFFFFFFFFF : Integer(value)
         return true
     }
 

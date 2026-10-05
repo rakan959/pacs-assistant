@@ -316,7 +316,8 @@ class SettingsTest {
     }
 
     TestSavingRejectsRefreshIntervalOutsideBounds() {
-        for interval in [9, 0, 86401] {
+        ; The last value is 2^64 + 10, which Integer() would wrap to 10.
+        for interval in [9, 0, 86401, "18446744073709551626"] {
             dialog := FakeSettingsDialog()
             result := Settings.SaveSettings(this.SettingsControls(false, interval), dialog)
 
@@ -335,7 +336,11 @@ class SettingsTest {
     }
 
     TestPersistedRefreshIntervalBounds() {
-        expectations := Map("9", 60, "10", 10, "86400", 86400, "86401", 60, "-10", 60, "1e2", 60)
+        expectations := Map(
+            "9", 60, "10", 10, "86400", 86400, "86401", 60, "-10", 60, "1e2", 60,
+            ; 2^64 + 10, which Integer() would wrap to 10
+            "18446744073709551626", 60
+        )
         for persisted, expected in expectations {
             IniWrite(persisted, Settings.settingsFile, "Settings", "RefreshInterval")
             Assert.Equal(expected, Settings.Get("RefreshInterval"), "Persisted interval '" persisted "'")

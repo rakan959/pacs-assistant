@@ -6,6 +6,7 @@ class JsonParserTest {
     static tests := [
         "TestParsesNestedValuesAcrossWhitespace",
         "TestParsesNumberForms",
+        "TestRejectsNumbersOutsideTheNumericRange",
         "TestHandlesEscapesAndUnicode",
         "TestLongStringRoundTripsExactly",
         "TestRejectsUppercaseTokensAndEscapes",
@@ -38,6 +39,22 @@ class JsonParserTest {
         Assert.Equal(1000.0, parsed[6])
         Assert.Equal(0.06, parsed[7])
         Assert.Equal(123456789012, parsed[8])
+    }
+
+    TestRejectsNumbersOutsideTheNumericRange() {
+        parsed := JsonParser.Parse("[9223372036854775807,-9223372036854775808,-0]")
+        Assert.Equal(9223372036854775807, parsed[1])
+        Assert.Equal(-9223372036854775808, parsed[2])
+        Assert.Equal(0, parsed[3])
+
+        ; Integer() and Float() would wrap or overflow these into other values.
+        this.AssertAllRejected([
+            {input: "9223372036854775808", error: "outside the 64-bit integer range"},
+            {input: "-9223372036854775809", error: "outside the 64-bit integer range"},
+            {input: "18446744073709551716", error: "outside the 64-bit integer range"},
+            {input: "1e999", error: "outside the floating-point range"},
+            {input: "-1e999", error: "outside the floating-point range"}
+        ])
     }
 
     TestHandlesEscapesAndUnicode() {
