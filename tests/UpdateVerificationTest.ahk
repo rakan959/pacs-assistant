@@ -1,25 +1,42 @@
+; = CONTENTS
+;   + Preamble
+;   + UpdateVerificationTest class (artifact checks, release metadata, download URL,
+;       metadata request and WinHTTP callback guards)
+;   + Test doubles (recording metadata request, WinHTTP status operation)
+
 #Requires AutoHotkey v2.0
 #Include ../UpdateChecker.ahk
 #Include TestRunner.ahk
 
 /**
  * The trust boundary of self-update: release-metadata parsing, the download URL
- * allowlist, downloaded-artifact verification, and the transport's local guards.
+ * allowlist, downloaded-artifact verification, and the transports' local guards.
  * Nothing here touches the network.
  */
 class UpdateVerificationTest {
     static tests := [
         "ArtifactValidationAcceptsMatchingExecutable",
         "ArtifactValidationRejectsEachMismatch",
+        "ArtifactValidationRejectsNonExecutable",
         "ArtifactValidationRejectsMzWithoutPeSignature",
         "ArtifactChecksReadALeadingByteOrderMark",
+        "Sha256KnownVector",
+        "ReleaseParserKeepsAssetMetadataTogether",
+        "ReleaseParserAcceptsArrayResponse",
         "ReleaseParserRejectsMalformedMetadata",
         "ReleaseParserRejectsInvalidAssetFields",
+        "ReleaseParserRejectsOversizedAsset",
+        "ReleaseStatusDistinguishesExpectedAbsenceFromFailure",
+        "DownloadUrlMustBelongToThisRepository",
         "DownloadUrlRejectsQueryFragmentAndDotSegments",
         "DownloadRejectsUntrustedArgumentsBeforeConnecting",
         "MetadataRequestRejectsInvalidConstruction",
         "MetadataRequestTimesOutOnlyPastItsBudget",
         "MetadataRequestReportsAsyncWinHttpErrors",
+        "MetadataResponsesAreStreamBoundedBeforeParsing",
+        "AsyncRequestCancelBreaksCallbackOwnership",
+        "StaleCallbackContextNeverFallsBackToReusedHandle",
+        "NativeCallbackMasksThirtyTwoBitParameters",
         "CallbackSubscriptionCoversEveryHandledStatus"
     ]
 
@@ -270,6 +287,164 @@ class UpdateVerificationTest {
         Assert.Equal(0x006A0800, WinHttpTextRequest.callbackFlags)
     }
 
+    ReleaseParserKeepsAssetMetadataTogether() {
+        json := '{"tag_name":"v2.2.0","prerelease":false,"body":"Line 1\nLine 2","assets":['
+            . '{"name":"notes.txt","size":12,"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/notes.txt"},'
+            . '{"browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/pacs-assistant.exe","digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":1550000,"name":"pacs-assistant.exe"}'
+            . ']}'
+
+        release := UpdateChecker.ParseReleaseResponse(json)
+
+        Assert.Equal("v2.2.0", release.version)
+        Assert.Equal("Line 1`nLine 2", release.notes)
+        Assert.Equal(1550000, release.assetSize)
+        Assert.Equal("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", release.assetSha256)
+        Assert.True(InStr(release.downloadUrl, "/pacs-assistant.exe") > 0)
+    }
+
+    ReleaseParserAcceptsArrayResponse() {
+        json := '[{"tag_name":"v2.2.0-beta.1","prerelease":true,"body":"Beta","assets":['
+            . '{"name":"pacs-assistant.exe","size":42,"digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0-beta.1/pacs-assistant.exe"}'
+            . ']}]'
+
+        release := UpdateChecker.ParseReleaseResponse(json)
+        Assert.Equal("v2.2.0-beta.1", release.version)
+        Assert.Equal(42, release.assetSize)
+    }
+
+    ReleaseParserRejectsOversizedAsset() {
+        size := UpdateChecker.maxUpdateSizeBytes + 1
+        json := '{"tag_name":"v9.0.0","prerelease":false,"body":"Large","assets":['
+            . '{"name":"pacs-assistant.exe","size":' size
+            . ',"digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"'
+            . ',"browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v9.0.0/pacs-assistant.exe"}'
+            . ']}'
+
+        Assert.Throws(
+            (*) => UpdateChecker.ParseReleaseResponse(json),
+            "invalid size"
+        )
+    }
+
+    ReleaseStatusDistinguishesExpectedAbsenceFromFailure() {
+        Assert.True(UpdateChecker.ReleaseResponseAvailable(200, true))
+        Assert.False(UpdateChecker.ReleaseResponseAvailable(404, true))
+        Assert.Throws(
+            () => UpdateChecker.ReleaseResponseAvailable(403, true),
+            "HTTP 403"
+        )
+        Assert.Throws(
+            () => UpdateChecker.ReleaseResponseAvailable(503, false),
+            "HTTP 503"
+        )
+        Assert.Throws(
+            () => UpdateChecker.ReleaseResponseAvailable(404, false),
+            "HTTP 404"
+        )
+    }
+
+    DownloadUrlMustBelongToThisRepository() {
+        Assert.True(UpdateChecker.IsTrustedDownloadUrl(
+            "https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/pacs-assistant.exe"
+        ))
+        Assert.False(UpdateChecker.IsTrustedDownloadUrl(
+            "http://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/pacs-assistant.exe"
+        ))
+        Assert.False(UpdateChecker.IsTrustedDownloadUrl(
+            "https://github.com/attacker/pacs-assistant/releases/download/v2.2.0/pacs-assistant.exe"
+        ))
+        Assert.False(UpdateChecker.IsTrustedDownloadUrl(
+            "https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/other.exe"
+        ))
+    }
+
+    Sha256KnownVector() {
+        path := TestTempPath("pacs-sha256", ".txt")
+        FileAppend("abc", path, "UTF-8-RAW")
+        try {
+            Assert.Equal(
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                UpdateChecker.HashFileSha256(path)
+            )
+        } finally {
+            try FileDelete(path)
+        }
+    }
+
+    ArtifactValidationRejectsNonExecutable() {
+        path := TestTempPath("pacs-bad-update", ".exe")
+        FileAppend("not an executable", path, "UTF-8-RAW")
+        try {
+            digest := UpdateChecker.HashFileSha256(path)
+            Assert.False(UpdateChecker.ValidateDownloadedArtifact(path, FileGetSize(path), digest, "v2.2.0"))
+        } finally {
+            try FileDelete(path)
+        }
+    }
+
+    AsyncRequestCancelBreaksCallbackOwnership() {
+        operation := WinHttpTextRequest(
+            "https://api.github.com/test",
+            (*) => 0,
+            (*) => 0,
+            UpdateChecker.maxMetadataSizeBytes
+        )
+
+        operation.Cancel()
+
+        Assert.Equal("closed", operation.state)
+        Assert.Equal(0, operation.onComplete)
+        Assert.Equal(0, operation.onError)
+    }
+
+    StaleCallbackContextNeverFallsBackToReusedHandle() {
+        operation := FakeWinHttpStatusOperation()
+        WinHttpTextRequest.operationsByHandle[42] := operation
+        try WinHttpTextRequest.DispatchStatus(42, 999, 0x00400000, 0, 0)
+        finally WinHttpTextRequest.operationsByHandle.Delete(42)
+
+        Assert.Equal(0, operation.statusCalls)
+    }
+
+    NativeCallbackMasksThirtyTwoBitParameters() {
+        operation := FakeWinHttpStatusOperation()
+        WinHttpTextRequest.operationsByHandle[42] := operation
+        try WinHttpTextRequest.DispatchStatus(
+            42,
+            0,
+            0x100000000 + 0x00400000,
+            0,
+            0x100000000
+        )
+        finally WinHttpTextRequest.operationsByHandle.Delete(42)
+
+        Assert.Equal(0x00400000, operation.lastStatus)
+        Assert.Equal(0, operation.lastLength)
+    }
+
+    MetadataResponsesAreStreamBoundedBeforeParsing() {
+        operation := WinHttpTextRequest(
+            "https://api.github.com/test",
+            (*) => 0,
+            (*) => 0,
+            5
+        )
+        firstChunk := Buffer(4)
+        NumPut("UInt", 0x64636261, firstChunk)
+        operation.ConsumeReadChunk(firstChunk.Ptr, firstChunk.Size)
+
+        Assert.Equal(4, operation.totalBytes)
+        Assert.Equal(5, operation.bodyBuffer.Size)
+
+        secondChunk := Buffer(2)
+        Assert.Throws(
+            () => operation.ConsumeReadChunk(secondChunk.Ptr, secondChunk.Size),
+            "exceeded its byte limit"
+        )
+        Assert.Equal(4, operation.totalBytes)
+        operation.Cancel()
+    }
+
     NewMetadataRequest(maximumSize) {
         return WinHttpTextRequest("https://api.github.com/test", (*) => 0, (*) => 0, maximumSize)
     }
@@ -326,5 +501,22 @@ class RecordingMetadataRequest extends WinHttpTextRequest {
 
     Schedule(methodName, params*) {
         this.scheduled.Push({method: methodName, params: params})
+    }
+}
+
+class FakeWinHttpStatusOperation {
+    __New() {
+        this.statusCalls := 0
+        this.lastStatus := 0
+        this.lastLength := 0
+    }
+
+    HandleNativeStatus(handle, status, information, length) {
+        this.statusCalls++
+        this.lastStatus := status
+        this.lastLength := length
+    }
+
+    Schedule(*) {
     }
 }

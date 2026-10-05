@@ -1,7 +1,8 @@
 ; = CONTENTS
 ;   + Preamble
-;   + UpdateCheckerTest class (version parsing, auto/manual check, download/verify, updater, dialog)
-;   + Test doubles (transports, status operations, shutdown coordinator, json/info helpers)
+;   + UpdateCheckerTest class (version parsing, auto/manual checks, update dialog,
+;       install-path and updater-script handling; trust checks are in UpdateVerificationTest)
+;   + Test doubles (transports, shutdown coordinator, json/info helpers)
 
 #Requires AutoHotkey v2.0
 #Include ../UpdateChecker.ahk
@@ -33,23 +34,12 @@ class UpdateCheckerTest {
         "TestManualCompletionDefersDialogDuringClinicalCommand",
         "TestUpdateDialogRequiresPresentationLease",
         "TestFailedUpdateNowLeavesTheDialogButtonsUsable",
-        "TestAsyncRequestCancelBreaksCallbackOwnership",
-        "TestStaleCallbackContextNeverFallsBackToReusedHandle",
-        "TestNativeCallbackMasksThirtyTwoBitParameters",
-        "TestMetadataResponsesAreStreamBoundedBeforeParsing",
         "TestSettingsChangeCancelsInFlightAutomaticCheck",
         "TestClinicalCommandBlocksUpdateExit",
         "TestReadOnlyInstallDirectoryBlocksUpdateBeforeShutdown",
         "TestUpdaterPathFailureReleasesShutdownTransaction",
         "TestVersionComesFromAppVersion",
-        "TestReleaseParserKeepsAssetMetadataTogether",
-        "TestReleaseParserAcceptsArrayResponse",
-        "TestReleaseParserRejectsOversizedAsset",
         "TestReleaseParserShortensOversizedNotes",
-        "TestReleaseStatusDistinguishesExpectedAbsenceFromFailure",
-        "TestDownloadUrlMustBelongToThisRepository",
-        "TestSha256KnownVector",
-        "TestArtifactValidationRejectsNonExecutable",
         "TestUpdaterScriptRequiresHealthyRelaunch",
         "TestUpdaterScriptRecoversAfterPreSwapFailure",
         "TestUpdaterUsesPrivateTemporaryScript",
@@ -190,45 +180,6 @@ class UpdateCheckerTest {
         Assert.Equal(AppVersion.current, UpdateChecker.currentVersion)
     }
 
-    TestReleaseParserKeepsAssetMetadataTogether() {
-        json := '{"tag_name":"v2.2.0","prerelease":false,"body":"Line 1\nLine 2","assets":['
-            . '{"name":"notes.txt","size":12,"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/notes.txt"},'
-            . '{"browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/pacs-assistant.exe","digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":1550000,"name":"pacs-assistant.exe"}'
-            . ']}'
-
-        release := UpdateChecker.ParseReleaseResponse(json)
-
-        Assert.Equal("v2.2.0", release.version)
-        Assert.Equal("Line 1`nLine 2", release.notes)
-        Assert.Equal(1550000, release.assetSize)
-        Assert.Equal("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", release.assetSha256)
-        Assert.True(InStr(release.downloadUrl, "/pacs-assistant.exe") > 0)
-    }
-
-    TestReleaseParserAcceptsArrayResponse() {
-        json := '[{"tag_name":"v2.2.0-beta.1","prerelease":true,"body":"Beta","assets":['
-            . '{"name":"pacs-assistant.exe","size":42,"digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0-beta.1/pacs-assistant.exe"}'
-            . ']}]'
-
-        release := UpdateChecker.ParseReleaseResponse(json)
-        Assert.Equal("v2.2.0-beta.1", release.version)
-        Assert.Equal(42, release.assetSize)
-    }
-
-    TestReleaseParserRejectsOversizedAsset() {
-        size := UpdateChecker.maxUpdateSizeBytes + 1
-        json := '{"tag_name":"v9.0.0","prerelease":false,"body":"Large","assets":['
-            . '{"name":"pacs-assistant.exe","size":' size
-            . ',"digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"'
-            . ',"browser_download_url":"https://github.com/rakan959/pacs-assistant/releases/download/v9.0.0/pacs-assistant.exe"}'
-            . ']}'
-
-        Assert.Throws(
-            (*) => UpdateChecker.ParseReleaseResponse(json),
-            "invalid size"
-        )
-    }
-
     ; Notes are display-only: long ones are shortened, never a reason to refuse the
     ; update. The cut never leaves half of a surrogate pair.
     TestReleaseParserShortensOversizedNotes() {
@@ -249,62 +200,6 @@ class UpdateCheckerTest {
         marker := "`n`n[Release notes shortened"
         Assert.Equal(marker, SubStr(release.notes, cutAt + 1, StrLen(marker)))
         Assert.True(InStr(release.notes, "release page on GitHub"), release.notes)
-    }
-
-    TestReleaseStatusDistinguishesExpectedAbsenceFromFailure() {
-        Assert.True(UpdateChecker.ReleaseResponseAvailable(200, true))
-        Assert.False(UpdateChecker.ReleaseResponseAvailable(404, true))
-        Assert.Throws(
-            () => UpdateChecker.ReleaseResponseAvailable(403, true),
-            "HTTP 403"
-        )
-        Assert.Throws(
-            () => UpdateChecker.ReleaseResponseAvailable(503, false),
-            "HTTP 503"
-        )
-        Assert.Throws(
-            () => UpdateChecker.ReleaseResponseAvailable(404, false),
-            "HTTP 404"
-        )
-    }
-
-    TestDownloadUrlMustBelongToThisRepository() {
-        Assert.True(UpdateChecker.IsTrustedDownloadUrl(
-            "https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/pacs-assistant.exe"
-        ))
-        Assert.False(UpdateChecker.IsTrustedDownloadUrl(
-            "http://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/pacs-assistant.exe"
-        ))
-        Assert.False(UpdateChecker.IsTrustedDownloadUrl(
-            "https://github.com/attacker/pacs-assistant/releases/download/v2.2.0/pacs-assistant.exe"
-        ))
-        Assert.False(UpdateChecker.IsTrustedDownloadUrl(
-            "https://github.com/rakan959/pacs-assistant/releases/download/v2.2.0/other.exe"
-        ))
-    }
-
-    TestSha256KnownVector() {
-        path := TestTempPath("pacs-sha256", ".txt")
-        FileAppend("abc", path, "UTF-8-RAW")
-        try {
-            Assert.Equal(
-                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-                UpdateChecker.HashFileSha256(path)
-            )
-        } finally {
-            try FileDelete(path)
-        }
-    }
-
-    TestArtifactValidationRejectsNonExecutable() {
-        path := TestTempPath("pacs-bad-update", ".exe")
-        FileAppend("not an executable", path, "UTF-8-RAW")
-        try {
-            digest := UpdateChecker.HashFileSha256(path)
-            Assert.False(UpdateChecker.ValidateDownloadedArtifact(path, FileGetSize(path), digest, "v2.2.0"))
-        } finally {
-            try FileDelete(path)
-        }
     }
 
     ; The script runs only on an installed workstation, so these pin its control
@@ -678,69 +573,6 @@ class UpdateCheckerTest {
         Assert.Equal(0, UpdateChecker.updateDialog)
     }
 
-    TestAsyncRequestCancelBreaksCallbackOwnership() {
-        operation := WinHttpTextRequest(
-            "https://api.github.com/test",
-            (*) => 0,
-            (*) => 0,
-            UpdateChecker.maxMetadataSizeBytes
-        )
-
-        operation.Cancel()
-
-        Assert.Equal("closed", operation.state)
-        Assert.Equal(0, operation.onComplete)
-        Assert.Equal(0, operation.onError)
-    }
-
-    TestStaleCallbackContextNeverFallsBackToReusedHandle() {
-        operation := FakeWinHttpStatusOperation()
-        WinHttpTextRequest.operationsByHandle[42] := operation
-        try WinHttpTextRequest.DispatchStatus(42, 999, 0x00400000, 0, 0)
-        finally WinHttpTextRequest.operationsByHandle.Delete(42)
-
-        Assert.Equal(0, operation.statusCalls)
-    }
-
-    TestNativeCallbackMasksThirtyTwoBitParameters() {
-        operation := FakeWinHttpStatusOperation()
-        WinHttpTextRequest.operationsByHandle[42] := operation
-        try WinHttpTextRequest.DispatchStatus(
-            42,
-            0,
-            0x100000000 + 0x00400000,
-            0,
-            0x100000000
-        )
-        finally WinHttpTextRequest.operationsByHandle.Delete(42)
-
-        Assert.Equal(0x00400000, operation.lastStatus)
-        Assert.Equal(0, operation.lastLength)
-    }
-
-    TestMetadataResponsesAreStreamBoundedBeforeParsing() {
-        operation := WinHttpTextRequest(
-            "https://api.github.com/test",
-            (*) => 0,
-            (*) => 0,
-            5
-        )
-        firstChunk := Buffer(4)
-        NumPut("UInt", 0x64636261, firstChunk)
-        operation.ConsumeReadChunk(firstChunk.Ptr, firstChunk.Size)
-
-        Assert.Equal(4, operation.totalBytes)
-        Assert.Equal(5, operation.bodyBuffer.Size)
-
-        secondChunk := Buffer(2)
-        Assert.Throws(
-            () => operation.ConsumeReadChunk(secondChunk.Ptr, secondChunk.Size),
-            "exceeded its byte limit"
-        )
-        Assert.Equal(4, operation.totalBytes)
-        operation.Cancel()
-    }
-
     TestSettingsChangeCancelsInFlightAutomaticCheck() {
         transport := FakeAsyncUpdateTransport()
         UpdateChecker.transport := transport
@@ -851,23 +683,6 @@ class FakeShutdownCoordinator {
 
     CancelShutdown(*) {
         this.cancelCalls++
-    }
-}
-
-class FakeWinHttpStatusOperation {
-    __New() {
-        this.statusCalls := 0
-        this.lastStatus := 0
-        this.lastLength := 0
-    }
-
-    HandleNativeStatus(handle, status, information, length) {
-        this.statusCalls++
-        this.lastStatus := status
-        this.lastLength := length
-    }
-
-    Schedule(*) {
     }
 }
 
