@@ -16,6 +16,7 @@ class SettingsTest {
         "TestSaveAndGetValues",
         "TestMutationGuardRejectsSettingsWrite",
         "TestPresentationLeaseRejectsSettingsWindowBeforeCreation",
+        "TestSettingsWindowReleasesItsPresentationLease",
         "TestMalformedPersistedSettingsUseDefaults",
         "TestExcessivePersistedRefreshIntervalUsesDefault",
         "TestSavingRejectsNonWholeRefreshInterval",
@@ -121,6 +122,26 @@ class SettingsTest {
         Assert.Equal(1, lease.acquireCalls)
         Assert.Equal(0, lease.releaseCalls)
         Assert.Equal(1, lease.notificationCalls)
+    }
+
+    ; The lease covers building the window only. Held on, it would refuse every
+    ; clinical command and profile change until a restart.
+    TestSettingsWindowReleasesItsPresentationLease() {
+        lease := FakePresentationLease(true)
+        Settings.dialogAcquire := ObjBindMethod(lease, "Acquire")
+        Settings.dialogRelease := ObjBindMethod(lease, "Release")
+        Settings.dialogUnavailableNotifier := ObjBindMethod(lease, "Notify")
+
+        result := Settings.ShowDialog()
+        try {
+            Assert.True(IsObject(result))
+            Assert.Equal(1, lease.acquireCalls)
+            Assert.Equal(1, lease.releaseCalls)
+            Assert.Equal(0, lease.notificationCalls)
+        } finally {
+            if IsObject(result)
+                try result.Destroy()
+        }
     }
 
     TestMalformedPersistedSettingsUseDefaults() {

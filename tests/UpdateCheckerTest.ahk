@@ -35,6 +35,7 @@ class UpdateCheckerTest {
         "TestSkippedCachedVersionCannotReopen",
         "TestManualCompletionDefersDialogDuringClinicalCommand",
         "TestUpdateDialogRequiresPresentationLease",
+        "TestUpdateDialogReleasesItsPresentationLease",
         "TestFailedUpdateNowLeavesTheDialogButtonsUsable",
         "TestStaleUpdateDialogClosesAfterItsConflictNotice",
         "TestNewerReleaseReplacesAnOpenUpdateDialog",
@@ -590,6 +591,24 @@ class UpdateCheckerTest {
         Assert.Equal(0, lease.releaseCalls)
         Assert.True(IsObject(UpdateChecker.pendingUpdateInfo))
         Assert.Equal(1, this.manualNotifications.Length)
+    }
+
+    ; The lease covers building the dialog only. Held on, it would refuse every
+    ; clinical command and profile change until a restart.
+    TestUpdateDialogReleasesItsPresentationLease() {
+        lease := FakePresentationLease(true)
+        UpdateChecker.dialogAcquire := ObjBindMethod(lease, "Acquire")
+        UpdateChecker.dialogRelease := ObjBindMethod(lease, "Release")
+
+        result := UpdateChecker.ShowUpdateDialog(ValidUpdateInfo())
+        try {
+            Assert.True(IsObject(result))
+            Assert.Equal(1, lease.acquireCalls)
+            Assert.Equal(1, lease.releaseCalls)
+        } finally {
+            if IsObject(result)
+                UpdateChecker.CloseUpdateDialog(result)
+        }
     }
 
     ; Update Now keeps the dialog open when the update does not start, so the
