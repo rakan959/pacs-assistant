@@ -40,6 +40,34 @@ function Assert-NotMatches {
     }
 }
 
+# YAML lets a key or a value be quoted and a mapping be written inline as
+# { key: value }. The workflow checks below parse only the plain block form, so
+# they count every form of a key or value and require each to be the plain one.
+function Get-YamlKeyCount {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string] $Text,
+
+        [Parameter(Mandatory)]
+        [string] $Key
+    )
+
+    $anyKey = "(?:$Key|""$Key""|'$Key')"
+    return [regex]::Matches($Text, "(?m)(?:^|[{,])\s*(?:-\s+)?$anyKey\s*:").Count
+}
+
+# Every value "write", in any form, for any key: only a permission takes it.
+function Get-WriteValueCount {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string] $Text
+    )
+
+    return [regex]::Matches($Text, '(?m):\s*["'']?write["'']?\s*(?:$|[,}])').Count
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $workflow = Get-Content -Raw (Join-Path $repoRoot '.github/workflows/ahk2exe.yml')
 # The workflow without comments, for checks that a trailing "# ..." must not defeat.
@@ -153,11 +181,14 @@ foreach ($ahkSource in $ahkSources) {
 
 Assert-Matches $workflowCode '(?m)^permissions:\s*\r?\n  contents:\s*read\s*$' 'The top-level workflow token permission must be contents: read.'
 Assert-NotMatches $workflowCode '(?m)^\s*permissions:[ \t]*\S' 'Workflow token permissions must be block mappings that name each scope, not an inline value such as write-all or { ... }.'
+if ((Get-YamlKeyCount $workflowCode 'permissions') -ne [regex]::Matches($workflowCode, '(?m)^\s*permissions:\s*$').Count) {
+    $failures.Add('Every workflow permissions key must be a plain, unquoted block mapping key.')
+}
 Assert-NotMatches $workflowCode '\b(?:read|write)-all\b' 'Workflow token permissions must name each scope, not read-all or write-all.'
 Assert-Matches $workflowCode '(?ms)^\s{2}release:\s.*?^\s{4}permissions:\s*\r?\n\s{6}contents:\s*write\s*$' 'Only the release job may request contents: write.'
-# Any scope (contents, actions, id-token, ...) counts: the release job's contents:
-# write is the only write permission in the workflow.
-if ([regex]::Matches($workflowCode, '(?m)^\s*[a-z-]+:\s*write\s*$').Count -ne 1) {
+# Any scope (contents, actions, id-token, ...) and any form (quoted, inline)
+# counts: the release job's contents: write is the only write permission.
+if ((Get-WriteValueCount $workflowCode) -ne 1) {
     $failures.Add('Exactly one write permission, the release job''s contents: write, may appear in the workflow.')
 }
 Assert-Matches $workflow '(?m)^\s*runs-on:\s*windows-2025\s*$' 'The build job must use a versioned Windows runner image.'
@@ -391,7 +422,8 @@ Assert-Matches $readme '(?i)tag ruleset.*restrict.*updates.*deletions' 'Release 
 Assert-NotMatches ($appControl + $keybindGui) '``n``n' 'User-facing diagnostics must use real AHK newline escapes, not render literal backtick-n text.'
 
 $actionReferencePattern = '(?m)^\s*(?:-\s+)?uses:\s*(?<reference>\S+?)(?:\s+#.*)?\s*$'
-$usesLineCount = [regex]::Matches($workflow, '(?m)^\s*(?:-\s+)?uses:\s*').Count
+# Quoted and inline uses keys count too, so a step the pattern cannot parse fails.
+$usesLineCount = Get-YamlKeyCount $workflowCode 'uses'
 $validatedActionCount = 0
 foreach ($match in [regex]::Matches($workflow, $actionReferencePattern)) {
     $validatedActionCount++
@@ -426,8 +458,31 @@ foreach ($fixture in @(
 
 $checkoutCount = [regex]::Matches($workflowCode, '(?m)^\s*(?:-\s+)?uses:\s*actions/checkout@').Count
 $credentialsOff = [regex]::Matches($workflowCode, '(?m)^\s*persist-credentials:\s*false\s*$').Count
-if ($checkoutCount -lt 1 -or $credentialsOff -ne $checkoutCount) {
-    $failures.Add('Every checkout must set persist-credentials: false; the build job runs downloaded tools.')
+if ($checkoutCount -lt 1 -or $credentialsOff -ne $checkoutCount -or (Get-YamlKeyCount $workflowCode 'persist-credentials') -ne $credentialsOff) {
+    $failures.Add('Every checkout must set persist-credentials: false, as a plain block line; the build job runs downloaded tools.')
+}
+
+# The counters must see the forms the plain-line patterns cannot parse.
+foreach ($fixture in @(
+    @{ Text = '      - { uses: actions/checkout@v4 }'; Key = 'uses' },
+    @{ Text = '      - "uses": actions/checkout@v4'; Key = 'uses' },
+    @{ Text = "        'uses': actions/checkout@v4"; Key = 'uses' },
+    @{ Text = '        with: { persist-credentials: true }'; Key = 'persist-credentials' },
+    @{ Text = '    "permissions": { contents: read }'; Key = 'permissions' }
+)) {
+    if ((Get-YamlKeyCount $fixture.Text $fixture.Key) -ne 1) {
+        $failures.Add("The YAML key counter did not cover negative fixture: $($fixture.Text)")
+    }
+}
+foreach ($fixture in @(
+    '      contents: "write"',
+    "      'id-token': 'write'",
+    '    permissions: { contents: write, actions: read }',
+    '    permissions: { actions: read, contents: write }'
+)) {
+    if ((Get-WriteValueCount $fixture) -ne 1) {
+        $failures.Add("The write permission counter did not cover negative fixture: $fixture")
+    }
 }
 Assert-NotMatches $workflow '(?i)benmusson/ahk2exe-action|softprops/action-gh-release' 'Build and release must not delegate downloaded binaries or release authority to third-party actions.'
 Assert-NotMatches $workflow 'Ahk2Exe-SetCopyright\s+MIT' 'Executable copyright metadata must not mislabel the GPL-3.0 project as MIT.'
