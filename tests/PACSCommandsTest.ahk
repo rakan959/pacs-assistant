@@ -79,6 +79,12 @@ class PACSCommandsTest {
         Assert.Equal("Chest", ReportModality.Classify("EXAMINATION: CT CHEST"))
         Assert.Equal("Chest", ReportModality.Classify("EXAMINATION: CT CHEST WITH CONTRAST"))
         Assert.Equal("Neuro", ReportModality.Classify("EXAMINATION: MRI BRAIN"))
+        ; MR and MRI name the same modality, as in the MSK rule.
+        Assert.Equal("Neuro", ReportModality.Classify("EXAMINATION: MR BRAIN WITHOUT CONTRAST"))
+        Assert.Equal("Neuro", ReportModality.Classify("EXAMINATION: MR CERVICAL SPINE"))
+        Assert.Equal("Body", ReportModality.Classify("EXAMINATION: MR ABDOMEN"))
+        Assert.Equal("Body", ReportModality.Classify("EXAMINATION: MRCP"))
+        Assert.Equal("Neuro", ReportModality.Classify("EXAMINATION: MRA HEAD"))
         Assert.Equal("Neuro", ReportModality.Classify("EXAMINATION: CT HEAD WITHOUT CONTRAST"))
         Assert.Equal("Nucs", ReportModality.Classify("EXAMINATION: NM BONE SCAN"))
         ; The Peds rules are ultrasounds, so they must beat the catch-all US rule
