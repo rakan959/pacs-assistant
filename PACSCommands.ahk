@@ -56,7 +56,7 @@ class PACSCommands {
         ; windows, so preserve the profile command but perform no window action.
         try this.unavailableNotifier.Call(
             "EPIC window identity has not been safely configured. Toggle EPIC manually.",
-            "Toggle EPIC unavailable",
+            "Toggle EPIC Unavailable",
             "Icon!"
         )
         return false
@@ -70,7 +70,7 @@ class PACSCommands {
         if lease.status == "unavailable" {
             try this.busyNotifier.Call(
                 "PACS Assistant is shutting down or changing configuration. '" name "' was not started.",
-                "Clinical command unavailable",
+                "Clinical Command Unavailable",
                 "Icon!"
             )
             return false
@@ -78,7 +78,7 @@ class PACSCommands {
         if lease.status != "acquired" {
             try this.busyNotifier.Call(
                 "'" lease.busyCommand "' is still running. '" name "' was not started.",
-                "Clinical command already in progress",
+                "Clinical Command In Progress",
                 "Icon!"
             )
             return false

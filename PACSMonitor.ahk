@@ -290,7 +290,7 @@ class PACSMonitor {
             AppLog.Write("PACS auto-refresh is not working: " this.consecutiveRefreshFailures " consecutive refreshes failed")
             this.Notify(
                 "Explorer Portal could not be refreshed safely. Monitoring may be stale; refresh and check the worklist manually.",
-                "PACS auto-refresh is not working",
+                "PACS Auto-Refresh Not Working",
                 "Icon!"
             )
         }
@@ -303,7 +303,7 @@ class PACSMonitor {
         AppLog.Write("PACS auto-refresh is unavailable: no Explorer Portal refresh control is approved")
         this.Notify(
             "PACS Assistant cannot refresh Explorer Portal yet, so it checks the worklist only as Explorer Portal shows it. Refresh the worklist yourself to see new studies.",
-            "PACS auto-refresh unavailable",
+            "PACS Auto-Refresh Unavailable",
             "Icon!"
         )
     }
@@ -330,7 +330,7 @@ class PACSMonitor {
             notice := "Explorer Portal could not be read after " this.consecutiveScanFailures " attempts. Last error: " message
             ; Logged once per failure episode, with the notice, rather than once per poll.
             AppLog.Write("PACS background monitoring failed: " notice)
-            this.Notify(notice, "PACS background monitoring failed", "Icon!")
+            this.Notify(notice, "PACS Background Monitoring Failed", "Icon!")
         }
     }
 

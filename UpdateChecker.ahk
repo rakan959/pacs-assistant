@@ -198,7 +198,7 @@ class UpdateChecker {
         this.notifiedVersion := updateInfo.latestVersion
         try this.updateAvailableNotifier.Call(
             "Version " updateInfo.latestVersion " is available. Use Check for Updates when ready.",
-            "PACS Assistant update available",
+            "PACS Assistant Update Available",
             "Iconi"
         )
     }
@@ -562,7 +562,7 @@ class UpdateChecker {
         }
         try this.updateAvailableNotifier.Call(
             "Checking GitHub for a PACS Assistant update...",
-            "Checking for updates",
+            "Checking for Updates",
             "Iconi"
         )
         return true
@@ -593,7 +593,7 @@ class UpdateChecker {
             if this.clinicalActivityProbe.Call() {
                 this.updateAvailableNotifier.Call(
                     "The update is ready to review after the active clinical command finishes.",
-                    "PACS Assistant update available",
+                    "PACS Assistant Update Available",
                     "Iconi"
                 )
                 return

@@ -424,7 +424,7 @@ class MicrophoneManagerTest {
 
         Assert.Equal(1, this.notifications.Length)
         Assert.True(InStr(this.notifications[1].text, "PowerMic") > 0)
-        Assert.Equal("PowerScribe microphone was not changed", this.notifications[1].title)
+        Assert.Equal("PowerScribe Microphone Not Changed", this.notifications[1].title)
     }
 
     OperationalErrorIsRecorded() {

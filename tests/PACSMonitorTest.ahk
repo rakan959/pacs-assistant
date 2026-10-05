@@ -415,7 +415,7 @@ class PACSMonitorTest {
         Assert.Equal(PACSMonitor.scanFailureThreshold, failures)
         Assert.True(InStr(lastError, "multiple exact Explorer Portal windows") > 0)
         Assert.Equal(1, this.notifications.Length)
-        Assert.Equal("PACS background monitoring failed", this.notifications[1].title)
+        Assert.Equal("PACS Background Monitoring Failed", this.notifications[1].title)
     }
 
     TestStudyListFallbackRequiresExpectedTypeAndProcess() {
@@ -509,7 +509,7 @@ class PACSMonitorTest {
         Assert.Equal(1, this.notifications.Length)
         Assert.True(InStr(this.notifications[1].text, "Monitoring may be stale") > 0)
         Assert.True(InStr(this.notifications[1].text, "manually") > 0)
-        Assert.Equal("PACS auto-refresh is not working", this.notifications[1].title)
+        Assert.Equal("PACS Auto-Refresh Not Working", this.notifications[1].title)
     }
 
     ; With no approved refresh control nothing can be clicked. That is a property of
@@ -545,7 +545,7 @@ class PACSMonitorTest {
         Assert.Equal(0, loggedFailures)
         Assert.Equal(0, PACSMonitor.consecutiveRefreshFailures)
         Assert.Equal(1, titles.Length)
-        Assert.Equal("PACS auto-refresh unavailable", titles[1])
+        Assert.Equal("PACS Auto-Refresh Unavailable", titles[1])
         Assert.True(InStr(this.notifications[1].text, "yourself"), this.notifications[1].text)
     }
 
@@ -563,7 +563,7 @@ class PACSMonitorTest {
 
         Assert.Equal(1, this.notifications.Length)
         Assert.True(InStr(this.notifications[1].text, "study list unavailable") > 0)
-        Assert.Equal("PACS background monitoring failed", this.notifications[1].title)
+        Assert.Equal("PACS Background Monitoring Failed", this.notifications[1].title)
         Assert.Equal("study list unavailable", PACSMonitor.lastError)
 
         PACSMonitor.RecordScanSuccess()

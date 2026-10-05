@@ -225,7 +225,7 @@ class MicrophoneManager {
             message .= " Last error: " this.lastError
         ; Logged once per login session, with the notice, rather than once per poll.
         AppLog.Write("PowerScribe microphone was not changed: " message)
-        this.Notify(message, "PowerScribe microphone was not changed", "Icon!")
+        this.Notify(message, "PowerScribe Microphone Not Changed", "Icon!")
     }
 
     ; Picker absence is expected after login. Identity ambiguity and provider failures
