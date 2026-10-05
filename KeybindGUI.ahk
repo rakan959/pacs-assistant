@@ -1277,7 +1277,7 @@ class KeybindGUI {
                 if (currentProfile.customFuncs.Has(funcName)) {
                     config := currentProfile.customFuncs[funcName]
                     callback := PACSCommands.CreateCustomKeybind(config.keys, config.window)
-                    result := HotkeyManager.RegisterCustomHotkey(funcName, bind, callback, scope)
+                    result := HotkeyManager.Register(funcName, bind, callback, scope)
                 } else {
                     result := HotkeyManager.RegisterHotkey(funcName, bind, scope)
                 }

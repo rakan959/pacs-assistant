@@ -17,7 +17,7 @@ class HotkeyManager {
     ; Registrations whose rollback could not be verified remain separately tracked.
     ; Losing either possibly-live variant would make later teardown fail open.
     static additionalActiveHotkeys := Map()
-    static hotkeyFunctions := Map()
+    static hotkeyFunctions := PACSCommands.commands
     static hotkeyDriver := NativeHotkeyDriver()
 
     ; Why the last Register call failed. Registration reports failure by return value
@@ -34,11 +34,6 @@ class HotkeyManager {
         "PowerScribe", (*) => HotkeyManager.PowerScribeIsActive(),
         "PACS or PowerScribe", (*) => HotkeyManager.PACSIsActive() || HotkeyManager.PowerScribeIsActive()
     )
-
-    static __New() {
-        ; Initialize hotkey functions from PACSCommands
-        this.hotkeyFunctions := PACSCommands.commands
-    }
 
     static PACSIsActive(exactWindowProbe := 0) {
         specs := [
@@ -101,10 +96,6 @@ class HotkeyManager {
     static RegisterHotkey(funcName, hotkeyStr, scope := "Any") {
         callback := this.hotkeyFunctions.Has(funcName) ? this.hotkeyFunctions[funcName] : 0
         return this.Register(funcName, hotkeyStr, callback, scope)
-    }
-
-    static RegisterCustomHotkey(funcName, hotkeyStr, customFunc, scope := "Any") {
-        return this.Register(funcName, hotkeyStr, customFunc, scope)
     }
 
     static Register(funcName, hotkeyStr, callback, scope := "Any") {
