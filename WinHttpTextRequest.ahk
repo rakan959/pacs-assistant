@@ -35,7 +35,6 @@ class WinHttpTextRequest {
         if (!(maximumSize is Integer) || maximumSize <= 0)
             throw ValueError("A positive metadata response limit is required")
 
-        this.url := url
         this.path := urlMatch[1]
         this.onComplete := onComplete
         this.onError := onError

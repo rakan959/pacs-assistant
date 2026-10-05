@@ -343,7 +343,7 @@ class UpdateCheckerTest {
         UpdateChecker.transport := transport
         SetTestSetting("SkipBetaVersions", true)
 
-        Assert.True(UpdateChecker.BeginAutoCheck(true))
+        Assert.True(UpdateChecker.BeginAutoCheck())
         Assert.Equal(1, transport.asyncCalls)
         Assert.Equal(0, transport.syncCalls)
         Assert.True(UpdateChecker.activeRequest != 0)
@@ -360,14 +360,14 @@ class UpdateCheckerTest {
             transport := FakeAsyncUpdateTransport()
             UpdateChecker.transport := transport
             loop 2 {
-                Assert.True(UpdateChecker.BeginAutoCheck(true))
+                Assert.True(UpdateChecker.BeginAutoCheck())
                 transport.Resolve({status: 503, body: ""})
             }
             Assert.Equal(1, capturedLog.Count("Automatic update check failed: Error: GitHub release request returned HTTP 503"))
 
-            Assert.True(UpdateChecker.BeginAutoCheck(true))
+            Assert.True(UpdateChecker.BeginAutoCheck())
             transport.Resolve({status: 404, body: ""})
-            Assert.True(UpdateChecker.BeginAutoCheck(true))
+            Assert.True(UpdateChecker.BeginAutoCheck())
             transport.Resolve({status: 503, body: ""})
             Assert.Equal(2, capturedLog.Count("Automatic update check failed"))
         } finally capturedLog.Restore()
@@ -377,7 +377,7 @@ class UpdateCheckerTest {
         UpdateChecker.transport := NullHandleAsyncTransport()
         capturedLog := LogCapture()
         try {
-            Assert.False(UpdateChecker.BeginAutoCheck(true))
+            Assert.False(UpdateChecker.BeginAutoCheck())
             Assert.Equal(0, UpdateChecker.activeRequest)
             Assert.Equal(1, capturedLog.Count("Automatic update check failed: Error: The update request returned no handle"))
         } finally capturedLog.Restore()
@@ -391,7 +391,7 @@ class UpdateCheckerTest {
     TestSynchronousAsyncFailureIsNotReportedAsStarted() {
         UpdateChecker.transport := SynchronousFailingAsyncTransport()
 
-        Assert.False(UpdateChecker.BeginAutoCheck(true))
+        Assert.False(UpdateChecker.BeginAutoCheck())
         Assert.Equal(0, UpdateChecker.activeRequest)
 
         Assert.False(UpdateChecker.BeginManualCheck())
@@ -405,7 +405,7 @@ class UpdateCheckerTest {
         transport := FakeAsyncUpdateTransport()
         UpdateChecker.transport := transport
         SetTestSetting("SkipBetaVersions", true)
-        Assert.True(UpdateChecker.BeginAutoCheck(true))
+        Assert.True(UpdateChecker.BeginAutoCheck())
         slot := UpdateChecker.activeRequest
 
         transport.Resolve({status: 200, body: UpdateReleaseJson("v9.0.0")})
@@ -426,7 +426,7 @@ class UpdateCheckerTest {
         SetTestSetting("SkipBetaVersions", true)
         UpdateChecker.lastRemindTime := DllCall("GetTickCount64", "UInt64")
 
-        Assert.True(UpdateChecker.BeginAutoCheck(true))
+        Assert.True(UpdateChecker.BeginAutoCheck())
         transport.Resolve({status: 200, body: UpdateReleaseJson("v9.0.0")})
         Assert.Equal(0, this.updateNotifications.Length)
         Assert.Equal(0, UpdateChecker.pendingUpdateInfo)
@@ -457,7 +457,7 @@ class UpdateCheckerTest {
         UpdateChecker.transport := transport
         SetTestSetting("SkipBetaVersions", true)
         check := () => (
-            UpdateChecker.BeginAutoCheck(true),
+            UpdateChecker.BeginAutoCheck(),
             transport.Resolve({status: 200, body: UpdateReleaseJson("v9.0.0")})
         )
 
@@ -626,7 +626,7 @@ class UpdateCheckerTest {
         transport := FakeAsyncUpdateTransport()
         UpdateChecker.transport := transport
         SetTestSetting("AutoUpdate", true)
-        Assert.True(UpdateChecker.BeginAutoCheck(true))
+        Assert.True(UpdateChecker.BeginAutoCheck())
 
         SetTestSetting("AutoUpdate", false)
         UpdateChecker.OnSettingsChanged()

@@ -96,10 +96,10 @@ class UpdateChecker {
             try handle.Cancel()
     }
 
-    static BeginAutoCheck(force := false) {
+    static BeginAutoCheck() {
         if this.activeRequest
             return false
-        if (!force && !this.updateCheckEligibleProbe.Call())
+        if !this.updateCheckEligibleProbe.Call()
             return false
 
         start := this.StartCheck(false)
