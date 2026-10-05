@@ -10,7 +10,10 @@
 #Include FakeWindowList.ahk
 
 class WetReadTest {
+    static helpers := ["PastedText"]
+
     static tests := [
+        "PasteConvertsLineEndingsOnlyWhenTheSettingIsOn",
         "ClipboardPasteModeIsRejectedWithoutMutation",
         "UnsupportedUIADoesNotClearTheNote",
         "PostMutationUIAErrorCanSucceedOnlyWithExactReadback",
@@ -69,6 +72,30 @@ class WetReadTest {
         "ThrowingReportCaptureStillPastesAndReportsAttendingOutcome",
         "StickyTargetIsPinnedBeforePowerScribeRouting"
     ]
+
+    PasteConvertsLineEndingsOnlyWhenTheSettingIsOn() {
+        saved := UseTestSettings("probe-line-endings")
+        original := WetReadPasteEngine.GetOwnPropDesc("Paste")
+        try {
+            SetTestSetting("AutoConvertWetReadLineEndings", true)
+            Assert.Equal("a`r`nb", this.PastedText("a`nb"))
+            SetTestSetting("AutoConvertWetReadLineEndings", false)
+            Assert.Equal("a`nb", this.PastedText("a`nb"))
+        } finally {
+            WetReadPasteEngine.DefineProp("Paste", original)
+            RestoreTestSettings(saved)
+        }
+    }
+    PastedText(clipText) {
+        pasted := []
+        WetReadPasteEngine.DefineProp("Paste", {Call: (cls, field, text, mode, driver) => (pasted.Push(text), {success: true, unsupported: false, unchanged: false, reason: "", error: ""})})
+        field := FakeStickyTargetElement(UIA.Type.Document, 42, true, 200)
+        session := {stickyHwnd: 200, pacsRoot: {ProcessId: 42, WinId: 100}}
+        session.driver := FakePinnedStickyDriver(true, LocatingStickyTargetRoot(42, [field], 200, field))
+        Assert.True(PerformWetReadPaste(clipText, "uia", session))
+        Assert.Equal(1, pasted.Length)
+        return pasted[1]
+    }
 
     ClipboardPasteModeIsRejectedWithoutMutation() {
         driver := FakeWetReadDriver("existing note")

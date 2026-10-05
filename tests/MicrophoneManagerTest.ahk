@@ -12,6 +12,7 @@
 
 class MicrophoneManagerTest {
     static tests := [
+        "FailureBeforeTheAttemptLimitStaysQuiet",
         "WaitForSelectionRequiresTheExactResolvedValue",
         "WaitForSelectionIgnoresDisplayCasing",
         "MicrophoneComboRequiresExactIdentityAndCapability",
@@ -52,6 +53,15 @@ class MicrophoneManagerTest {
     static helpers := [
         "ChangePicker"
     ]
+
+    FailureBeforeTheAttemptLimitStaysQuiet() {
+        fixture := MicrophoneFixture(["PowerMic III"])
+        MicrophoneManager.sessionDriver := fixture.driver
+        SetTestSetting("MicrophoneName", "SpeechMike")
+        MicrophoneManager.CheckForLogin()
+        Assert.Equal(1, MicrophoneManager.attempts)
+        Assert.Equal(0, this.notifications.Length)
+    }
 
     Setup() {
         this.savedSettings := UseTestSettings("microphone-settings")

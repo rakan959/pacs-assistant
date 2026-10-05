@@ -12,6 +12,8 @@
 
 class ClinicalAutomationTest {
     static tests := [
+        "ForeignIdentityCandidateMakesTheReportUnreadable",
+        "FallbackThatIsNotAReportControlIsIgnored",
         "ActivationFailureDoesNotSend",
         "ActivationCanSucceedButFocusCheckStopsSend",
         "TargetedSendActivatesBeforeSending",
@@ -92,6 +94,21 @@ class ClinicalAutomationTest {
     static helpers := [
         "PowerScribeSession"
     ]
+
+    ForeignIdentityCandidateMakesTheReportUnreadable() {
+        session := {hwnd: 803, target: "ahk_id 803", processId: 42}
+        valid := FakePowerScribeReportElement(803, 42, "EXAMINATION: CT CHEST`nFINDINGS: Current report.")
+        foreign := FakePowerScribeReportElement(803, 43, "EXAMINATION: CT HEAD`nFINDINGS: Other process.")
+        PowerScribe.sessionDriver := FixedReportRootSessionDriver(session, UncertainReportRoot(803, 42, [valid, foreign]))
+        Assert.Equal("", PowerScribe.ReadReportText(session))
+    }
+    FallbackThatIsNotAReportControlIsIgnored() {
+        session := {hwnd: 804, target: "ahk_id 804", processId: 42}
+        text := FakePowerScribeReportElement(804, 42, "EXAMINATION: CT HEAD`nFINDINGS: Prior report pane.")
+        text.Type := UIA.Type.Text
+        PowerScribe.sessionDriver := FixedReportRootSessionDriver(session, PathOnlyReportRoot(804, 42, text))
+        Assert.Equal("", PowerScribe.ReadReportText(session))
+    }
 
     Setup() {
         this.originalDriver := AppControl.windowDriver
@@ -1981,3 +1998,17 @@ class SimulatedClockRestartDriver extends NativePacsRestartDriver {
     }
 }
 
+
+class PathOnlyReportRoot {
+    __New(hwnd, processId, pathElement) {
+        this.WinId := hwnd
+        this.ProcessId := processId
+        this.pathElement := pathElement
+    }
+    FindElements(*) {
+        return []
+    }
+    ElementFromPath(*) {
+        return this.pathElement
+    }
+}
