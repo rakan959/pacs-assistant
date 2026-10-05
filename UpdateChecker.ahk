@@ -1008,11 +1008,14 @@ class UpdateChecker {
         }
     }
 
+    ; The tag segment may be percent-encoded (GitHub encodes "+" build metadata),
+    ; but a literal or encoded dot segment would let the path climb out of
+    ; /releases/download/ before the digest check ever runs.
     static IsTrustedDownloadUrl(url) {
         return Type(url) = "String"
             && RegExMatch(
                 url,
-                "i)^https://github\.com/rakan959/pacs-assistant/releases/download/[^/?#]+/pacs-assistant\.exe$"
+                "i)^https://github\.com/rakan959/pacs-assistant/releases/download/(?!(?:\.|%2e){1,2}/)[^/?#]+/pacs-assistant\.exe$"
             ) > 0
     }
 

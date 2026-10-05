@@ -14,6 +14,7 @@ OnError(OnError_StdErr)
 #Include AppStorageTest.ahk
 #Include JsonParserTest.ahk
 #Include UpdateCheckerTest.ahk
+#Include UpdateVerificationTest.ahk
 #Include SettingsTest.ahk
 #Include PACSMonitorTest.ahk
 #Include MicrophoneManagerTest.ahk
@@ -29,6 +30,7 @@ TestRunner.AddTest(TestRunnerTest)
 TestRunner.AddTest(AppStorageTest)
 TestRunner.AddTest(JsonParserTest)
 TestRunner.AddTest(UpdateCheckerTest)
+TestRunner.AddTest(UpdateVerificationTest)
 TestRunner.AddTest(SettingsTest)
 TestRunner.AddTest(PACSMonitorTest)
 TestRunner.AddTest(MicrophoneManagerTest)
