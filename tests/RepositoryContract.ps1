@@ -272,10 +272,10 @@ foreach ($fixture in @(
     'uses: actions/checkout@v4',
     'uses: actions/checkout@v4 # v4'
 )) {
-    $matches = [regex]::Matches($fixture, $actionReferencePattern)
-    if ($matches.Count -ne 1 -or $matches[0].Groups['reference'].Value -ne 'actions/checkout@v4') {
+    $fixtureMatches = [regex]::Matches($fixture, $actionReferencePattern)
+    if ($fixtureMatches.Count -ne 1 -or $fixtureMatches[0].Groups['reference'].Value -ne 'actions/checkout@v4') {
         $failures.Add("The action-reference parser did not cover negative fixture: $fixture")
-    } elseif ($matches[0].Groups['reference'].Value -match '@[0-9a-f]{40}$') {
+    } elseif ($fixtureMatches[0].Groups['reference'].Value -match '@[0-9a-f]{40}$') {
         $failures.Add("A floating action negative fixture was incorrectly accepted: $fixture")
     }
 }
