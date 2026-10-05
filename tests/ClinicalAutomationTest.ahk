@@ -7,6 +7,7 @@
 #Include ../ProfileManager.ahk
 #Include ../PACSCommands.ahk
 #Include TestRunner.ahk
+#Include FakeWindowList.ahk
 
 class ClinicalAutomationTest {
     static tests := [
@@ -75,28 +76,25 @@ class ClinicalAutomationTest {
     ]
 
     ExactWindowStatusDistinguishesAbsenceAmbiguityAndFailure() {
-        originalWindowDriver := AppControl.windowDriver
         spec := AppControl.ExplorerPortalWindowSpec()
         portal := {hwnd: 100, pid: 42, exe: "msedge.exe", title: "Explorer Portal", active: false}
-        try {
-            AppControl.windowDriver := ScopeLikeWindowDriver([])
-            Assert.Equal("absent", AppControl.ResolveUniqueExactWindowStatus(spec).status)
+        AppControl.windowDriver := FakeWindowList([])
+        Assert.Equal("absent", AppControl.ResolveUniqueExactWindowStatus(spec).status)
 
-            AppControl.windowDriver := ScopeLikeWindowDriver([portal])
-            unique := AppControl.ResolveUniqueExactWindowStatus(spec)
-            Assert.Equal("unique", unique.status)
-            Assert.Equal(100, unique.session.hwnd)
+        AppControl.windowDriver := FakeWindowList([portal])
+        unique := AppControl.ResolveUniqueExactWindowStatus(spec)
+        Assert.Equal("unique", unique.status)
+        Assert.Equal(100, unique.session.hwnd)
 
-            second := {hwnd: 101, pid: 43, exe: "msedge.exe", title: "Explorer Portal", active: false}
-            AppControl.windowDriver := ScopeLikeWindowDriver([portal, second])
-            Assert.Equal("ambiguous", AppControl.ResolveUniqueExactWindowStatus(spec).status)
+        second := {hwnd: 101, pid: 43, exe: "msedge.exe", title: "Explorer Portal", active: false}
+        AppControl.windowDriver := FakeWindowList([portal, second])
+        Assert.Equal("ambiguous", AppControl.ResolveUniqueExactWindowStatus(spec).status)
 
-            ; A title read failing mid-enumeration is uncertainty, not absence.
-            AppControl.windowDriver := ScopeLikeWindowDriver([portal], true)
-            failed := AppControl.ResolveUniqueExactWindowStatus(spec)
-            Assert.Equal("error", failed.status)
-            Assert.True(InStr(failed.error, "simulated title failure"), failed.error)
-        } finally AppControl.windowDriver := originalWindowDriver
+        ; A title read failing mid-enumeration is uncertainty, not absence.
+        AppControl.windowDriver := FakeWindowList([portal], true)
+        failed := AppControl.ResolveUniqueExactWindowStatus(spec)
+        Assert.Equal("error", failed.status)
+        Assert.True(InStr(failed.error, "simulated title failure"), failed.error)
     }
 
     Setup() {
@@ -675,33 +673,26 @@ class ClinicalAutomationTest {
     }
 
     RestartPreparationCapturesHiddenTrustedVueProcesses() {
-        originalWindowDriver := AppControl.windowDriver
-        originalLifecycleDriver := AppControl.lifecycleDriver
         trustedPath := A_Temp "\Philips\Vue\mp.exe"
-        try {
-            AppControl.windowDriver := FakeExactWindowDriver([{
-                hwnd: 501,
-                title: AppControl.vuePacsTitle,
-                exe: AppControl.vuePacsExecutable,
-                pid: 42
-            }])
-            AppControl.lifecycleDriver := FakeProcessInventoryLifecycleDriver(
-                Map(42, trustedPath, 99, trustedPath),
-                [
-                    {processId: 42, name: AppControl.vuePacsExecutable, path: trustedPath},
-                    {processId: 99, name: AppControl.vuePacsExecutable, path: trustedPath}
-                ]
-            )
-            driver := NativePacsRestartDriver()
+        AppControl.windowDriver := FakeExactWindowDriver([{
+            hwnd: 501,
+            title: AppControl.vuePacsTitle,
+            exe: AppControl.vuePacsExecutable,
+            pid: 42
+        }])
+        AppControl.lifecycleDriver := FakeProcessInventoryLifecycleDriver(
+            Map(42, trustedPath, 99, trustedPath),
+            [
+                {processId: 42, name: AppControl.vuePacsExecutable, path: trustedPath},
+                {processId: 99, name: AppControl.vuePacsExecutable, path: trustedPath}
+            ]
+        )
+        driver := NativePacsRestartDriver()
 
-            Assert.True(driver.PrepareRestart())
-            Assert.True(driver.priorVueProcessIds.Has(42))
-            Assert.True(driver.priorVueProcessIds.Has(99))
-            Assert.Equal(trustedPath, driver.trustedVueExecutablePath)
-        } finally {
-            AppControl.windowDriver := originalWindowDriver
-            AppControl.lifecycleDriver := originalLifecycleDriver
-        }
+        Assert.True(driver.PrepareRestart())
+        Assert.True(driver.priorVueProcessIds.Has(42))
+        Assert.True(driver.priorVueProcessIds.Has(99))
+        Assert.Equal(trustedPath, driver.trustedVueExecutablePath)
     }
 
     RestartAbortsWhenTargetReappearsBeforeLaunch() {
@@ -762,45 +753,38 @@ class ClinicalAutomationTest {
     }
 
     RestartLaunchProofRequiresANewStableVueSession() {
-        originalWindowDriver := AppControl.windowDriver
-        originalLifecycleDriver := AppControl.lifecycleDriver
         trustedPath := A_Temp "\Philips\Vue\mp.exe"
-        try {
-            native := SimulatedClockRestartDriver()
-            native.trustedVueExecutablePath := trustedPath
-            AppControl.lifecycleDriver := FakeProcessInventoryLifecycleDriver(
-                Map(
-                    42, trustedPath,
-                    43, trustedPath,
-                    51, trustedPath,
-                    52, trustedPath,
-                    61, trustedPath
-                ),
-                []
-            )
-            native.priorVueProcessIds := Map(42, true)
-            AppControl.windowDriver := SequencedLaunchWindowDriver([
-                [{hwnd: 701, pid: 42}],
-                [{hwnd: 702, pid: 43}]
-            ])
-            Assert.False(native.WaitForLaunch(350))
+        native := SimulatedClockRestartDriver()
+        native.trustedVueExecutablePath := trustedPath
+        AppControl.lifecycleDriver := FakeProcessInventoryLifecycleDriver(
+            Map(
+                42, trustedPath,
+                43, trustedPath,
+                51, trustedPath,
+                52, trustedPath,
+                61, trustedPath
+            ),
+            []
+        )
+        native.priorVueProcessIds := Map(42, true)
+        AppControl.windowDriver := SequencedLaunchWindowDriver([
+            [{hwnd: 701, pid: 42}],
+            [{hwnd: 702, pid: 43}]
+        ])
+        Assert.False(native.WaitForLaunch(350))
 
-            native.priorVueProcessIds := Map()
-            AppControl.windowDriver := SequencedLaunchWindowDriver([
-                [{hwnd: 801, pid: 51}],
-                [{hwnd: 802, pid: 52}]
-            ])
-            Assert.False(native.WaitForLaunch(350))
+        native.priorVueProcessIds := Map()
+        AppControl.windowDriver := SequencedLaunchWindowDriver([
+            [{hwnd: 801, pid: 51}],
+            [{hwnd: 802, pid: 52}]
+        ])
+        Assert.False(native.WaitForLaunch(350))
 
-            AppControl.windowDriver := SequencedLaunchWindowDriver([
-                [{hwnd: 901, pid: 61}],
-                [{hwnd: 901, pid: 61}]
-            ])
-            Assert.True(native.WaitForLaunch(350))
-        } finally {
-            AppControl.windowDriver := originalWindowDriver
-            AppControl.lifecycleDriver := originalLifecycleDriver
-        }
+        AppControl.windowDriver := SequencedLaunchWindowDriver([
+            [{hwnd: 901, pid: 61}],
+            [{hwnd: 901, pid: 61}]
+        ])
+        Assert.True(native.WaitForLaunch(350))
     }
 
     GracefulCloseTimesOutAcross32BitTickWrap() {
@@ -1105,37 +1089,19 @@ class FakeWindowDriver {
 class FakeExactWindowDriver extends FakeWindowDriver {
     __New(windows) {
         super.__New()
-        this.windows := windows.Clone()
+        this.list := FakeWindowList(windows)
     }
 
-    ListWindowsByExecutable(executable) {
-        handles := []
-        for window in this.windows {
-            if (window.exe = executable)
-                handles.Push(window.hwnd)
-        }
-        return handles
+    ; Subclasses add or replace windows between polls.
+    windows {
+        get => this.list.windows
+        set => this.list.windows := value
     }
 
-    Window(hwnd) {
-        for window in this.windows {
-            if (window.hwnd = hwnd)
-                return window
-        }
-        throw Error("unknown fake window")
-    }
-
-    GetTitle(hwnd) {
-        return this.Window(hwnd).title
-    }
-
-    GetProcessName(hwnd) {
-        return this.Window(hwnd).exe
-    }
-
-    GetProcessId(hwnd) {
-        return this.Window(hwnd).pid
-    }
+    ListWindowsByExecutable(executable) => this.list.ListWindowsByExecutable(executable)
+    GetTitle(hwnd) => this.list.GetTitle(hwnd)
+    GetProcessName(hwnd) => this.list.GetProcessName(hwnd)
+    GetProcessId(hwnd) => this.list.GetProcessId(hwnd)
 }
 
 class ToggleRaceWindowDriver extends FakeExactWindowDriver {
@@ -1634,7 +1600,6 @@ class RetitledWindowDriver {
     GetProcessId(*) {
         return 4242
     }
-
 }
 
 class SameTitleWindowLifecycleDriver {
@@ -1689,40 +1654,3 @@ class SimulatedClockRestartDriver extends NativePacsRestartDriver {
     }
 }
 
-class ScopeLikeWindowDriver {
-    __New(windows, failTitles := false) {
-        this.windows := windows
-        this.failTitles := failTitles
-    }
-
-    ListWindowsByExecutable(executable) {
-        handles := []
-        for window in this.windows {
-            if (window.exe = executable)
-                handles.Push(window.hwnd)
-        }
-        return handles
-    }
-
-    Window(hwnd) {
-        for window in this.windows {
-            if (window.hwnd = hwnd)
-                return window
-        }
-        throw TargetError("unknown fake window")
-    }
-
-    GetTitle(hwnd) {
-        if this.failTitles
-            throw Error("simulated title failure")
-        return this.Window(hwnd).title
-    }
-
-    GetProcessName(hwnd) {
-        return this.Window(hwnd).exe
-    }
-
-    GetProcessId(hwnd) {
-        return this.Window(hwnd).pid
-    }
-}

@@ -1,12 +1,13 @@
 ; = CONTENTS
 ;   + Preamble
 ;   + HotkeyManagerTest class (registration, reassignment, rollback, scopes, teardown)
-;   + Test doubles (scope window driver, hotkey driver)
+;   + Test doubles (hotkey driver)
 
 #Requires AutoHotkey v2.0
 #Include ../HotkeyManager.ahk
 #Include ../Settings.ahk
 #Include TestRunner.ahk
+#Include FakeWindowList.ahk
 
 class HotkeyManagerTest {
     static tests := [
@@ -162,7 +163,7 @@ class HotkeyManagerTest {
     }
 
     TestPacsScopeRejectsWrongTitleAndDuplicateWindows() {
-        AppControl.windowDriver := ScopeWindowDriver([{
+        AppControl.windowDriver := FakeWindowList([{
             hwnd: 100,
             title: "Unrelated mp.exe dialog",
             exe: AppControl.vuePacsExecutable,
@@ -171,7 +172,7 @@ class HotkeyManagerTest {
         }])
         Assert.False(HotkeyManager.PACSIsActive())
 
-        AppControl.windowDriver := ScopeWindowDriver([
+        AppControl.windowDriver := FakeWindowList([
             {
                 hwnd: 101,
                 title: AppControl.vuePacsTitle,
@@ -189,7 +190,7 @@ class HotkeyManagerTest {
         ])
         Assert.False(HotkeyManager.PACSIsActive())
 
-        AppControl.windowDriver := ScopeWindowDriver([{
+        AppControl.windowDriver := FakeWindowList([{
             hwnd: 103,
             title: AppControl.vuePacsTitle,
             exe: AppControl.vuePacsExecutable,
@@ -200,7 +201,7 @@ class HotkeyManagerTest {
     }
 
     TestPowerScribeScopeRejectsWrongTitleAndDuplicateWindows() {
-        AppControl.windowDriver := ScopeWindowDriver([{
+        AppControl.windowDriver := FakeWindowList([{
             hwnd: 200,
             title: "PowerScribe Login",
             exe: AppControl.powerScribeExecutable,
@@ -209,7 +210,7 @@ class HotkeyManagerTest {
         }])
         Assert.False(HotkeyManager.PowerScribeIsActive())
 
-        AppControl.windowDriver := ScopeWindowDriver([
+        AppControl.windowDriver := FakeWindowList([
             {
                 hwnd: 201,
                 title: AppControl.powerScribeReportingTitle,
@@ -227,7 +228,7 @@ class HotkeyManagerTest {
         ])
         Assert.False(HotkeyManager.PowerScribeIsActive())
 
-        AppControl.windowDriver := ScopeWindowDriver([{
+        AppControl.windowDriver := FakeWindowList([{
             hwnd: 203,
             title: AppControl.powerScribeReportingTitle,
             exe: AppControl.powerScribeExecutable,
@@ -240,7 +241,7 @@ class HotkeyManagerTest {
     TestRestrictedCallbackRechecksScopeBeforeInvocation() {
         driver := FakeHotkeyDriver()
         HotkeyManager.hotkeyDriver := driver
-        AppControl.windowDriver := ScopeWindowDriver([{
+        AppControl.windowDriver := FakeWindowList([{
             hwnd: 301,
             title: AppControl.vuePacsTitle,
             exe: AppControl.vuePacsExecutable,
@@ -387,46 +388,6 @@ class HotkeyManagerTest {
         HotkeyManager.hotkeyFunctions := this.originalHotkeyFunctions
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalSettings
-    }
-}
-
-class ScopeWindowDriver {
-    __New(windows) {
-        this.windows := windows
-    }
-
-    ListWindowsByExecutable(executable) {
-        handles := []
-        for window in this.windows {
-            if (window.exe = executable)
-                handles.Push(window.hwnd)
-        }
-        return handles
-    }
-
-    Window(hwnd) {
-        for window in this.windows {
-            if (window.hwnd = hwnd)
-                return window
-        }
-        throw Error("unknown fake window")
-    }
-
-    GetTitle(hwnd) {
-        return this.Window(hwnd).title
-    }
-
-    GetProcessName(hwnd) {
-        return this.Window(hwnd).exe
-    }
-
-    GetProcessId(hwnd) {
-        return this.Window(hwnd).pid
-    }
-
-    IsActive(target) {
-        hwnd := Integer(SubStr(target, StrLen("ahk_id ") + 1))
-        return this.Window(hwnd).active
     }
 }
 

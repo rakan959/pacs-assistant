@@ -251,7 +251,6 @@ class PACSMonitorTest {
     }
 
     TestDuplicateRefreshAppearingBeforeClickDoesNotInvoke() {
-        originalDriver := PACSMonitor.driver
         session := {
             hwnd: 100,
             target: "ahk_id 100",
@@ -268,12 +267,8 @@ class PACSMonitorTest {
             [saved, duplicate]
         )
 
-        try {
-            PACSMonitor.driver := FixedPortalSessionDriver(session)
-            result := PACSMonitor.ClickRefresh(root, session)
-        } finally {
-            PACSMonitor.driver := originalDriver
-        }
+        PACSMonitor.driver := FixedPortalSessionDriver(session)
+        result := PACSMonitor.ClickRefresh(root, session)
 
         Assert.False(result)
         Assert.Equal(2, root.findCalls)
@@ -282,7 +277,6 @@ class PACSMonitorTest {
     }
 
     TestPortalActivationBeforeClickDoesNotInvokeRefresh() {
-        originalDriver := PACSMonitor.driver
         session := {
             hwnd: 100,
             target: "ahk_id 100",
@@ -298,19 +292,14 @@ class PACSMonitorTest {
         )
         driver := ActivationChangingPortalDriver(session, button, studyList)
 
-        try {
-            PACSMonitor.driver := driver
-            PACSMonitor.RefreshAndCheck()
-        } finally {
-            PACSMonitor.driver := originalDriver
-        }
+        PACSMonitor.driver := driver
+        PACSMonitor.RefreshAndCheck()
 
         Assert.True(driver.activeChecks >= 2)
         Assert.Equal(0, button.clickCalls)
     }
 
     TestActiveClinicalLeaseSkipsBackgroundMonitor() {
-        originalDriver := PACSMonitor.driver
         originalClinicalActive := PACSCommands.clinicalCommandActive
         originalClinicalName := PACSCommands.activeClinicalCommand
         driver := CountingPortalResolutionDriver()
@@ -332,7 +321,6 @@ class PACSMonitorTest {
         } finally {
             PACSCommands.clinicalCommandActive := originalClinicalActive
             PACSCommands.activeClinicalCommand := originalClinicalName
-            PACSMonitor.driver := originalDriver
         }
 
         Assert.False(result)
@@ -340,7 +328,6 @@ class PACSMonitorTest {
     }
 
     TestRefreshWaitDoesNotHoldClinicalLease() {
-        originalDriver := PACSMonitor.driver
         originalClinicalActive := PACSCommands.clinicalCommandActive
         originalClinicalName := PACSCommands.activeClinicalCommand
         session := {
@@ -375,7 +362,6 @@ class PACSMonitorTest {
         } finally {
             PACSCommands.clinicalCommandActive := originalClinicalActive
             PACSCommands.activeClinicalCommand := originalClinicalName
-            PACSMonitor.driver := originalDriver
         }
 
         Assert.Equal("acquired", driver.waitLeaseStatus)
@@ -383,7 +369,6 @@ class PACSMonitorTest {
     }
 
     TestRefreshAndScanUseOneCapturedPortalSession() {
-        originalDriver := PACSMonitor.driver
         session := {
             hwnd: 100,
             target: "ahk_id 100",
@@ -399,15 +384,11 @@ class PACSMonitorTest {
         )
         driver := PinnedPortalMonitorDriver(session, button, studyList)
 
-        try {
-            PACSMonitor.driver := driver
-            PACSMonitor.knownAccessions := Map()
-            SetTestSetting("MessageBoxNewCase", true)
-            PACSMonitor.RefreshAndCheck()
-            marked := PACSMonitor.HasAccession("12345678")
-        } finally {
-            PACSMonitor.driver := originalDriver
-        }
+        PACSMonitor.driver := driver
+        PACSMonitor.knownAccessions := Map()
+        SetTestSetting("MessageBoxNewCase", true)
+        PACSMonitor.RefreshAndCheck()
+        marked := PACSMonitor.HasAccession("12345678")
 
         Assert.True(marked)
         Assert.Equal(1, driver.resolveCalls)
@@ -421,18 +402,13 @@ class PACSMonitorTest {
     }
 
     TestAmbiguousPortalWindowsAreReportedAsScanFailure() {
-        originalDriver := PACSMonitor.driver
         driver := AmbiguousPortalMonitorDriver()
 
-        try {
-            PACSMonitor.driver := driver
-            loop PACSMonitor.scanFailureThreshold
-                PACSMonitor.RefreshAndCheck()
-            failures := PACSMonitor.consecutiveScanFailures
-            lastError := PACSMonitor.lastError
-        } finally {
-            PACSMonitor.driver := originalDriver
-        }
+        PACSMonitor.driver := driver
+        loop PACSMonitor.scanFailureThreshold
+            PACSMonitor.RefreshAndCheck()
+        failures := PACSMonitor.consecutiveScanFailures
+        lastError := PACSMonitor.lastError
 
         Assert.Equal(PACSMonitor.scanFailureThreshold, failures)
         Assert.True(InStr(lastError, "multiple exact Explorer Portal windows") > 0)

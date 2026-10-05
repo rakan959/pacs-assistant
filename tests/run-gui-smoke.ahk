@@ -20,39 +20,22 @@ OnError(OnError_StdErr)
 global tempDir := UseIsolatedDataRoot("pacs-assistant-gui-smoke")
 
 #Include ../KeybindGUI.ahk
+#Include DesktopChecks.ahk
 
-global testsRun := 0
-global testsFailed := 0
 global openedWindows := []
 global smokeKB := 0
 
-Out(text) {
-    FileAppend(text "`n", "*")
-}
+Out(text) => DesktopChecks.Out(text)
 
 Check(label, action) {
-    global testsRun, testsFailed
-    testsRun++
     ; catch Any: a thrown non-Error value fails this check rather than the whole run.
-    try {
-        action()
-        Out("  ok   " label)
-    } catch Any as err {
-        testsFailed++
-        Out("  FAIL " label " -- " ErrorText.Describe(err))
-    }
+    try action()
+    catch Any as err
+        return DesktopChecks.Record(false, label, ErrorText.Describe(err))
+    return DesktopChecks.Record(true, label)
 }
 
-Assert(condition, label) {
-    global testsRun, testsFailed
-    testsRun++
-    if condition {
-        Out("  ok   " label)
-        return
-    }
-    testsFailed++
-    Out("  FAIL " label)
-}
+Assert(condition, label) => DesktopChecks.Record(condition, label)
 
 OpenAndCaptureWindow(title, action) {
     global openedWindows
@@ -108,7 +91,7 @@ FindListView(guiObj) {
 }
 
 Main() {
-    global testsRun, testsFailed, tempDir, smokeKB
+    global tempDir, smokeKB
 
     SetWorkingDir(tempDir)
 
@@ -250,12 +233,7 @@ Main() {
         Assert(HotkeyManager.activeHotkeys.Count = registeredBeforeCapture, "closing the keybind prompt restores profile hotkeys")
     }
 
-    Out("")
-    Out(testsFailed = 0
-        ? "PASS - " testsRun " checks"
-        : "FAIL - " testsFailed " of " testsRun " checks failed")
-
-    return testsFailed = 0 ? 0 : 1
+    return DesktopChecks.Finish("checks")
 }
 
 AssertScope(listView, funcName, expected) {
