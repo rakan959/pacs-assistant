@@ -626,7 +626,7 @@ class PACSMonitorTest {
     TestFailedAlertDoesNotConsumeAccession() {
         SetTestSetting("MessageBoxNewCase", true)
         SetTestSetting("AudioAlertNewCase", false)
-        PACSMonitor.notifier := FailPACSNotification
+        PACSMonitor.notifier := ThrowError.Bind("simulated notification failure")
 
         Assert.Throws(
             () => PACSMonitor.ProcessRows([{name: "CT HEAD WITHOUT CONTRAST 12345678"}]),
@@ -872,8 +872,4 @@ class CountingPortalResolutionDriver {
         this.resolveCalls++
         return {status: "absent", session: 0}
     }
-}
-
-FailPACSNotification(*) {
-    throw Error("simulated notification failure")
 }

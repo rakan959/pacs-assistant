@@ -48,16 +48,13 @@ class SettingsTest {
     ]
 
     Setup() {
-        this.originalFile := Settings.settingsFile
+        this.savedSettings := UseTestSettings("settings-test")
         this.originalListeners := Settings.changeListeners
-        this.originalRevision := Settings.revision
         this.originalMutationGuard := Settings.mutationGuard
         this.originalDialogAcquire := Settings.dialogAcquire
         this.originalDialogRelease := Settings.dialogRelease
         this.originalDialogUnavailableNotifier := Settings.dialogUnavailableNotifier
         this.originalWriteTransactionActive := Settings.writeTransactionActive
-        this.tempFile := TestTempPath("settings-test", ".ini")
-        Settings.settingsFile := this.tempFile
         Settings.changeListeners := []
         Settings.mutationGuard := (*) => true
         Settings.dialogAcquire := (*) => true
@@ -219,7 +216,7 @@ class SettingsTest {
         values := Map("AutoUpdate", false, "RefreshInterval", 45)
 
         Assert.Throws(
-            () => Settings.SaveValues(values, FailSettingsReplace),
+            () => Settings.SaveValues(values, ThrowError.Bind("simulated settings replace failure")),
             "simulated settings replace failure"
         )
 
@@ -401,7 +398,7 @@ class SettingsTest {
     }
 
     TestSavingSettingsReportsListenerFailures() {
-        Settings.AddChangeListener(ThrowSettingsListener)
+        Settings.AddChangeListener(ThrowError.Bind("listener failed"))
         controls := this.SettingsControls(false, 45)
         dialog := FakeSettingsDialog()
         reports := []
@@ -441,7 +438,7 @@ class SettingsTest {
 
     TestChangeListenerFailureDoesNotBlockLaterListeners() {
         calls := []
-        Settings.AddChangeListener(ThrowSettingsListener)
+        Settings.AddChangeListener(ThrowError.Bind("listener failed"))
         Settings.AddChangeListener((*) => calls.Push("after failure"))
 
         errors := Settings.NotifyChanged()
@@ -459,24 +456,14 @@ class SettingsTest {
     }
 
     Teardown() {
-        try FileDelete(Settings.settingsFile)
-        Settings.settingsFile := this.originalFile
+        RestoreTestSettings(this.savedSettings)
         Settings.changeListeners := this.originalListeners
-        Settings.revision := this.originalRevision
         Settings.mutationGuard := this.originalMutationGuard
         Settings.dialogAcquire := this.originalDialogAcquire
         Settings.dialogRelease := this.originalDialogRelease
         Settings.dialogUnavailableNotifier := this.originalDialogUnavailableNotifier
         Settings.writeTransactionActive := this.originalWriteTransactionActive
     }
-}
-
-ThrowSettingsListener(*) {
-    throw Error("listener failed")
-}
-
-FailSettingsReplace(*) {
-    throw Error("simulated settings replace failure")
 }
 
 ReentrantSettingsReplace(*) {
