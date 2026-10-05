@@ -32,21 +32,15 @@ class HotkeyManager {
         "PACS or PowerScribe", (*) => HotkeyManager.PACSIsActive() || HotkeyManager.PowerScribeIsActive()
     )
 
-    static PACSIsActive(exactWindowProbe := 0) {
-        specs := [
+    static PACSIsActive() {
+        return AppControl.IsUniqueExactWindowActive([
             AppControl.VuePacsWindowSpec(),
             AppControl.VuePacsClientWindowSpec()
-        ]
-        return exactWindowProbe
-            ? exactWindowProbe.Call(specs)
-            : AppControl.IsUniqueExactWindowActive(specs)
+        ])
     }
 
-    static PowerScribeIsActive(exactWindowProbe := 0) {
-        specs := [AppControl.PowerScribeWindowSpec()]
-        return exactWindowProbe
-            ? exactWindowProbe.Call(specs)
-            : AppControl.IsUniqueExactWindowActive(specs)
+    static PowerScribeIsActive() {
+        return AppControl.IsUniqueExactWindowActive([AppControl.PowerScribeWindowSpec()])
     }
 
     ; Enter the HotIf context a scope registers under. Always paired with ExitScope().

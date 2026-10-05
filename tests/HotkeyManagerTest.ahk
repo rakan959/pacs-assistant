@@ -19,7 +19,6 @@ class HotkeyManagerTest {
         "TestDisableAllHotkeys",
         "TestRegistersWithScope",
         "TestScopedBindCanBeTurnedOffAgain",
-        "TestPowerScribeScopeRequiresExactReportingWindow",
         "TestPowerScribeScopeRejectsWrongTitleAndDuplicateWindows",
         "TestPacsScopeRejectsWrongTitleAndDuplicateWindows",
         "TestRestrictedCallbackRechecksScopeBeforeInvocation",
@@ -130,26 +129,6 @@ class HotkeyManagerTest {
             Assert.True(HotkeyManager.Unregister("ActionOne"), scope ": " HotkeyManager.lastError)
             Assert.False(HotkeyManager.activeHotkeys.Has("ActionOne"))
         }
-    }
-
-    TestPowerScribeScopeRequiresExactReportingWindow() {
-        requestedSpecs := []
-
-        active := HotkeyManager.PowerScribeIsActive(
-            (specs) => (requestedSpecs.Push(specs), true)
-        )
-
-        Assert.True(active)
-        Assert.Equal(1, requestedSpecs.Length)
-        Assert.Equal(1, requestedSpecs[1].Length)
-        Assert.Equal(
-            AppControl.powerScribeReportingTitle,
-            requestedSpecs[1][1].title
-        )
-        Assert.Equal(
-            AppControl.powerScribeExecutable,
-            requestedSpecs[1][1].exe
-        )
     }
 
     TestPacsScopeRejectsWrongTitleAndDuplicateWindows() {
