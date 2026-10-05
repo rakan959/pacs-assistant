@@ -41,6 +41,8 @@ class ProfileManagerTest {
         "TestProfileNameValidation",
         "TestCreateProfileRejectsUnsafeAndDuplicateNames",
         "TestCreateProfileKeepsAnUnloadedFileOfThatName",
+        "TestRenameKeepsAnUnloadedFileOfThatName",
+        "TestNameDifferingOnlyInCaseNamesTheExistingProfile",
         "TestIniKeyRules",
         "TestSaveRejectsUnsafeIniKeys",
         "TestSaveRejectsMalformedCustomCommand",
@@ -686,6 +688,31 @@ class ProfileManagerTest {
 
         Assert.False(ProfileManager.profiles.Has("Broken"))
         Assert.Equal("[Functions]`nnot a valid profile`n", FileRead(path, "UTF-16"))
+        ; The name is valid and not listed, so the refusal must say what blocks it.
+        Assert.True(InStr(ProfileManager.lastError, path " already exists but is not loaded"), ProfileManager.lastError)
+    }
+
+    TestRenameKeepsAnUnloadedFileOfThatName() {
+        ProfileManager.profiles["Day"] := ProfileManager.NewProfile()
+        ProfileManager.SaveProfile("Day", ProfileManager.profiles["Day"])
+        path := ProfileManager.profilesPath "\Broken.ini"
+        FileAppend("[Functions]`nnot a valid profile`n", path, "UTF-16")
+
+        Assert.False(ProfileManager.RenameProfile("Day", "Broken"))
+
+        Assert.True(ProfileManager.profiles.Has("Day"))
+        Assert.Equal("[Functions]`nnot a valid profile`n", FileRead(path, "UTF-16"))
+        Assert.True(InStr(ProfileManager.lastError, path " already exists but is not loaded"), ProfileManager.lastError)
+    }
+
+    ; Windows file names ignore case, so the other profile owns the file.
+    TestNameDifferingOnlyInCaseNamesTheExistingProfile() {
+        Assert.True(ProfileManager.CreateProfile("Reading Room"))
+
+        Assert.False(ProfileManager.CreateProfile("reading room"))
+
+        Assert.False(ProfileManager.profiles.Has("reading room"))
+        Assert.Equal("A profile named 'Reading Room' already exists.", ProfileManager.lastError)
     }
 
     ; INI keys are written as "key=value" lines inside [sections], and the Order

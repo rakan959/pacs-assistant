@@ -441,7 +441,7 @@ class ProfileManager {
 
         try {
             if FileExist(this.ProfilePath(name))
-                return false
+                return this.ExistingFileConflict(name)
             profile := this.NewProfile()
             this.SaveProfile(name, profile)
             this.profiles[name] := profile
@@ -449,6 +449,24 @@ class ProfileManager {
         } catch as err {
             return this.FailStorageMutation("Profile creation failed: " err.Message)
         }
+    }
+
+    /**
+     * Explains why a name whose profile file already exists cannot be used. The
+     * file is either a loaded profile whose name differs only in case (Windows
+     * file names ignore case) or one that is not loaded, as after it failed to
+     * load. Sets lastError and returns false.
+     */
+    static ExistingFileConflict(name) {
+        for loadedName in this.profiles {
+            if (loadedName = name) {
+                this.lastError := "A profile named '" loadedName "' already exists."
+                return false
+            }
+        }
+        this.lastError := "The profile file " this.ProfilePath(name)
+            . " already exists but is not loaded, so it may have failed to load. Fix or remove that file, or choose another name."
+        return false
     }
 
     /**
@@ -593,7 +611,7 @@ class ProfileManager {
         if this.profiles.Has(newName)
             return false
         if FileExist(newPath)
-            return false
+            return this.ExistingFileConflict(newName)
 
         profile := this.profiles[oldName]
         try {
