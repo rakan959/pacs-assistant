@@ -43,8 +43,9 @@ class NativePowerScribeSessionDriver {
 class PowerScribe {
     static sessionDriver := NativePowerScribeSessionDriver()
 
-    ; Positional path to the report text. Brittle - kept only as a last resort behind
-    ; a property-based lookup.
+    ; Positional path to the report text. Brittle, so it is only a cross-check: it
+    ; must resolve to the same exact window and agree with the typed lookup, and it
+    ; is the report on its own only when that lookup finds nothing.
     static reportPath := "YYYYV"
 
     ; Whether a piece of text reads like a report body rather than some other field
