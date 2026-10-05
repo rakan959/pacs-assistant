@@ -1838,11 +1838,12 @@ class KeybindGUI {
         ; Custom deletion persists the whole profile. Resolve any pending keybind
         ; edits before opening a dialog that can reach that persistence boundary.
         ; Discard rebuilds the owner and invalidates the ListView supplied by its
-        ; click callback, so require a fresh click from the rebuilt window.
-        hadDirtyProfile := this.IsProfileDirty()
+        ; click callback, so require a fresh click from the rebuilt window. Save
+        ; keeps the window, so the dialog opens as asked.
+        ownerBefore := this.gui
         if !this.ResolveDirtyProfileBeforeLeaving(true)
             return false
-        if hadDirtyProfile {
+        if !(this.gui == ownerBefore) {
             this.NotifyUser(
                 "The pending profile changes were resolved. Click Add Function again in the refreshed window.",
                 "Profile Refreshed"

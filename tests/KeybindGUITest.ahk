@@ -49,6 +49,7 @@ class KeybindGUITest {
         "TestPreexistingDirtyProfileBlocksModalityDialog",
         "TestPreexistingDirtyProfileBlocksCustomDeletion",
         "TestDiscardBeforeAddFunctionRequiresFreshMainWindowControl",
+        "TestSaveBeforeAddFunctionOpensTheDialog",
         "TestStaleRenameDialogCannotRenameAnotherProfile",
         "TestDestroyedRenameDialogCannotMutateProfile",
         "TestRenameDialogCannotMutateSameNameReplacement",
@@ -1379,7 +1380,9 @@ class KeybindGUITest {
     TestDiscardBeforeAddFunctionRequiresFreshMainWindowControl() {
         editor := {
             base: DirtyAddFunctionTestGUI.Prototype,
+            gui: {},
             dirty: true,
+            rebuildsWindow: true,
             resolveCalls: 0,
             dialogCalls: 0,
             notices: 0
@@ -1391,6 +1394,25 @@ class KeybindGUITest {
         Assert.Equal(1, editor.resolveCalls)
         Assert.Equal(0, editor.dialogCalls)
         Assert.Equal(1, editor.notices)
+    }
+
+    TestSaveBeforeAddFunctionOpensTheDialog() {
+        ; Save keeps the main window, so its ListView is still the live one.
+        editor := {
+            base: DirtyAddFunctionTestGUI.Prototype,
+            gui: {},
+            dirty: true,
+            rebuildsWindow: false,
+            resolveCalls: 0,
+            dialogCalls: 0,
+            notices: 0
+        }
+
+        Assert.Throws(ObjBindMethod(editor, "ShowAddFunctionDialog", {}), "dialog reached")
+
+        Assert.Equal(1, editor.resolveCalls)
+        Assert.Equal(1, editor.dialogCalls)
+        Assert.Equal(0, editor.notices)
     }
 
     TestStaleRenameDialogCannotRenameAnotherProfile() {
@@ -2670,12 +2692,16 @@ class DirtyAddFunctionTestGUI extends KeybindGUI {
     ResolveDirtyProfileBeforeLeaving(*) {
         this.resolveCalls++
         this.dirty := false
+        ; Discard rebuilds the main window; Save keeps it.
+        if this.rebuildsWindow
+            this.gui := {}
         return true
     }
 
     NewProfileDialog(*) {
         this.dialogCalls++
-        throw Error("A stale ListView must not reach dialog creation")
+        ; The rest of the dialog needs a real window; reaching it is the result.
+        throw Error("dialog reached")
     }
 
     NotifyUser(*) {
