@@ -290,8 +290,8 @@ class ProfileManager {
         IniWrite(customFunctionList, path, "CustomFunctions", "Order")
         for funcName, customConfig in profile.customFuncs {
             if (InStr(funcName, "Custom: ") = 1) {
-                IniWrite(customConfig.keys, path, "CustomFunctions", funcName "_keys")
-                IniWrite(customConfig.window, path, "CustomFunctions", funcName "_window")
+                this.WriteIniText(customConfig.keys, path, "CustomFunctions", funcName "_keys")
+                this.WriteIniText(customConfig.window, path, "CustomFunctions", funcName "_window")
             }
         }
 
@@ -302,8 +302,16 @@ class ProfileManager {
         }
         IniWrite(modalityList, path, "ModalityAttendings", "Order")
         for modality, attending in profile.modalityAttendings {
-            IniWrite(attending, path, "ModalityAttendings", modality)
+            this.WriteIniText(attending, path, "ModalityAttendings", modality)
         }
+    }
+
+    ; IniRead trims surrounding spaces and tabs and drops one pair of outer quotes, so
+    ; keys such as " " or '"text"' would not read back. Free text is written inside
+    ; quotes, which IniRead removes, so it reads back exactly; values that earlier
+    ; versions wrote without quotes read as before.
+    static WriteIniText(value, path, section, key) {
+        IniWrite('"' value '"', path, section, key)
     }
 
     static ValidateProfile(profile) {

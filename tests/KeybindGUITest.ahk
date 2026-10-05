@@ -15,6 +15,7 @@ class KeybindGUITest {
         "TestPrettifyHotkey",
         "TestCustomFunctionNameChecksUnboundFunctions",
         "TestCustomFunctionNamesUsePersistedCaseInsensitiveIdentity",
+        "TestCustomKeybindRejectsABlankLookingWindow",
         "TestStaleAddFunctionCannotClearANewerBinding",
         "TestProfileBindingOwnerUsesRuntimeIdentity",
         "TestCaptureSuppressesInputToTheForegroundWindow",
@@ -181,6 +182,21 @@ class KeybindGUITest {
         profile.customFuncs["Custom: Existing"] := {keys: "HELLO", window: ""}
 
         Assert.False(this.gui.CustomFunctionNameAvailable(profile, "Custom: existing"))
+    }
+
+    ; Such a window matches nothing, so the command would silently never run.
+    TestCustomKeybindRejectsABlankLookingWindow() {
+        profile := ProfileManager.NewProfile()
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        dialog := FakeProfileDialog("Test")
+
+        Assert.False(this.gui.AddCustomKeybind("Yell", "HELLO", " `t ", "", dialog))
+
+        Assert.False(profile.customFuncs.Has("Custom: Yell"))
+        Assert.Equal(1, TestRunner.dialogs.Length)
+        Assert.Equal("Invalid Custom Keybind", TestRunner.dialogs[1].title)
+        Assert.False(dialog.destroyed)
     }
 
     TestStaleAddFunctionCannotClearANewerBinding() {

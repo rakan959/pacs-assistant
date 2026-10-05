@@ -2056,6 +2056,11 @@ class KeybindGUI {
             MsgBox("Please enter keys to send.", "Invalid Custom Keybind", "Icon!")
             return false
         }
+        ; A blank-looking window would match no window, so the command would never run.
+        if (window != "" && Trim(window, " `t") = "") {
+            MsgBox("Leave the target window empty to send to any window, or enter a window title.", "Invalid Custom Keybind", "Icon!")
+            return false
+        }
 
         ; Create unique function name
         funcName := "Custom: " name

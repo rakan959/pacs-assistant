@@ -23,6 +23,8 @@ class ProfileManagerTest {
         "TestDefaultDeleteRollbackFailureIsSurfacedAndReconciled",
         "TestCustomFunctionPersistence",
         "TestUnboundCustomFunctionPersistence",
+        "TestFreeTextValuesRoundTripExactly",
+        "TestUnquotedLegacyValuesStillLoad",
         "TestScopePersistence",
         "TestScopeDefaultsToAnyWhenAbsent",
         "TestLegacyScopeMigration",
@@ -319,6 +321,47 @@ class ProfileManagerTest {
         Assert.True(loaded.customFuncs.Has("Custom: Saved For Later"))
         Assert.False(loaded.binds.Has("Custom: Saved For Later"))
         Assert.Equal("{Tab}", loaded.customFuncs["Custom: Saved For Later"].keys)
+    }
+
+    ; IniRead trims spaces and strips outer quotes. Before values were written quoted,
+    ; keys of " " reloaded as "" and made the whole profile unloadable, and a
+    ; whitespace-only target window reloaded as "" (any window).
+    TestFreeTextValuesRoundTripExactly() {
+        values := [" ", "Hello ", " lead", '"quoted"', "'single'", '""', "`t tab", 'a "mid" b']
+        profile := ProfileManager.NewProfile()
+        for index, value in values {
+            profile.customFuncs["Custom: Edge " index] := {keys: value, window: value}
+            profile.modalityAttendings["Edge" index] := value
+        }
+
+        ProfileManager.profiles["EdgeValues"] := profile
+        ProfileManager.SaveProfile("EdgeValues", profile)
+        ProfileManager.LoadProfiles()
+
+        Assert.Equal(0, ProfileManager.loadErrors.Length)
+        loaded := ProfileManager.profiles["EdgeValues"]
+        for index, value in values {
+            Assert.Equal(value, loaded.customFuncs["Custom: Edge " index].keys)
+            Assert.Equal(value, loaded.customFuncs["Custom: Edge " index].window)
+            Assert.Equal(value, loaded.modalityAttendings["Edge" index])
+        }
+    }
+
+    ; Profiles written before values were quoted still load unchanged.
+    TestUnquotedLegacyValuesStillLoad() {
+        path := ProfileManager.profilesPath "\Legacy.ini"
+        IniWrite("", path, "Functions", "Order")
+        IniWrite("Custom: Old|", path, "CustomFunctions", "Order")
+        IniWrite("HELLO", path, "CustomFunctions", "Custom: Old_keys")
+        IniWrite("PowerScribe", path, "CustomFunctions", "Custom: Old_window")
+        IniWrite("Neuro|", path, "ModalityAttendings", "Order")
+        IniWrite("Smith", path, "ModalityAttendings", "Neuro")
+
+        loaded := ProfileManager.LoadProfile(path)
+
+        Assert.Equal("HELLO", loaded.customFuncs["Custom: Old"].keys)
+        Assert.Equal("PowerScribe", loaded.customFuncs["Custom: Old"].window)
+        Assert.Equal("Smith", loaded.modalityAttendings["Neuro"])
     }
 
     TestScopePersistence() {
