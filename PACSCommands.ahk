@@ -125,12 +125,12 @@ class PACSCommands {
         } finally Critical("Off")
     }
 
-    static CreateCustomKeybind(keys, targetWindow := "") {
+    static CreateCustomKeybind(keys, targetWindow := "", name := "Custom keybind") {
         ; Create a function that stores its configuration
         action := targetWindow != "" ?
             (*) => AppControl.SendKeysToWindow(targetWindow, keys) :
             (*) => Send(keys)
-        commandCallback := (*) => PACSCommands.RunClinicalCommand("Custom keybind", action)
+        commandCallback := (*) => PACSCommands.RunClinicalCommand(name, action)
 
         ; Exposed so the configuration can be checked without sending keys.
         commandCallback.keys := keys

@@ -256,7 +256,6 @@ class KeybindGUI {
         message := "The active profile changed while this dialog was open. Reopen it before saving changes."
         if ExclusiveOperations.captureActive
             return this.AbortStaleCapture(dialog, message, "Profile Changed")
-        this.StopListening()
         try dialog.Destroy()
         this.NotifyUser(message, "Profile Changed", "Icon!")
         return false
@@ -341,28 +340,10 @@ class KeybindGUI {
                 "Function Changed"
             )
         }
-        try this.StopListening()
-        catch as err {
-            MsgBox(
-                "The key-capture hook could not be stopped after the function changed. Restart PACS Assistant before pressing another shortcut.`n`n" err.Message,
-                "Function Changed",
-                "Icon!"
-            )
-            return false
-        }
         message := "The selected function changed while this dialog was open. Reopen it before applying changes."
-        if IsObject(KeybindGUI.captureRuntimeProfile) {
-            this.RestoreCapturedRuntimeAndNotify(
-                ProfileManager.profiles[dialog.profileName],
-                message,
-                "Function Changed",
-                true
-            )
-        } else {
-            ; A scope dialog never suspends runtime bindings. Rejecting a stale
-            ; callback must not create an unnecessary Off/On failure boundary.
-            this.NotifyUser(message, "Function Changed", "Icon!")
-        }
+        ; A scope dialog never suspends runtime bindings; capture recovery is
+        ; handled above while its lease is held.
+        this.NotifyUser(message, "Function Changed", "Icon!")
         try dialog.Destroy()
         return false
     }
@@ -963,7 +944,7 @@ class KeybindGUI {
                 ; Preserve the live hook and listening state so callers cannot tear
                 ; down its profile/dialog while it may still capture the next key.
                 ; Only a restart ends it now.
-                ExclusiveOperations.captureRestartRequired := true
+                this.RequireCaptureRestart()
                 AppLog.Write("Key capture could not be stopped: " ErrorText.Describe(err))
                 throw Error("Input capture could not be stopped: " err.Message)
             }
@@ -1295,7 +1276,7 @@ class KeybindGUI {
             try {
                 if (currentProfile.customFuncs.Has(funcName)) {
                     config := currentProfile.customFuncs[funcName]
-                    callback := PACSCommands.CreateCustomKeybind(config.keys, config.window)
+                    callback := PACSCommands.CreateCustomKeybind(config.keys, config.window, funcName)
                     result := HotkeyManager.Register(funcName, bind, callback, scope)
                 } else {
                     result := HotkeyManager.RegisterHotkey(funcName, bind, scope)
@@ -1413,8 +1394,10 @@ class KeybindGUI {
                 message := "Wait for '" PACSCommands.activeClinicalCommand "' to finish before you " action "."
                 title := "Clinical Command In Progress"
             case "capture":
-                message := "Finish or cancel the active key capture before you " action "."
-                title := "Keybind In Progress"
+                message := ExclusiveOperations.captureRestartRequired
+                    ? "Restart PACS Assistant before you " action ". Key capture could not be recovered."
+                    : "Finish or cancel the active key capture before you " action "."
+                title := ExclusiveOperations.captureRestartRequired ? "Restart Required" : "Keybind In Progress"
             case "profileMutation":
                 message := "Wait for the current profile operation ('"
                     . ExclusiveOperations.profileMutationAction
@@ -1485,6 +1468,14 @@ class KeybindGUI {
         } finally Critical("Off")
     }
 
+    RequireCaptureRestart() {
+        ExclusiveOperations.captureRestartRequired := true
+        ; Keep the capture lease to refuse unsafe edits, but let the owner window's
+        ; Close action use the restart exemption and exit normally.
+        if IsObject(KeybindGUI.captureOwnerGui)
+            try KeybindGUI.captureOwnerGui.Opt("-Disabled")
+    }
+
     AbortStaleCapture(dialog, message, title) {
         ; BeginListening revalidates its dialog after taking the capture lease but
         ; before suspending hotkeys or starting InputHook. If that snapshot is stale,
@@ -1537,7 +1528,7 @@ class KeybindGUI {
         if restored
             this.ReleaseCaptureTransaction()
         else
-            ExclusiveOperations.captureRestartRequired := true
+            this.RequireCaptureRestart()
         return false
     }
 
@@ -1567,7 +1558,7 @@ class KeybindGUI {
         } finally KeybindGUI.captureRuntimeProfile := 0
         ; The caller keeps the capture lease; the notice asked for a restart.
         if !restored
-            ExclusiveOperations.captureRestartRequired := true
+            this.RequireCaptureRestart()
         return restored
     }
 
@@ -2365,8 +2356,9 @@ class KeybindGUI {
         }
 
         if !this.BeginListening(funcName, listView, promptGui) {
-            if !ExclusiveOperations.captureActive
-                try promptGui.Destroy()
+            ; A refusal can leave an earlier capture lease held. This new prompt
+            ; has never owned its hook and must not remain as a hidden window.
+            try promptGui.Destroy()
             return false
         }
 

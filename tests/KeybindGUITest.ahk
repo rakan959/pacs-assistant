@@ -18,6 +18,7 @@ class KeybindGUITest {
         "TestCustomFunctionNameChecksUnboundFunctions",
         "TestCustomFunctionNamesUsePersistedCaseInsensitiveIdentity",
         "TestCustomKeybindRejectsABlankLookingWindow",
+        "TestCustomKeybindRejectsUnsafeNames",
         "TestAddedCustomKeybindSucceedsWhenCaptureDoesNotStart",
         "TestAddedFunctionMarksTheProfileUnsaved",
         "TestRemovedFunctionMarksTheProfileUnsaved",
@@ -29,6 +30,7 @@ class KeybindGUITest {
         "TestCaptureSuppressesInputToTheForegroundWindow",
         "TestCapturedHotkeyUsesTerminationModifierSnapshot",
         "TestProfileSwitchPreparationStopsActiveCapture",
+        "TestProfileSelectorSuspendsHotkeys",
         "TestProfileSwitchAbortsWhenCaptureCannotStop",
         "TestCaptureStartFailureWarnsWhenRuntimeCannotBeRestored",
         "TestCapturePromptShowFailureRestoresRuntimeAndReleasesOwner",
@@ -42,6 +44,7 @@ class KeybindGUITest {
         "TestBindAutoHotkeyRejectsIsReportedNotFailed",
         "TestStaleRealCaptureRestoresCurrentProfileNotSnapshot",
         "TestStaleCaptureThatCannotRestoreStillAllowsExit",
+        "TestRefusedCaptureDestroysTheHiddenPrompt",
         "TestProfileBoundDialogRejectsSameNameReplacement",
         "TestCapturedBindPublishesDirtyStateBeforeReleasingOwner",
         "TestStoppedCaptureHookDoesNotUnassignTheCommand",
@@ -419,6 +422,39 @@ class KeybindGUITest {
         hook := FakeCaptureHook("S", "<^>!")
 
         Assert.Equal("^!S", this.gui.CapturedHotkey(hook))
+        Assert.Equal("^!+#F12", this.gui.CapturedHotkey(FakeCaptureHook("F12", "<^<!<+<#")))
+    }
+
+    TestProfileSelectorSuspendsHotkeys() {
+        this.gui.profileSelectorGui := 0
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        profile.scopes["Sign Report"] := "Any"
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        this.gui.ApplyBinds()
+        Assert.Equal(1, HotkeyManager.activeHotkeys.Count)
+        try {
+            Assert.True(this.gui.OpenProfileSelector())
+            Assert.Equal(0, HotkeyManager.activeHotkeys.Count)
+        } finally {
+            if IsObject(this.gui.profileSelectorGui)
+                this.gui.RetireProfileSelector(this.gui.profileSelectorGui)
+        }
+    }
+
+    TestCustomKeybindRejectsUnsafeNames() {
+        profile := ProfileManager.NewProfile()
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        for name in ["a|b", "a=b", "a[b", "a]b"] {
+            dialog := FakeProfileDialog("Test")
+            TestRunner.dialogs := []
+            Assert.False(this.gui.AddCustomKeybind(name, "HELLO", "", "", dialog))
+            Assert.Equal(0, profile.customFuncs.Count)
+            Assert.Equal(0, profile.binds.Count)
+            Assert.Equal("Invalid Custom Keybind", TestRunner.dialogs[1].title)
+        }
     }
 
     TestProfileSwitchPreparationStopsActiveCapture() {
@@ -1093,12 +1129,18 @@ class KeybindGUITest {
                 1
             ))
             Assert.True(editor.BeginListening("Sign Report", listView, prompt))
+            owner := FakeDisableableGui()
+            owner.Opt("+Disabled")
+            KeybindGUI.captureOwnerGui := owner
             hook := KeybindGUI.activeInputHook
 
             listView.Delete(1)
             result := editor.OnInputEnd("Sign Report", listView, prompt, hook)
             leaseHeld := ExclusiveOperations.captureActive
             restartRequired := ExclusiveOperations.captureRestartRequired
+            Assert.False(owner.disabled)
+            Assert.False(editor.ProfileMutationAllowed("save a profile"))
+            Assert.True(InStr(editor.notifications[-1].message, "Restart PACS Assistant"))
             ; The notice asked for a restart, so exit must not be refused by the
             ; capture lease the failed restore left held.
             exitResult := editor.HandleProcessExit("Menu", 0)
@@ -1114,6 +1156,25 @@ class KeybindGUITest {
         Assert.True(prompt.destroyed)
         Assert.True(InStr(editor.notifications[1].message, "Restart PACS Assistant") > 0,
             editor.notifications[1].message)
+    }
+
+    TestRefusedCaptureDestroysTheHiddenPrompt() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        ExclusiveOperations.captureActive := true
+        ExclusiveOperations.captureRestartRequired := true
+        KeybindGUI.isListening := false
+        editor := {base: RefusedPromptGUI.Prototype, gui: "", notifications: []}
+        listView := RemovableListView("Sign Report", "Ctrl + F13", "Any window")
+        try {
+            Assert.False(editor.PromptKeybind("Sign Report", listView))
+            Assert.False(editor.GuiIsLive(editor.lastPrompt))
+        } finally {
+            try editor.lastPrompt.Destroy()
+        }
     }
 
     TestStaleCaptureBeforeSuspensionReleasesWithoutRuntimeMutation() {
@@ -3049,9 +3110,22 @@ class StopFailureCancelGUI extends KeybindGUI {
 }
 
 class StaleRestoreFailingGUI extends CaptureMutationGuardGUI {
+    NotifyNonModal(message, title, options := "") {
+        this.NotifyUser(message, title, options)
+    }
     RestoreRuntimeProfile(profile, &failureText) {
         failureText := "simulated stale restore failure"
         return false
+    }
+}
+
+class RefusedPromptGUI extends KeybindGUI {
+    NewProfileDialog(title, profileName := "", ownerGui := 0) {
+        this.lastPrompt := super.NewProfileDialog(title, profileName, ownerGui)
+        return this.lastPrompt
+    }
+
+    NotifyNonModal(*) {
     }
 }
 

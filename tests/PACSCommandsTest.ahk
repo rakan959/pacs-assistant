@@ -8,6 +8,7 @@ class PACSCommandsTest {
         "TestBuiltInCommandsExist",
         "TestEachBuiltInCommandRunsUnderItsOwnName",
         "TestCreateCustomKeybindStoresConfig",
+        "TestCustomKeybindRefusalNamesTheCommand",
         "TestModalityClassification",
         "TestModalityNamesCoverEveryRule",
         "TestLooksLikeReport",
@@ -71,6 +72,25 @@ class PACSCommandsTest {
         targetedCallback := PACSCommands.CreateCustomKeybind("^v", "TargetWindow")
         Assert.Equal("^v", targetedCallback.keys)
         Assert.Equal("TargetWindow", targetedCallback.window)
+    }
+
+    TestCustomKeybindRefusalNamesTheCommand() {
+        originalActive := PACSCommands.clinicalCommandActive
+        originalName := PACSCommands.activeClinicalCommand
+        originalNotifier := PACSCommands.busyNotifier
+        notices := []
+        PACSCommands.busyNotifier := (text, *) => notices.Push(text)
+        PACSCommands.clinicalCommandActive := true
+        PACSCommands.activeClinicalCommand := "Other Command"
+        try {
+            callback := PACSCommands.CreateCustomKeybind("^c", "", "Custom: Copy Study")
+            Assert.False(callback.Call())
+            Assert.Equal("'Other Command' is still running. 'Custom: Copy Study' was not started.", notices[1])
+        } finally {
+            PACSCommands.clinicalCommandActive := originalActive
+            PACSCommands.activeClinicalCommand := originalName
+            PACSCommands.busyNotifier := originalNotifier
+        }
     }
 
     TestModalityClassification() {
