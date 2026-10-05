@@ -461,7 +461,7 @@ class PACSMonitor {
             rowText := row.Name
             if (Type(rowText) != "String")
                 throw Error("study row text is unavailable")
-            rows.Push({Name: rowText})
+            rows.Push({name: rowText})
         }
         return rows
     }
@@ -479,7 +479,7 @@ class PACSMonitor {
         pendingAccessions := Map()
 
         for row in rows {
-            rowText := row.Name
+            rowText := row.name
             ; Find any accession numbers
             accessions := []
             firstAccessionPosition := 0

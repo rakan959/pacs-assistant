@@ -82,9 +82,9 @@ class PACSMonitorTest {
     
     TestProcessRowsFindsNewStudies() {
         studies := PACSMonitor.ProcessRows([
-            {Name: "CT HEAD WITHOUT CONTRAST 12345678"},
-            {Name: "CT ABDOMEN 87654321"},
-            {Name: "XR CHEST 2 VIEW 99887766"}
+            {name: "CT HEAD WITHOUT CONTRAST 12345678"},
+            {name: "CT ABDOMEN 87654321"},
+            {name: "XR CHEST 2 VIEW 99887766"}
         ], (*) => true)
 
         Assert.True(PACSMonitor.HasAccession("12345678"))
@@ -95,8 +95,8 @@ class PACSMonitorTest {
 
     TestProcessRowsPreservesLongModalityPrefix() {
         studies := PACSMonitor.ProcessRows([
-            {Name: "MRI BRAIN WITHOUT CONTRAST 12345678"},
-            {Name: "CTA HEAD AND NECK 87654321"}
+            {name: "MRI BRAIN WITHOUT CONTRAST 12345678"},
+            {name: "CTA HEAD AND NECK 87654321"}
         ], (*) => true)
 
         Assert.Equal("MRI", studies[1].studyType)
@@ -105,7 +105,7 @@ class PACSMonitorTest {
 
     TestStudyNotificationDropsPatientNamePrefix() {
         studies := PACSMonitor.ProcessRows([
-            {Name: "DOE JOHN CT CHEST 12345678"}
+            {name: "DOE JOHN CT CHEST 12345678"}
         ], (*) => true)
 
         Assert.Equal(1, studies.Length)
@@ -115,7 +115,7 @@ class PACSMonitorTest {
 
         PACSMonitor.knownAccessions := Map()
         studies := PACSMonitor.ProcessRows([
-            {Name: "CT CHEST DOE JOHN 87654321"}
+            {name: "CT CHEST DOE JOHN 87654321"}
         ], (*) => true)
         Assert.Equal("CT", studies[1].studyType)
         Assert.False(InStr(studies[1].studyType, "DOE") > 0)
@@ -123,8 +123,8 @@ class PACSMonitorTest {
 
     TestAmbiguousFlattenedRowDoesNotNotify() {
         studies := PACSMonitor.ProcessRows([
-            {Name: "DOE CT JOHN MRI BRAIN 12345678"},
-            {Name: "12345678 DOE JOHN CT CHEST"}
+            {name: "DOE CT JOHN MRI BRAIN 12345678"},
+            {name: "12345678 DOE JOHN CT CHEST"}
         ], (*) => true)
 
         Assert.Equal(0, studies.Length)
@@ -133,9 +133,9 @@ class PACSMonitorTest {
 
     TestProcessRowsRequiresAnExactEightDigitAccession() {
         studies := PACSMonitor.ProcessRows([
-            {Name: "CT HEAD 1234567"},
-            {Name: "CT HEAD 123456789"},
-            {Name: "CT HEAD 87654321"}
+            {name: "CT HEAD 1234567"},
+            {name: "CT HEAD 123456789"},
+            {name: "CT HEAD 87654321"}
         ], (*) => true)
 
         Assert.Equal(1, studies.Length)
@@ -145,8 +145,8 @@ class PACSMonitorTest {
 
     TestAmbiguousNumericColumnsDoNotBecomeAccessions() {
         studies := PACSMonitor.ProcessRows([
-            {Name: "DOE JOHN 19800101 CT CHEST 12345678"},
-            {Name: "CT CHEST 20260815"}
+            {name: "DOE JOHN 19800101 CT CHEST 12345678"},
+            {name: "CT CHEST 20260815"}
         ], (*) => true)
 
         Assert.Equal(0, studies.Length)
@@ -159,9 +159,9 @@ class PACSMonitorTest {
     ; reported once, not once per row.
     TestRepeatedAccessionAlertsOnce() {
         rows := [
-            {Name: "CT HEAD WITHOUT CONTRAST 12345678"},
-            {Name: "CT HEAD WITHOUT CONTRAST 12345678"},
-            {Name: "XR CHEST 2 VIEW 99887766"}
+            {name: "CT HEAD WITHOUT CONTRAST 12345678"},
+            {name: "CT HEAD WITHOUT CONTRAST 12345678"},
+            {name: "XR CHEST 2 VIEW 99887766"}
         ]
 
         studies := PACSMonitor.ProcessRows(rows, (*) => true)
@@ -178,7 +178,7 @@ class PACSMonitorTest {
     TestDisabledAlertsDoNotConsumeFutureStudyNotification() {
         SetTestSetting("AudioAlertNewCase", false)
         SetTestSetting("MessageBoxNewCase", false)
-        rows := [{Name: "CT CHEST 12345678"}]
+        rows := [{name: "CT CHEST 12345678"}]
 
         PACSMonitor.ProcessRows(rows)
         unseenWhileDisabled := !PACSMonitor.HasAccession("12345678")
@@ -451,7 +451,7 @@ class PACSMonitorTest {
     ; that partial pass must remain eligible for the next successful scan.
     TestInterruptedScanDoesNotConsumeUnalertedAccessions() {
         rows := [
-            {Name: "CT HEAD WITHOUT CONTRAST 12345678"},
+            {name: "CT HEAD WITHOUT CONTRAST 12345678"},
             {}  ; reading Name raises, simulating a stale UIA row
         ]
 
@@ -459,7 +459,7 @@ class PACSMonitorTest {
         Assert.False(PACSMonitor.HasAccession("12345678"))
 
         studies := PACSMonitor.ProcessRows(
-            [{Name: "CT HEAD WITHOUT CONTRAST 12345678"}],
+            [{name: "CT HEAD WITHOUT CONTRAST 12345678"}],
             (*) => true
         )
         Assert.Equal(1, studies.Length)
@@ -532,7 +532,7 @@ class PACSMonitorTest {
         PACSMonitor.notifier := FailPACSNotification
 
         Assert.Throws(
-            () => PACSMonitor.ProcessRows([{Name: "CT HEAD WITHOUT CONTRAST 12345678"}]),
+            () => PACSMonitor.ProcessRows([{name: "CT HEAD WITHOUT CONTRAST 12345678"}]),
             "notifications could not be delivered"
         )
         Assert.False(PACSMonitor.HasAccession("12345678"))

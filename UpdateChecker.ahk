@@ -1713,7 +1713,7 @@ class UpdateChecker {
             updateGui.Destroy()
             if shutdownStarted
                 return this.shutdownCoordinator.CompleteShutdown()
-            ExitApp
+            ExitApp()
         } catch as err {
             if shutdownStarted
                 this.shutdownCoordinator.CancelShutdown()
