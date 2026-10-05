@@ -125,7 +125,9 @@ class WinHttpTransport {
             if (contentLength != expectedSize || contentLength > maximumSize)
                 throw Error("Update download Content-Length does not match trusted metadata")
 
-            output := FileOpen(destination, "w")
+            ; -RAW: under the script's FileEncoding "UTF-8", FileOpen would otherwise
+            ; put a byte-order mark before the downloaded bytes.
+            output := FileOpen(destination, "w", "UTF-8-RAW")
             total := 0
             downloadBuffer := Buffer(64 * 1024)
             loop {

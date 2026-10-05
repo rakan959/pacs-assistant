@@ -124,6 +124,18 @@ foreach ($testFile in Get-ChildItem -LiteralPath (Join-Path $repoRoot 'tests') -
         $failures.Add("tests/RunTests.ahk does not register $testClass.")
     }
 }
+# main.ahk and the test runners set FileEncoding "UTF-8", under which FileOpen puts
+# a byte-order mark at the start of every file it creates. A binary write such as
+# the update download needs a -RAW encoding, so every writing FileOpen names one.
+$ahkSources = Get-ChildItem -LiteralPath $repoRoot -Filter '*.ahk' -Recurse |
+    Where-Object { $_.FullName -notmatch '[\\/]UIA-v2[\\/]' }
+foreach ($ahkSource in $ahkSources) {
+    $text = Get-Content -Raw -LiteralPath $ahkSource.FullName
+    foreach ($call in [regex]::Matches($text, 'FileOpen\(\s*[^,()]+,\s*"[^"]*[wa][^"]*"\s*\)')) {
+        $failures.Add("$($ahkSource.Name) opens a file for writing without naming its encoding: $($call.Value)")
+    }
+}
+
 Assert-Matches $workflow '(?m)^\s*contents:\s*read\s*$' 'The default workflow token permission must be contents: read.'
 Assert-Matches $workflow '(?ms)^\s{2}release:\s.*?^\s{4}permissions:\s*\r?\n\s{6}contents:\s*write\s*$' 'Only the release job may request contents: write.'
 if ([regex]::Matches($workflow, '(?m)^\s*contents:\s*write\s*$').Count -ne 1) {

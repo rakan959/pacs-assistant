@@ -779,6 +779,8 @@ class UpdateChecker {
             )
 
             inputFile := FileOpen(path, "r")
+            ; FileOpen skips a leading byte-order mark; the digest covers every byte.
+            inputFile.Pos := 0
             readBuffer := Buffer(1024 * 1024)
             while (bytesRead := inputFile.RawRead(readBuffer)) {
                 this.CheckNtStatus(
@@ -845,6 +847,8 @@ class UpdateChecker {
             if (size < 64)
                 return false
             executableFile := FileOpen(path, "r")
+            ; FileOpen skips a leading byte-order mark; the header starts at byte 0.
+            executableFile.Pos := 0
 
             signature := Buffer(2)
             if (executableFile.RawRead(signature) != 2 || NumGet(signature, 0, "UShort") != 0x5A4D)
@@ -933,7 +937,7 @@ class UpdateChecker {
             ; In-place update needs directory create, write, rename, and delete
             ; permission. Probe that complete contract before acquiring shutdown or
             ; downloading an executable that cannot be installed.
-            probeFile := FileOpen(probePath, "w")
+            probeFile := FileOpen(probePath, "w", "UTF-8-RAW")
             probeFile.Write("PACS Assistant update write probe")
             probeFile.Close()
             probeFile := 0

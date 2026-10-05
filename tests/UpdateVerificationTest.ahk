@@ -12,6 +12,7 @@ class UpdateVerificationTest {
         "ArtifactValidationAcceptsMatchingExecutable",
         "ArtifactValidationRejectsEachMismatch",
         "ArtifactValidationRejectsMzWithoutPeSignature",
+        "ArtifactChecksReadALeadingByteOrderMark",
         "ReleaseParserRejectsMalformedMetadata",
         "ReleaseParserRejectsInvalidAssetFields",
         "DownloadUrlRejectsQueryFragmentAndDotSegments",
@@ -27,7 +28,8 @@ class UpdateVerificationTest {
         "CopyRunningInterpreter",
         "NewMetadataRequest",
         "Repeat",
-        "TrackTemp"
+        "TrackTemp",
+        "WriteRawFile"
     ]
 
     Setup() {
@@ -88,12 +90,33 @@ class UpdateVerificationTest {
             NumPut("UShort", 0x5A4D, image, 0)
             NumPut("UInt", peOffset, image, 0x3C)
             path := this.TrackTemp(TestTempPath("pacs-mz-only", ".exe"))
-            fileHandle := FileOpen(path, "w")
-            fileHandle.RawWrite(image)
-            fileHandle.Close()
+            this.WriteRawFile(path, image)
 
             Assert.False(UpdateChecker.IsPortableExecutable(path), "MZ image with e_lfanew " peOffset " was accepted")
         }
+    }
+
+    ArtifactChecksReadALeadingByteOrderMark() {
+        ; FileOpen skips a leading UTF-8 byte-order mark when reading. The digest
+        ; must cover it, and a file that starts with one is not an executable even
+        ; when the bytes after it are laid out as one at their absolute offsets.
+        bom := Buffer(4)
+        NumPut("UChar", 0xEF, "UChar", 0xBB, "UChar", 0xBF, "UChar", 0x41, bom)
+        path := this.TrackTemp(TestTempPath("pacs-bom", ".bin"))
+        this.WriteRawFile(path, bom)
+        Assert.Equal(
+            "4d91bc408f19af2e9483a216ae71673e0ee456ece7a12998dd207e504f4f19a6",
+            UpdateChecker.HashFileSha256(path)
+        )
+
+        image := Buffer(128, 0)
+        NumPut("UChar", 0xEF, "UChar", 0xBB, "UChar", 0xBF, image, 0)
+        NumPut("UShort", 0x5A4D, image, 3)
+        NumPut("UInt", 68, image, 0x3C)
+        NumPut("UInt", 0x00004550, image, 68)
+        path := this.TrackTemp(TestTempPath("pacs-bom-mz", ".exe"))
+        this.WriteRawFile(path, image)
+        Assert.False(UpdateChecker.IsPortableExecutable(path))
     }
 
     ReleaseParserRejectsMalformedMetadata() {
@@ -267,6 +290,14 @@ class UpdateVerificationTest {
     TrackTemp(path) {
         this.tempPaths.Push(path)
         return path
+    }
+
+    ; Writes the bytes exactly. Under the suite's FileEncoding "UTF-8", FileOpen
+    ; without a -RAW encoding puts a byte-order mark before them.
+    WriteRawFile(path, bytes) {
+        fileHandle := FileOpen(path, "w", "UTF-8-RAW")
+        fileHandle.RawWrite(bytes)
+        fileHandle.Close()
     }
 
     Repeat(text, count) {
