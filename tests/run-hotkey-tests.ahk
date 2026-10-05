@@ -11,6 +11,7 @@ FileEncoding "UTF-8"
 ;
 ; The binds use keys a normal keyboard lacks: Ctrl+F13 for single hotkeys and F23/F24
 ; in combinations, so a registered bind swallows them before any window sees them.
+; Where a scoped bind must pass its key through, a window of this script receives it.
 ; The alias check also needs a real prefix key, Esc & F24; it sends Esc only while
 ; that combination is registered, so Esc never reaches the active window.
 ;
@@ -71,6 +72,32 @@ PressCombo(keys) {
     }
 }
 
+; A focused window of this script that counts the F13 key-downs reaching it, so a key
+; passed through can be told from one swallowed.
+class KeyReceiver {
+    __New() {
+        this.count := 0
+        this.gui := Gui(, "PACS Assistant hotkey test receiver")
+        this.edit := this.gui.Add("Edit", "w200")
+        this.handler := ObjBindMethod(this, "OnKeyDown")
+        OnMessage(0x100, this.handler)  ; WM_KEYDOWN
+        this.gui.Show()
+        WinActivate("ahk_id " this.gui.Hwnd)
+        WinWaitActive("ahk_id " this.gui.Hwnd, , 2)
+        this.edit.Focus()
+    }
+
+    OnKeyDown(wParam, *) {
+        if (wParam = 0x7C)  ; VK_F13
+            this.count++
+    }
+
+    Close() {
+        OnMessage(0x100, this.handler, 0)
+        this.gui.Destroy()
+    }
+}
+
 ; Sends Ctrl+F13 and reports how many times the bound action ran
 Press() {
     global fired
@@ -124,7 +151,11 @@ Main() {
         AssertEqual(true, HotkeyManager.Register("Test", "^F13", Bump, "PACS"), "a PACS-scoped bind registers")
         AssertEqual(1, Press(), "a PACS-scoped bind fires while PACS is active")
         pacs.active := false
-        AssertEqual(0, Press(), "a PACS-scoped bind does not fire outside PACS")
+        receiver := KeyReceiver()
+        try {
+            AssertEqual(0, Press(), "a PACS-scoped bind does not fire outside PACS")
+            AssertEqual(1, receiver.count, "outside PACS the key reaches the focused window")
+        } finally receiver.Close()
 
         ; Turning it off only works in the HotIf context it was created in; a variant
         ; left on would still fire while PACS is active.
