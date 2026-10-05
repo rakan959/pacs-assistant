@@ -2935,7 +2935,7 @@ class ReentrantDefaultProfileStorageDriver {
         this.observedDisabled := false
     }
 
-    WriteIni(*) {
+    WriteIniText(*) {
         this.closeAttempted := true
         this.observedDisabled := this.selector.disabled
         this.closeResult := this.callback.Call()

@@ -13,7 +13,7 @@ class NativeProfileStorageDriver {
     MoveFile(sourcePath, destinationPath, overwrite := false) =>
         FileMove(sourcePath, destinationPath, overwrite)
     DeleteIni(path, section, key) => IniDelete(path, section, key)
-    WriteIni(value, path, section, key) => IniWrite(value, path, section, key)
+    WriteIniText(value, path, section, key) => ProfileManager.WriteIniText(value, path, section, key)
     ReadIni(path, section, key, defaultValue := "") =>
         IniRead(path, section, key, defaultValue)
 }
@@ -515,7 +515,7 @@ class ProfileManager {
             return false
 
         try {
-            this.storageDriver.WriteIni(name, this.configPath, "Settings", "DefaultProfile")
+            this.storageDriver.WriteIniText(name, this.configPath, "Settings", "DefaultProfile")
             this.defaultProfile := name
             return true
         } catch as err {
@@ -550,7 +550,7 @@ class ProfileManager {
         try this.storageDriver.DeleteFile(this.ProfilePath(name))
         catch as deleteError {
             if wasDefault {
-                try this.storageDriver.WriteIni(name, this.configPath, "Settings", "DefaultProfile")
+                try this.storageDriver.WriteIniText(name, this.configPath, "Settings", "DefaultProfile")
                 catch as rollbackError {
                     refreshError := this.RefreshDefaultProfileFromStorage()
                     message := "Profile deletion failed: " deleteError.Message
@@ -606,10 +606,10 @@ class ProfileManager {
         defaultChanged := this.defaultProfile = oldName
         if defaultChanged {
             try {
-                this.storageDriver.WriteIni(newName, this.configPath, "Settings", "DefaultProfile")
+                this.storageDriver.WriteIniText(newName, this.configPath, "Settings", "DefaultProfile")
             } catch as configError {
                 rollbackError := ""
-                try this.storageDriver.WriteIni(oldName, this.configPath, "Settings", "DefaultProfile")
+                try this.storageDriver.WriteIniText(oldName, this.configPath, "Settings", "DefaultProfile")
                 catch as err
                     rollbackError := err.Message
                 if (rollbackError != "") {
@@ -642,7 +642,7 @@ class ProfileManager {
         } catch as deleteError {
             rollbackError := ""
             if defaultChanged {
-                try this.storageDriver.WriteIni(oldName, this.configPath, "Settings", "DefaultProfile")
+                try this.storageDriver.WriteIniText(oldName, this.configPath, "Settings", "DefaultProfile")
                 catch as err
                     rollbackError := err.Message
             }
@@ -698,14 +698,14 @@ class ProfileManager {
         defaultChanged := this.defaultProfile = oldName
         if defaultChanged {
             try {
-                this.storageDriver.WriteIni(newName, this.configPath, "Settings", "DefaultProfile")
+                this.storageDriver.WriteIniText(newName, this.configPath, "Settings", "DefaultProfile")
             } catch as configError {
                 rollbackError := ""
                 try this.MoveProfileThroughTemporaryPath(newPath, oldPath)
                 catch as err
                     rollbackError := err.Message
                 if (rollbackError = "") {
-                    try this.storageDriver.WriteIni(oldName, this.configPath, "Settings", "DefaultProfile")
+                    try this.storageDriver.WriteIniText(oldName, this.configPath, "Settings", "DefaultProfile")
                     catch as err
                         rollbackError := err.Message
                 }

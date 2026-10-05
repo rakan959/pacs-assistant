@@ -14,6 +14,7 @@ class ProfileManagerTest {
         "TestProfileNameContainingIniRoundTrips",
         "TestDefaultProfileTracking",
         "TestStoredDefaultProfileIsReadAtStartup",
+        "TestQuoteWrappedDefaultProfileIsReadAtStartup",
         "TestProfileRename",
         "TestProfileCaseOnlyRename",
         "TestLoadCanonicalizesCaseDriftedDefaultProfile",
@@ -132,6 +133,21 @@ class ProfileManagerTest {
 
         Assert.Equal("Night", ProfileManager.defaultProfile)
         Assert.Equal("Night", ProfileManager.currentProfile)
+    }
+
+    ; IniRead drops one pair of outer quotes, which a profile name may carry.
+    TestQuoteWrappedDefaultProfileIsReadAtStartup() {
+        name := "'Night'"
+        ProfileManager.profiles[name] := ProfileManager.NewProfile()
+        ProfileManager.SaveProfile(name, ProfileManager.profiles[name])
+        Assert.True(ProfileManager.SetDefaultProfile(name))
+        ProfileManager.defaultProfile := ""
+
+        ProfileManager.__New()
+        ProfileManager.LoadProfiles()
+
+        Assert.Equal(name, ProfileManager.defaultProfile)
+        Assert.Equal(name, ProfileManager.currentProfile)
     }
 
     TestProfileRename() {
@@ -824,10 +840,10 @@ class FaultInjectingProfileStorageDriver extends NativeProfileStorageDriver {
         return super.DeleteFile(path)
     }
 
-    WriteIni(value, path, section, key) {
+    WriteIniText(value, path, section, key) {
         if this.failWriteValues.Has(value)
             throw Error("simulated INI write failure")
-        return super.WriteIni(value, path, section, key)
+        return super.WriteIniText(value, path, section, key)
     }
 
     MoveFile(sourcePath, destinationPath, overwrite := false) {
