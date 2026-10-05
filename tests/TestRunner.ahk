@@ -18,6 +18,7 @@ class TestRunner {
     static tests := []
     static successes := 0
     static failures := 0
+    static completed := false
     ; Dialogs raised through the MsgBox override below during the current test, so a
     ; test can assert which message a failure path showed rather than only its result.
     static dialogs := []
@@ -29,12 +30,27 @@ class TestRunner {
     static RunAll() {
         this.successes := 0
         this.failures := 0
+        this.completed := false
+        ; Production code under test can reach ExitApp. Without this guard such a
+        ; test would end the run with exit code 0, no summary, and every later test
+        ; silently skipped.
+        OnExit(ObjBindMethod(this, "RequireCompletedRun"))
 
         for testClass in this.tests {
             this.RunTestClass(testClass)
         }
 
         this.ReportResults()
+        this.completed := true
+    }
+
+    ; OnExit callback: turns an otherwise "successful" exit into exit code 11 when
+    ; RunAll did not finish or ran no tests. Failure exit codes pass through.
+    static RequireCompletedRun(exitReason, exitCode) {
+        if (exitCode != 0 || (this.completed && this.successes + this.failures > 0))
+            return 0
+        try FileAppend("INCOMPLETE test run: the process exited (" exitReason ") before every test finished or no test ran.`n", "**")
+        ExitApp(11)
     }
 
     static RunTestClass(testClass, report := true) {

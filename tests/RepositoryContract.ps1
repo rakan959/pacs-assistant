@@ -69,6 +69,8 @@ $updateNetworking = $updateChecker + $winHttpTransport + $winHttpTextRequest
 $appControl = Get-Content -Raw (Join-Path $repoRoot 'AppControl.ahk')
 $keybindGui = Get-Content -Raw (Join-Path $repoRoot 'KeybindGUI.ahk')
 $guiSmoke = Get-Content -Raw (Join-Path $repoRoot 'tests/run-gui-smoke.ahk')
+$runTests = Get-Content -Raw (Join-Path $repoRoot 'tests/RunTests.ahk')
+$testRunner = Get-Content -Raw (Join-Path $repoRoot 'tests/TestRunner.ahk')
 $noticesPath = Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md'
 $autoHotkeyLicensePath = Join-Path $repoRoot 'licenses/AutoHotkey-v2.0.26.txt'
 
@@ -101,6 +103,26 @@ if ([regex]::Matches($workflow, '(?m)^\s{4}timeout-minutes:\s*\d+\s*$').Count -n
     $failures.Add('Both CI jobs must define bounded timeout-minutes values.')
 }
 Assert-Matches $workflow '(?m)^\s*- name: Run unit tests\s*\r?\n\s+timeout-minutes:\s*\d+\s*$' 'The unit-test step must have its own timeout so a blocked harness fails fast.'
+$unitStep = [regex]::Match($workflow, '(?ms)^\s*- name: Run unit tests\s*$.*?(?=^\s*- name:|\z)').Value
+Assert-Matches $unitStep "'tests\\RunTests\.ahk'" 'The unit-test step must run tests\RunTests.ahk.'
+Assert-Matches $unitStep '(?s)if \(\$process\.ExitCode -ne 0\)\s*\{\s*throw' 'The unit-test step must fail when the suite exits non-zero.'
+$syntaxStep = [regex]::Match($workflow, '(?ms)^\s*- name: Validate syntax\s*$.*?(?=^\s*- name:|\z)').Value
+foreach ($validatedScript in @("'main.ahk'", "'tests\\run-hotkey-tests\.ahk'", "'tests\\run-gui-smoke\.ahk'")) {
+    Assert-Matches $syntaxStep $validatedScript "CI must /validate $validatedScript."
+}
+Assert-Matches $runTests 'ExitApp\(TestRunner\.failures > 0 \? 1 : 0\)' 'RunTests.ahk must exit non-zero when any test fails.'
+Assert-Matches $testRunner 'OnExit\(ObjBindMethod\(this, "RequireCompletedRun"\)\)' 'TestRunner must fail a run that exits before every test finished.'
+# README: add a test by writing a class and registering it in RunTests.ahk. Every
+# *Test.ahk file must therefore be both included and registered, or it never runs.
+foreach ($testFile in Get-ChildItem -LiteralPath (Join-Path $repoRoot 'tests') -Filter '*Test.ahk') {
+    $testClass = [IO.Path]::GetFileNameWithoutExtension($testFile.Name)
+    if ($runTests -notmatch ('(?m)^#Include\s+' + [regex]::Escape($testFile.Name) + '\s*$')) {
+        $failures.Add("tests/RunTests.ahk does not include $($testFile.Name).")
+    }
+    if ($runTests -notmatch ('(?m)^TestRunner\.AddTest\(' + [regex]::Escape($testClass) + '\)\s*$')) {
+        $failures.Add("tests/RunTests.ahk does not register $testClass.")
+    }
+}
 Assert-Matches $workflow '(?m)^\s*contents:\s*read\s*$' 'The default workflow token permission must be contents: read.'
 Assert-Matches $workflow '(?ms)^\s{2}release:\s.*?^\s{4}permissions:\s*\r?\n\s{6}contents:\s*write\s*$' 'Only the release job may request contents: write.'
 if ([regex]::Matches($workflow, '(?m)^\s*contents:\s*write\s*$').Count -ne 1) {

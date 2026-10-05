@@ -108,21 +108,25 @@ jobs:
           "AHK_EXE=$ahkExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "AHK2EXE_EXE=$compilerExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      # The desktop suites stay local-only, but /validate loads them without opening
+      # windows or registering hotkeys, so their load errors still fail CI.
       - name: Validate syntax
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $stdout = Join-Path $env:RUNNER_TEMP 'syntax-output.txt'
-          $stderr = Join-Path $env:RUNNER_TEMP 'syntax-errors.txt'
-          $process = Start-Process -FilePath $env:AHK_EXE -ArgumentList @(
-            '/validate',
-            '/ErrorStdOut',
-            'main.ahk'
-          ) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-          if (Test-Path -LiteralPath $stdout) { Get-Content $stdout }
-          if (Test-Path -LiteralPath $stderr) { Get-Content $stderr }
-          if ($process.ExitCode -ne 0) {
-            throw "Syntax validation failed (exit $($process.ExitCode))"
+          foreach ($script in @('main.ahk', 'tests\run-hotkey-tests.ahk', 'tests\run-gui-smoke.ahk')) {
+            $stdout = Join-Path $env:RUNNER_TEMP 'syntax-output.txt'
+            $stderr = Join-Path $env:RUNNER_TEMP 'syntax-errors.txt'
+            $process = Start-Process -FilePath $env:AHK_EXE -ArgumentList @(
+              '/validate',
+              '/ErrorStdOut',
+              $script
+            ) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            if (Test-Path -LiteralPath $stdout) { Get-Content $stdout }
+            if (Test-Path -LiteralPath $stderr) { Get-Content $stderr }
+            if ($process.ExitCode -ne 0) {
+              throw "Syntax validation failed for $script (exit $($process.ExitCode))"
+            }
           }
 
       # The hotkey and GUI smoke suites interact with the real desktop and remain local-only.
