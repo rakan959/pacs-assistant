@@ -84,7 +84,9 @@ class UpdateCheckerTest {
         this.originalInstalledExecutable := UpdateChecker.installedExecutable
         this.originalCompiledProbe := UpdateChecker.compiledProbe
         this.originalLaunchUpdater := UpdateChecker.launchUpdater
-        this.installRoot := ""
+        ; Never the folder beside the test scripts: the write probe and staged
+        ; files go to a private folder, and no updater is ever really launched.
+        this.UseTestInstall()
         UpdateChecker.shutdownCoordinator := 0
         UpdateChecker.updateCheckEligibleProbe := (*) => true
         this.updateNotifications := []
@@ -710,7 +712,7 @@ class UpdateCheckerTest {
     ; A verified download is staged beside the app, the updater script is written,
     ; and the updater is launched once, with this install's paths, before shutdown.
     TestVerifiedUpdateLaunchesTheUpdaterOnce() {
-        launches := this.UseTestInstall()
+        launches := this.launches
         updateInfo := InterpreterUpdateInfo()
         transport := RecordingDownloadTransport(A_AhkPath)
         UpdateChecker.transport := transport
@@ -745,7 +747,7 @@ class UpdateCheckerTest {
     ; An uncompiled build has no executable to replace, and a release asset outside
     ; this repository's releases is never fetched.
     TestUpdateIsNotDownloadedWhenItCannotBeTrusted() {
-        launches := this.UseTestInstall()
+        launches := this.launches
         trusted := InterpreterUpdateInfo()
         foreign := InterpreterUpdateInfo()
         foreign.downloadUrl := StrReplace(foreign.downloadUrl, "/rakan959/", "/someone-else/")
@@ -777,7 +779,7 @@ class UpdateCheckerTest {
     ; A download that fails verification is deleted, and no updater is launched to
     ; install it.
     TestRejectedDownloadIsDiscardedWithoutLaunchingTheUpdater() {
-        launches := this.UseTestInstall()
+        launches := this.launches
         updateInfo := InterpreterUpdateInfo()
         digest := updateInfo.downloadSha256
         updateInfo.downloadSha256 := (SubStr(digest, 1, 1) = "0" ? "1" : "0") SubStr(digest, 2)
@@ -803,7 +805,7 @@ class UpdateCheckerTest {
     ; Installing ends the app, which only the shutdown coordinator may do: without
     ; one, nothing is downloaded or launched.
     TestUpdateIsNotInstalledWithoutAShutdownCoordinator() {
-        launches := this.UseTestInstall()
+        launches := this.launches
         transport := RecordingDownloadTransport(A_AhkPath)
         UpdateChecker.transport := transport
 
@@ -836,20 +838,18 @@ class UpdateCheckerTest {
         UpdateChecker.installedExecutable := this.originalInstalledExecutable
         UpdateChecker.compiledProbe := this.originalCompiledProbe
         UpdateChecker.launchUpdater := this.originalLaunchUpdater
-        if (this.installRoot != "") {
-            ; A launch is only recorded, so the script it names is still on disk.
-            for launch in this.launches
-                try FileDelete(this.LaunchedScriptPath(launch))
-            try DirDelete(this.installRoot, true)
-        }
+        ; A launch is only recorded, so the script it names is still on disk.
+        for launch in this.launches
+            try FileDelete(this.LaunchedScriptPath(launch))
+        try DirDelete(this.installRoot, true)
         UpdateChecker.skippedVersion := ""
         UpdateChecker.lastRemindTime := 0
         RestoreTestSettings(this.savedSettings)
     }
 
     ; Points the installer at a private folder standing in for the app folder, and
-    ; records the updater launch instead of running it.
-    ; @returns the launches, each {command, workingDirectory}
+    ; records each updater launch, as {command, workingDirectory}, in this.launches
+    ; instead of running it.
     UseTestInstall() {
         this.installRoot := TestTempPath("update-install")
         DirCreate(this.installRoot)
@@ -860,7 +860,6 @@ class UpdateCheckerTest {
         UpdateChecker.launchUpdater := (command, workingDirectory) => launches.Push(
             {command: command, workingDirectory: workingDirectory}
         )
-        return launches
     }
 
     ; The updater script a recorded launch would run, or "" when it names none.
