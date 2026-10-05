@@ -24,6 +24,7 @@ class WetReadTest {
         "UnreadableNativeFieldFailsClosed",
         "StickyRootMustBelongToPacsProcess",
         "PacsSessionRecheckRequiresTheSameUniqueWindow",
+        "StickyButtonFilterRequiresEachProperty",
         "StickyOpenerRejectsSameProcessWrongWindowButton",
         "NativeStickyButtonReportsWhetherClickActioned",
         "AttendingFailureMessagesReadAsOneSentence",
@@ -251,6 +252,27 @@ class WetReadTest {
                 )
             }
         } finally AppControl.windowDriver := originalWindowDriver
+    }
+
+    ; Only an enabled button with the exact name, in the PACS root's process and
+    ; window, is the Sticky Notes button; each condition alone rejects it.
+    StickyButtonFilterRequiresEachProperty() {
+        opener := StickyNoteOpener()
+        name := StickyNoteOpener.stickyButtonName
+        valid := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, name)
+        Assert.True(opener.FindUniqueStickyButton(FakeStickyTargetRoot(42, [valid], 100)) == valid)
+        variants := [
+            {label: "name casing", property: "Name", value: StrUpper(name)},
+            {label: "type", property: "Type", value: UIA.Type.Text},
+            {label: "disabled", property: "IsEnabled", value: false},
+            {label: "process", property: "ProcessId", value: 43},
+            {label: "window", property: "WinId", value: 999}
+        ]
+        for variant in variants {
+            button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, name)
+            button.%variant.property% := variant.value
+            Assert.Equal(0, opener.FindUniqueStickyButton(FakeStickyTargetRoot(42, [button], 100)), variant.label)
+        }
     }
 
     StickyOpenerRejectsSameProcessWrongWindowButton() {

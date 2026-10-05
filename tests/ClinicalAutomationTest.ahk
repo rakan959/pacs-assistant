@@ -73,6 +73,7 @@ class ClinicalAutomationTest {
         "ReportSelectionUsesOnlyReportShapedText",
         "ReportSelectionRejectsMultipleReportCandidates",
         "ReportSelectionRejectsUnrelatedFallbackText",
+        "ReportControlIdentityRequiresEachProperty",
         "ReportCaptureReadsTheOneCurrentReport",
         "ReportCaptureFailsClosedOnEnumerationError",
         "ReportCaptureFailsClosedOnUnreadableSibling",
@@ -1126,6 +1127,25 @@ class ClinicalAutomationTest {
         )
         fallbackReport := "EXAMINATION: XR KNEE`nFINDINGS: No fracture."
         Assert.Equal(fallbackReport, PowerScribe.SelectReportText([], fallbackReport))
+    }
+
+    ; The report control must be a document or edit control in the root's process
+    ; and window; each condition alone rejects it.
+    ReportControlIdentityRequiresEachProperty() {
+        root := {ProcessId: 77, WinId: 601}
+        Assert.True(PowerScribe.InspectExpectedReportControl(root, {ProcessId: 77, WinId: 601, Type: UIA.Type.Document}))
+        Assert.True(PowerScribe.InspectExpectedReportControl(root, {ProcessId: 77, WinId: 601, Type: UIA.Type.Edit}))
+        cases := [
+            {label: "other process", root: root, control: {ProcessId: 78, WinId: 601, Type: UIA.Type.Document}},
+            {label: "other window", root: root, control: {ProcessId: 77, WinId: 602, Type: UIA.Type.Document}},
+            {label: "text control", root: root, control: {ProcessId: 77, WinId: 601, Type: UIA.Type.Text}},
+            {label: "no root process", root: {ProcessId: 0, WinId: 601},
+                control: {ProcessId: 0, WinId: 601, Type: UIA.Type.Document}},
+            {label: "no root window", root: {ProcessId: 77, WinId: 0},
+                control: {ProcessId: 77, WinId: 0, Type: UIA.Type.Document}}
+        ]
+        for testCase in cases
+            Assert.False(PowerScribe.InspectExpectedReportControl(testCase.root, testCase.control), testCase.label)
     }
 
     ReportCaptureReadsTheOneCurrentReport() {

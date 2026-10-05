@@ -32,6 +32,7 @@ class PACSMonitorTest {
         "TestPortalActivationBeforeClickDoesNotInvokeRefresh",
         "TestActiveClinicalLeaseSkipsBackgroundMonitor",
         "TestRefreshWaitDoesNotHoldClinicalLease",
+        "TestPortalRootMustBeTheCapturedWindowAndProcess",
         "TestRefreshAndScanUseOneCapturedPortalSession",
         "TestAmbiguousPortalWindowsAreReportedAsScanFailure",
         "TestStudyListFallbackRequiresExpectedTypeAndProcess",
@@ -353,6 +354,22 @@ class PACSMonitorTest {
 
         Assert.Equal("acquired", driver.waitLeaseStatus)
         Assert.False(PACSCommands.clinicalCommandActive)
+    }
+
+    ; The portal's UIA root must be the captured window in the captured process;
+    ; each condition alone rejects it.
+    TestPortalRootMustBeTheCapturedWindowAndProcess() {
+        session := this.PortalSession()
+        Assert.True(PACSMonitor.IsExpectedPortalRoot(session, {WinId: 100, ProcessId: 42}))
+        cases := [
+            {label: "other window", session: session, root: {WinId: 101, ProcessId: 42}},
+            {label: "other process", session: session, root: {WinId: 100, ProcessId: 43}},
+            {label: "no captured window", session: {hwnd: 0, processId: 42}, root: {WinId: 0, ProcessId: 42}},
+            {label: "no captured process", session: {hwnd: 100, processId: 0}, root: {WinId: 100, ProcessId: 0}},
+            {label: "no root", session: session, root: 0}
+        ]
+        for testCase in cases
+            Assert.False(PACSMonitor.IsExpectedPortalRoot(testCase.session, testCase.root), testCase.label)
     }
 
     TestRefreshAndScanUseOneCapturedPortalSession() {

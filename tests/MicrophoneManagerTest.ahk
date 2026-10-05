@@ -20,6 +20,7 @@ class MicrophoneManagerTest {
         "UnsupportedMicrophoneValuePreventsAnySelectionMutation",
         "PartialMicrophoneNameMustResolveUniquely",
         "ExactMicrophoneNameWinsOverPartialMatches",
+        "MicrophoneItemIdentityRequiresEachProperty",
         "MicrophoneItemMustBelongToTheExactCombo",
         "UnreadableMicrophoneItemAlongsideValidDoesNotSelect",
         "ItemInvalidatedByFinalComboCheckIsNotSelected",
@@ -338,6 +339,28 @@ class MicrophoneManagerTest {
         Assert.True(IsObject(resolved))
         Assert.Equal("PowerMic III", resolved.name)
         Assert.True(resolved.item == fixture.items[1])
+    }
+
+    ; A microphone item must be an enabled, selectable, named list item in the
+    ; picker's process and window, contained by the picker; each condition alone
+    ; rejects it.
+    MicrophoneItemIdentityRequiresEachProperty() {
+        fixture := MicrophoneFixture(["Desk Mic"])
+        Assert.True(MicrophoneManager.InspectMicrophoneItem(fixture.root, fixture.combo, fixture.items[1]))
+        variants := [
+            {label: "process", property: "ProcessId", value: fixture.session.processId + 1},
+            {label: "window", property: "WinId", value: fixture.session.hwnd + 1},
+            {label: "type", property: "Type", value: UIA.Type.Button},
+            {label: "disabled", property: "IsEnabled", value: false},
+            {label: "not selectable", property: "IsSelectionItemPatternAvailable", value: false},
+            {label: "blank name", property: "Name", value: "  "},
+            {label: "no container", property: "combo", value: 0}
+        ]
+        for variant in variants {
+            item := FakeMicrophoneItem(fixture.session.processId, fixture.session.hwnd, "Desk Mic", fixture.combo)
+            item.%variant.property% := variant.value
+            Assert.False(MicrophoneManager.InspectMicrophoneItem(fixture.root, fixture.combo, item), variant.label)
+        }
     }
 
     MicrophoneItemMustBelongToTheExactCombo() {
