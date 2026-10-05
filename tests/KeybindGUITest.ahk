@@ -97,8 +97,8 @@ class KeybindGUITest {
     ]
 
     Setup() {
-        ; Build an instance without running the constructor, which would check GitHub
-        ; for updates and load profiles
+        ; Build an instance without running the constructor, which loads profiles from
+        ; disk and opens the main window, the profile selector or a new-profile prompt
         this.gui := {base: KeybindGUI.Prototype, gui: ""}
         this.originalLeases := ExclusiveOperationsFixture.ReleaseAll()
         this.tempProfilesRoot := ""
@@ -2192,11 +2192,8 @@ class KeybindGUITest {
         callbackCalls := 0
         editor := {base: InterruptingProfileApplyGUI.Prototype}
         editor.callback := (*) => callbackCalls++
-        PACSCommands.commandAvailabilityProbe := (*) =>
-            !ExclusiveOperations.profileMutationActive
-            && !ExclusiveOperations.captureActive
-            && !Settings.writeTransactionActive
-            && !ExclusiveOperations.shutdownActive
+        ; The same clinical-entry check main.ahk installs
+        PACSCommands.commandAvailabilityProbe := (*) => ExclusiveOperations.Active("clinical") = ""
         PACSCommands.busyNotifier := (text, title, options) => notifications.Push(text)
 
         try {
