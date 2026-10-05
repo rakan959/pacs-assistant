@@ -139,6 +139,10 @@ class KeybindGUITest {
         ; native key-name coverage.
         HotkeyManager.activeHotkeys := Map()
         HotkeyManager.hotkeyDriver := TransactionalHotkeyDriver()
+        ; Saving a profile bumps its revision in place, so each test starts from
+        ; fresh maps rather than the ones Teardown restores.
+        ProfileManager.profiles := Map()
+        ProfileManager.profileRevisions := Map()
     }
 
     Teardown() {
@@ -175,9 +179,6 @@ class KeybindGUITest {
         Assert.Equal("", this.gui.SelectedFunction({Text: ""}, {Text: ""}))
     }
 
-    ; The custom-function list exists only when the profile has custom functions, so
-    ; reading the selection must not assume it; otherwise the GUI callback raises an
-    ; unset-variable error for a profile without any.
     ; Add Selected must add what was clicked last, so choosing in one list clears
     ; the other.
     TestFunctionListsKeepOnlyTheLastClickedSelection() {
@@ -198,6 +199,9 @@ class KeybindGUITest {
         } finally dialog.Destroy()
     }
 
+    ; The custom-function list exists only when the profile has custom functions, so
+    ; reading the selection must not assume it; otherwise the GUI callback raises an
+    ; unset-variable error for a profile without any.
     TestSelectedFunctionSurvivesMissingCustomList() {
         Assert.Equal("Sign Report", this.gui.SelectedFunction({Text: "Sign Report"}, ""))
         Assert.Equal("", this.gui.SelectedFunction({Text: ""}, ""))
@@ -472,7 +476,6 @@ class KeybindGUITest {
         editor.notifications := []
 
         try {
-            ProfileManager.profileRevisions := Map()
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
             ProfileManager.SaveProfile("Test", profile)
@@ -742,7 +745,6 @@ class KeybindGUITest {
         )
         editor.confirmationDriver := confirmation
 
-        ProfileManager.profileRevisions := Map()
         ProfileManager.profiles := Map(
             "A", ProfileManager.NewProfile(),
             "B", ProfileManager.NewProfile()
@@ -777,7 +779,6 @@ class KeybindGUITest {
         confirmation := ReentrantProfileDeleteConfirmationDriver((*) => false, selector)
         editor.confirmationDriver := confirmation
 
-        ProfileManager.profileRevisions := Map()
         ProfileManager.profiles := Map(
             "A", ProfileManager.NewProfile(),
             "B", ProfileManager.NewProfile()
@@ -1362,7 +1363,6 @@ class KeybindGUITest {
         profile.modalityAttendings["Neuro"] := "Old Attending"
 
         ProfileManager.profiles := Map("Test", profile)
-        ProfileManager.profileRevisions := Map()
         ProfileManager.currentProfile := "Test"
         ProfileManager.SaveProfile("Test", profile)
         editor := {base: LiveDialogIdentityGUI.Prototype, gui: ""}
@@ -1393,7 +1393,6 @@ class KeybindGUITest {
         profile.modalityAttendings["Neuro"] := "Old Attending"
 
         ProfileManager.profiles := Map("Test", profile)
-        ProfileManager.profileRevisions := Map()
         ProfileManager.currentProfile := "Test"
         ProfileManager.SaveProfile("Test", profile)
         dialog := FakeProfileDialog("Test")
@@ -1452,7 +1451,6 @@ class KeybindGUITest {
         editor := {base: DirtyPersistentOperationGUI.Prototype, dialogCalls: 0}
         editor.confirmationDriver := AlwaysConfirmDriver()
 
-        ProfileManager.profileRevisions := Map()
         ProfileManager.profiles := Map("Test", profile)
         ProfileManager.currentProfile := "Test"
         ProfileManager.SaveProfile("Test", profile)
@@ -1618,7 +1616,6 @@ class KeybindGUITest {
         }
         editor.gui := FakeProfileDialog()
 
-        ProfileManager.profileRevisions := Map()
         ProfileManager.profiles := Map("Night", profile)
         ProfileManager.currentProfile := "Night"
         ProfileManager.SaveProfile("Night", profile)
@@ -1729,7 +1726,6 @@ class KeybindGUITest {
         editor.createCalls := 0
         editor.applyCalls := 0
 
-        ProfileManager.profileRevisions := Map()
         ProfileManager.defaultProfile := ""
         ProfileManager.profiles := Map("Old", profile)
         ProfileManager.currentProfile := "Old"
@@ -1798,7 +1794,6 @@ class KeybindGUITest {
             profileLeaveDriver: FixedProfileLeaveDriver("Yes")
         }
 
-        ProfileManager.profileRevisions := Map()
         ProfileManager.profiles := Map("Test", profile)
         ProfileManager.currentProfile := "Test"
         ProfileManager.SaveProfile("Test", profile)
@@ -1908,7 +1903,6 @@ class KeybindGUITest {
             profileLeaveDriver: FixedProfileLeaveDriver("No")
         }
 
-        ProfileManager.profileRevisions := Map()
         ProfileManager.profiles := Map("Test", profile)
         ProfileManager.currentProfile := "Test"
         ProfileManager.SaveProfile("Test", profile)
@@ -2316,7 +2310,6 @@ class KeybindGUITest {
         selector := FakeProfileDialog()
         editor := {base: ProfileDeleteTestGUI.Prototype}
 
-        ProfileManager.profileRevisions := Map()
         ProfileManager.profiles := Map("A", oldProfile, "B", otherProfile)
         ProfileManager.currentProfile := "B"
         ProfileManager.defaultProfile := ""
