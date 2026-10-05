@@ -1890,6 +1890,7 @@ class KeybindGUI {
             selectorGui.Add("Text", "xm y+10", "Custom Functions:")
             lbCustom := selectorGui.Add("ListBox", "w200 h100", customFunctions)
             selectorGui.Add("Button", "y+5 w200", "Delete Selected Custom Function").OnEvent("Click", (*) => this.DeleteCustomFunction(lbCustom.Text, selectorGui))
+            this.LinkFunctionLists(lbBuiltIn, lbCustom)
         }
 
         ; Add action buttons
@@ -1900,6 +1901,13 @@ class KeybindGUI {
 
         selectorGui.Show()
         return true
+    }
+
+    ; One selection across both lists: choosing in one clears the other, so Add
+    ; Selected adds the function clicked last.
+    LinkFunctionLists(lbBuiltIn, lbCustom) {
+        lbBuiltIn.OnEvent("Change", (*) => lbCustom.Choose(0))
+        lbCustom.OnEvent("Change", (*) => lbBuiltIn.Choose(0))
     }
 
     /**

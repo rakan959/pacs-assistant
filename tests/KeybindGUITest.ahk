@@ -13,6 +13,7 @@ class KeybindGUITest {
     static tests := [
         "TestSelectedFunctionPrefersBuiltIn",
         "TestSelectedFunctionSurvivesMissingCustomList",
+        "TestFunctionListsKeepOnlyTheLastClickedSelection",
         "TestPrettifyHotkey",
         "TestCustomFunctionNameChecksUnboundFunctions",
         "TestCustomFunctionNamesUsePersistedCaseInsensitiveIdentity",
@@ -180,6 +181,26 @@ class KeybindGUITest {
     ; The custom-function list exists only when the profile has custom functions, so
     ; reading the selection must not assume it; otherwise the GUI callback raises an
     ; unset-variable error for a profile without any.
+    ; Add Selected must add what was clicked last, so choosing in one list clears
+    ; the other.
+    TestFunctionListsKeepOnlyTheLastClickedSelection() {
+        dialog := Gui()
+        try {
+            lbBuiltIn := dialog.Add("ListBox", "w200 h80", ["Draft Report", "Sign Report"])
+            lbCustom := dialog.Add("ListBox", "w200 h80", ["Custom: Macro"])
+            this.gui.LinkFunctionLists(lbBuiltIn, lbCustom)
+
+            SelectListBoxItem(lbBuiltIn, 1)
+            SelectListBoxItem(lbCustom, 1)
+            Assert.Equal("", lbBuiltIn.Text)
+            Assert.Equal("Custom: Macro", this.gui.SelectedFunction(lbBuiltIn, lbCustom))
+
+            SelectListBoxItem(lbBuiltIn, 2)
+            Assert.Equal("", lbCustom.Text)
+            Assert.Equal("Sign Report", this.gui.SelectedFunction(lbBuiltIn, lbCustom))
+        } finally dialog.Destroy()
+    }
+
     TestSelectedFunctionSurvivesMissingCustomList() {
         Assert.Equal("Sign Report", this.gui.SelectedFunction({Text: "Sign Report"}, ""))
         Assert.Equal("", this.gui.SelectedFunction({Text: ""}, ""))
@@ -2958,6 +2979,15 @@ class FailingCaptureHook extends FakeCaptureHook {
     Stop() {
         throw Error("simulated InputHook stop failure")
     }
+}
+
+; Selects a ListBox item the way a click does: the selection, then the
+; LBN_SELCHANGE notification that raises the control's Change event.
+SelectListBoxItem(listBox, index) {
+    listBox.Choose(index)
+    controlId := DllCall("GetDlgCtrlID", "Ptr", listBox.Hwnd, "Int")
+    SendMessage(0x0111, (1 << 16) | controlId, listBox.Hwnd, listBox.Gui)  ; WM_COMMAND, LBN_SELCHANGE
+    Sleep(20)
 }
 
 class FakeProfileDialog {
