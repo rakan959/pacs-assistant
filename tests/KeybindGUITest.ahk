@@ -1272,18 +1272,18 @@ class KeybindGUITest {
         ProfileManager.profileRevisions := Map()
         ProfileManager.currentProfile := "Test"
         ProfileManager.SaveProfile("Test", profile)
-        revision := ProfileManager.GetProfileRevision("Test")
-        staleDialog := FakeProfileDialog("Test", revision)
-        newerDialog := FakeProfileDialog("Test", revision)
+        editor := {base: LiveDialogIdentityGUI.Prototype, gui: ""}
+        staleDialog := ProfileBoundFakeDialog("Test")
+        newerDialog := ProfileBoundFakeDialog("Test")
 
-        this.gui.SaveModalityAttendings(
+        Assert.True(editor.SaveModalityAttendings(
             Map("Neuro", {Value: "New Attending"}),
             newerDialog
-        )
-        this.gui.SaveModalityAttendings(
+        ))
+        Assert.False(editor.SaveModalityAttendings(
             Map("Neuro", {Value: "Stale Attending"}),
             staleDialog
-        )
+        ))
 
         captured := ProfileManager.profiles["Test"].modalityAttendings["Neuro"]
         capturedDestroyed := staleDialog.destroyed
@@ -2898,7 +2898,6 @@ class FakeProfileDialog {
         this.profileRevision := IsSet(profileRevision)
             ? profileRevision
             : ProfileManager.GetProfileRevision(profileName)
-        this.profileMutationRevision := KeybindGUI.GetProfileMutationRevision(profileName)
         this.disabled := false
     }
 
@@ -2912,6 +2911,18 @@ class FakeProfileDialog {
         else if (option = "-Disabled")
             this.disabled := false
     }
+}
+
+; A fake dialog carrying the profile identity NewProfileDialog records for a real
+; one, so DialogProfileIsCurrent applies its full check.
+ProfileBoundFakeDialog(profileName) {
+    dialog := FakeProfileDialog(profileName)
+    dialog.requiresLiveProfileIdentity := true
+    dialog.profileObject := ProfileManager.profiles[profileName]
+    dialog.profileStorageRevision := ProfileManager.GetProfileRevision(profileName)
+    dialog.profileMutationSnapshot := KeybindGUI.GetProfileMutationRevision(profileName)
+    dialog.ownerHwnd := 0
+    return dialog
 }
 
 class ReentrantSelectorDialog extends FakeProfileDialog {

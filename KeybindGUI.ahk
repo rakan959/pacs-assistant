@@ -2436,11 +2436,9 @@ class KeybindGUI {
         if !this.ResolveDirtyProfileBeforeLeaving(true)
             return false
 
+        ; NewProfileDialog records the profile object and both revisions;
+        ; DialogProfileIsCurrent rejects the save if any of them changed.
         modGui := this.NewProfileDialog("PACS Assistant - Modality Attendings")
-        modGui.profileRevision := ProfileManager.GetProfileRevision(modGui.profileName)
-        modGui.profileMutationRevision := KeybindGUI.GetProfileMutationRevision(
-            modGui.profileName
-        )
         modGui.Add("Text",, "Attending to assign per modality for '" modGui.profileName "'.")
         modGui.Add("Text", "y+5", "Leave a modality blank to keep PowerScribe's default attending.")
 
@@ -2473,18 +2471,6 @@ class KeybindGUI {
             )
             return false
         }
-        if (!HasProp(modGui, "profileRevision")
-            || modGui.profileRevision != ProfileManager.GetProfileRevision(profileName)
-            || !HasProp(modGui, "profileMutationRevision")
-            || modGui.profileMutationRevision != KeybindGUI.GetProfileMutationRevision(profileName)) {
-            try modGui.Destroy()
-            MsgBox(
-                "The profile changed while attending assignments were open. Reopen the dialog before saving.",
-                "Profile Changed",
-                "Icon!"
-            )
-            return false
-        }
         candidate := ProfileManager.CloneProfile(ProfileManager.profiles[profileName])
         for modality, attendingEdit in edits {
             candidate.modalityAttendings[modality] := Trim(attendingEdit.Value)
@@ -2495,9 +2481,7 @@ class KeybindGUI {
         try {
             ; Revalidate after acquiring the serialization boundary. A callback may
             ; have run between the dialog checks and the transaction acquisition.
-            if (!this.DialogProfileIsCurrent(modGui)
-                || modGui.profileRevision != ProfileManager.GetProfileRevision(profileName)
-                || modGui.profileMutationRevision != KeybindGUI.GetProfileMutationRevision(profileName))
+            if !this.DialogProfileIsCurrent(modGui)
                 return false
             try ProfileManager.SaveProfile(profileName, candidate)
             catch as err {
