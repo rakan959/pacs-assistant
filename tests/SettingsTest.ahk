@@ -7,7 +7,6 @@ class SettingsTest {
         "TestDefaultSettingsLoaded",
         "TestSaveAndGetValues",
         "TestMutationGuardRejectsSettingsWrite",
-        "TestDialogGuardRejectsSettingsWindowBeforeCreation",
         "TestPresentationLeaseRejectsSettingsWindowBeforeCreation",
         "TestMalformedPersistedSettingsUseDefaults",
         "TestExcessivePersistedRefreshIntervalUsesDefault",
@@ -40,7 +39,6 @@ class SettingsTest {
         this.originalListeners := Settings.changeListeners
         this.originalRevision := Settings.revision
         this.originalMutationGuard := Settings.mutationGuard
-        this.originalDialogGuard := Settings.dialogGuard
         this.originalDialogAcquire := Settings.HasOwnProp("dialogAcquire")
             ? Settings.dialogAcquire
             : 0
@@ -55,7 +53,6 @@ class SettingsTest {
         Settings.settingsFile := this.tempFile
         Settings.changeListeners := []
         Settings.mutationGuard := (*) => true
-        Settings.dialogGuard := (*) => true
         Settings.dialogAcquire := (*) => true
         Settings.dialogRelease := (*) => 0
         Settings.dialogUnavailableNotifier := (*) => 0
@@ -104,12 +101,6 @@ class SettingsTest {
             "Settings cannot be changed"
         )
         Assert.True(Settings.Get("AutoUpdate"))
-    }
-
-    TestDialogGuardRejectsSettingsWindowBeforeCreation() {
-        Settings.dialogGuard := (*) => false
-
-        Assert.False(Settings.ShowDialog())
     }
 
     TestPresentationLeaseRejectsSettingsWindowBeforeCreation() {
@@ -440,7 +431,6 @@ class SettingsTest {
         Settings.changeListeners := this.originalListeners
         Settings.revision := this.originalRevision
         Settings.mutationGuard := this.originalMutationGuard
-        Settings.dialogGuard := this.originalDialogGuard
         if this.originalDialogAcquire
             Settings.dialogAcquire := this.originalDialogAcquire
         else

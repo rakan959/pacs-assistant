@@ -33,22 +33,9 @@ UpdateChecker.clinicalActivityProbe := (*) => PACSCommands.clinicalCommandActive
 
 ; Compose every cross-module lease before showing the main window or registering
 ; callbacks, so even the first user action observes the same serialization policy.
-PACSCommands.commandAvailabilityProbe := (*) => !KeybindGUI.shutdownTransactionActive
-    && !KeybindGUI.captureTransactionActive
-    && !KeybindGUI.profileMutationTransactionActive
-    && !KeybindGUI.uiPresentationTransactionActive
-    && !Settings.writeTransactionActive
-Settings.mutationGuard := (*) => !PACSCommands.clinicalCommandActive
-    && !KeybindGUI.shutdownTransactionActive
-    && !KeybindGUI.captureTransactionActive
-    && !KeybindGUI.profileMutationTransactionActive
-    && !KeybindGUI.uiPresentationTransactionActive
-Settings.dialogGuard := (*) => !PACSCommands.clinicalCommandActive
-    && !KeybindGUI.shutdownTransactionActive
-    && !KeybindGUI.captureTransactionActive
-    && !KeybindGUI.profileMutationTransactionActive
-    && !KeybindGUI.uiPresentationTransactionActive
-    && !Settings.writeTransactionActive
+; Each guard ignores only the lease its own module tracks and reports separately.
+PACSCommands.commandAvailabilityProbe := (*) => KeybindGUI.ActiveExclusiveOperation("clinical") = ""
+Settings.mutationGuard := (*) => KeybindGUI.ActiveExclusiveOperation("settingsWrite") = ""
 Settings.dialogAcquire := ObjBindMethod(KeybindGUI, "TryBeginUiPresentation")
 Settings.dialogRelease := ObjBindMethod(KeybindGUI, "EndUiPresentation")
 UpdateChecker.dialogAcquire := ObjBindMethod(KeybindGUI, "TryBeginUiPresentation")

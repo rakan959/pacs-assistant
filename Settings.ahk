@@ -9,7 +9,6 @@ class Settings {
     static settingsFile := AppStorage.DataRoot() "\settings.ini"
     static changeListeners := []
     static mutationGuard := (*) => true
-    static dialogGuard := (*) => true
     static dialogAcquire := (*) => true
     static dialogRelease := (*) => 0
     static dialogUnavailableNotifier := (text, title, options) => TrayTip(text, title, options)
@@ -295,14 +294,8 @@ class Settings {
     
     ; Show settings dialog
     static ShowDialog() {
-        if !this.dialogGuard.Call() {
-            this.dialogUnavailableNotifier.Call(
-                "Wait for the active clinical or configuration operation to finish before opening Settings.",
-                "Settings Unavailable",
-                "Icon!"
-            )
-            return false
-        }
+        ; The presentation lease excludes every clinical, capture, profile, settings
+        ; and shutdown operation, so it is the only gate the dialog needs.
         if !this.dialogAcquire.Call("open Settings") {
             this.dialogUnavailableNotifier.Call(
                 "Wait for the active clinical or configuration operation to finish before opening Settings.",

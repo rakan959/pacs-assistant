@@ -75,6 +75,7 @@ class KeybindGUITest {
         "TestProfileSelectorCloseCannotInterruptDefaultProfileTransaction",
         "TestProfileCreationCloseCannotInterruptStorageTransaction",
         "TestDestroyedNewProfileDialogCannotDispatchQueuedActions",
+        "TestExclusiveOperationClassifierReportsTheFirstActiveKind",
         "TestUiPresentationLeaseBlocksClinicalEntry",
         "TestDestroyedProfileSelectorCannotDispatchQueuedActions",
         "TestProfileDeletionOwnsSelectorAcrossConfirmation"
@@ -658,11 +659,50 @@ class KeybindGUITest {
         Assert.Equal(0, editor.exitCalls)
     }
 
+    TestExclusiveOperationClassifierReportsTheFirstActiveKind() {
+        flags := [
+            {kind: "clinical", owner: PACSCommands, name: "clinicalCommandActive"},
+            {kind: "capture", owner: KeybindGUI, name: "captureTransactionActive"},
+            {kind: "profileMutation", owner: KeybindGUI, name: "profileMutationTransactionActive"},
+            {kind: "settingsWrite", owner: Settings, name: "writeTransactionActive"},
+            {kind: "uiPresentation", owner: KeybindGUI, name: "uiPresentationTransactionActive"},
+            {kind: "shutdown", owner: KeybindGUI, name: "shutdownTransactionActive"}
+        ]
+        originals := []
+        for flag in flags
+            originals.Push(flag.owner.%flag.name%)
+        try {
+            for flag in flags
+                flag.owner.%flag.name% := false
+            Assert.Equal("", KeybindGUI.ActiveExclusiveOperation())
+
+            for flag in flags {
+                flag.owner.%flag.name% := true
+                Assert.Equal(flag.kind, KeybindGUI.ActiveExclusiveOperation())
+                Assert.Equal("", KeybindGUI.ActiveExclusiveOperation(flag.kind), "Ignoring the only active kind")
+                flag.owner.%flag.name% := false
+            }
+
+            ; With several active, the user hears about the highest-priority one,
+            ; and an ignored kind does not hide the next one.
+            PACSCommands.clinicalCommandActive := true
+            KeybindGUI.shutdownTransactionActive := true
+            Assert.Equal("clinical", KeybindGUI.ActiveExclusiveOperation())
+            Assert.Equal("shutdown", KeybindGUI.ActiveExclusiveOperation("clinical"))
+            Assert.Equal("", KeybindGUI.ActiveExclusiveOperation("clinical", "shutdown"))
+            Assert.Throws(ObjBindMethod(KeybindGUI, "ExclusiveOperationIsActive", "Clinical"), "Unknown exclusive operation kind")
+        } finally {
+            for index, flag in flags
+                flag.owner.%flag.name% := originals[index]
+        }
+    }
+
     TestUiPresentationLeaseBlocksClinicalEntry() {
         callbackCalls := 0
         originalProbe := PACSCommands.commandAvailabilityProbe
+        ; The same composition main.ahk uses for clinical entry.
         PACSCommands.commandAvailabilityProbe := (*) =>
-            !KeybindGUI.uiPresentationTransactionActive
+            KeybindGUI.ActiveExclusiveOperation("clinical") = ""
 
         try {
             Assert.True(KeybindGUI.TryBeginUiPresentation("open Settings"))

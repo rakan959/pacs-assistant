@@ -28,6 +28,16 @@ class KeybindGUI {
     static shutdownAction := ""
     static uiPresentationTransactionActive := false
     static uiPresentationTransactionAction := ""
+    ; Mutually exclusive app-wide operations, in user-facing priority order. See
+    ; ActiveExclusiveOperation.
+    static exclusiveOperationKinds := [
+        "clinical",
+        "capture",
+        "profileMutation",
+        "settingsWrite",
+        "uiPresentation",
+        "shutdown"
+    ]
     ; The V option would pass the selected key through to the foreground application.
     ; Capture is intentionally suppressing: the key is configuration data only.
     static inputHookOptions := ""
@@ -144,12 +154,7 @@ class KeybindGUI {
         acquired := false
         Critical("On")
         try {
-            if (!PACSCommands.clinicalCommandActive
-                && !KeybindGUI.captureTransactionActive
-                && !KeybindGUI.profileMutationTransactionActive
-                && !Settings.writeTransactionActive
-                && !KeybindGUI.uiPresentationTransactionActive
-                && !KeybindGUI.shutdownTransactionActive) {
+            if (KeybindGUI.ActiveExclusiveOperation() = "") {
                 KeybindGUI.shutdownTransactionActive := true
                 KeybindGUI.shutdownAction := action
                 acquired := true
@@ -1350,60 +1355,78 @@ class KeybindGUI {
     }
 
     ProfileMutationAllowed(action, allowDuringShutdown := false) {
-        if PACSCommands.clinicalCommandActive {
-            this.NotifyUnavailable(
-                "Wait for '" PACSCommands.activeClinicalCommand "' to finish before you " action ".",
-                "Clinical Command In Progress",
-                "Icon!"
-            )
-            return false
-        }
-        if KeybindGUI.captureTransactionActive {
-            this.NotifyUnavailable(
-                "Finish or cancel the active key capture before you " action ".",
-                "Keybind In Progress",
-                "Icon!"
-            )
-            return false
-        }
-        if KeybindGUI.profileMutationTransactionActive {
-            this.NotifyUnavailable(
-                "Wait for the current profile operation ('"
+        active := KeybindGUI.ActiveExclusiveOperation(KeybindGUI.ShutdownExemption(allowDuringShutdown)*)
+        switch active, true {
+            case "":
+                return true
+            case "clinical":
+                message := "Wait for '" PACSCommands.activeClinicalCommand "' to finish before you " action "."
+                title := "Clinical Command In Progress"
+            case "capture":
+                message := "Finish or cancel the active key capture before you " action "."
+                title := "Keybind In Progress"
+            case "profileMutation":
+                message := "Wait for the current profile operation ('"
                     . KeybindGUI.profileMutationTransactionAction
-                    . "') to finish before you " action ".",
-                "Profile Operation In Progress",
-                "Icon!"
-            )
-            return false
-        }
-        if Settings.writeTransactionActive {
-            this.NotifyUnavailable(
-                "Wait for the current settings operation to finish before you " action ".",
-                "Settings Operation In Progress",
-                "Icon!"
-            )
-            return false
-        }
-        if KeybindGUI.uiPresentationTransactionActive {
-            this.NotifyUnavailable(
-                "Wait for the current dialog operation ('"
+                    . "') to finish before you " action "."
+                title := "Profile Operation In Progress"
+            case "settingsWrite":
+                message := "Wait for the current settings operation to finish before you " action "."
+                title := "Settings Operation In Progress"
+            case "uiPresentation":
+                message := "Wait for the current dialog operation ('"
                     . KeybindGUI.uiPresentationTransactionAction
-                    . "') to finish before you " action ".",
-                "Dialog Operation In Progress",
-                "Icon!"
-            )
-            return false
+                    . "') to finish before you " action "."
+                title := "Dialog Operation In Progress"
+            case "shutdown":
+                message := "PACS Assistant is preparing to " KeybindGUI.shutdownAction
+                    . ". Wait for that operation to finish before you " action "."
+                title := "Shutdown In Progress"
         }
-        if (KeybindGUI.shutdownTransactionActive && !allowDuringShutdown) {
-            this.NotifyUnavailable(
-                "PACS Assistant is preparing to " KeybindGUI.shutdownAction
-                    . ". Wait for that operation to finish before you " action ".",
-                "Shutdown In Progress",
-                "Icon!"
-            )
-            return false
+        this.NotifyUnavailable(message, title, "Icon!")
+        return false
+    }
+
+    /**
+     * The first active app-wide exclusive operation, or "" when none is active.
+     * Clinical automation, key capture, profile mutation, settings writes, dialog
+     * presentation and shutdown are mutually exclusive; every acquisition and the
+     * composition-root guards in main.ahk check them through this one list, in the
+     * order ProfileMutationAllowed explains them to the user.
+     * @param ignoredKinds Kinds the caller tracks itself, such as its own lease
+     * @returns One of exclusiveOperationKinds, or ""
+     */
+    static ActiveExclusiveOperation(ignoredKinds*) {
+        for kind in KeybindGUI.exclusiveOperationKinds {
+            ignored := false
+            for ignoredKind in ignoredKinds {
+                if (ignoredKind == kind) {
+                    ignored := true
+                    break
+                }
+            }
+            if (!ignored && KeybindGUI.ExclusiveOperationIsActive(kind))
+                return kind
         }
-        return true
+        return ""
+    }
+
+    static ExclusiveOperationIsActive(kind) {
+        switch kind, true {
+            case "clinical": return PACSCommands.clinicalCommandActive
+            case "capture": return KeybindGUI.captureTransactionActive
+            case "profileMutation": return KeybindGUI.profileMutationTransactionActive
+            case "settingsWrite": return Settings.writeTransactionActive
+            case "uiPresentation": return KeybindGUI.uiPresentationTransactionActive
+            case "shutdown": return KeybindGUI.shutdownTransactionActive
+        }
+        throw ValueError("Unknown exclusive operation kind: " kind)
+    }
+
+    ; Profile saves during shutdown resolve dirty state on the way out, so the
+    ; shutdown lease is the one exclusion they may ignore.
+    static ShutdownExemption(allowDuringShutdown) {
+        return allowDuringShutdown ? ["shutdown"] : []
     }
 
     BeginProfileMutationTransaction(action, allowDuringShutdown := false) {
@@ -1412,12 +1435,7 @@ class KeybindGUI {
         acquired := false
         Critical("On")
         try {
-            if (!PACSCommands.clinicalCommandActive
-                && !KeybindGUI.captureTransactionActive
-                && !Settings.writeTransactionActive
-                && !KeybindGUI.profileMutationTransactionActive
-                && !KeybindGUI.uiPresentationTransactionActive
-                && (!KeybindGUI.shutdownTransactionActive || allowDuringShutdown)) {
+            if (KeybindGUI.ActiveExclusiveOperation(KeybindGUI.ShutdownExemption(allowDuringShutdown)*) = "") {
                 KeybindGUI.profileMutationTransactionActive := true
                 KeybindGUI.profileMutationTransactionAction := action
                 acquired := true
@@ -1442,12 +1460,7 @@ class KeybindGUI {
         acquired := false
         Critical("On")
         try {
-            if (!PACSCommands.clinicalCommandActive
-                && !KeybindGUI.captureTransactionActive
-                && !KeybindGUI.profileMutationTransactionActive
-                && !Settings.writeTransactionActive
-                && !KeybindGUI.uiPresentationTransactionActive
-                && !KeybindGUI.shutdownTransactionActive) {
+            if (KeybindGUI.ActiveExclusiveOperation() = "") {
                 KeybindGUI.captureTransactionActive := true
                 acquired := true
             }
@@ -1483,12 +1496,7 @@ class KeybindGUI {
         acquired := false
         Critical("On")
         try {
-            if (!PACSCommands.clinicalCommandActive
-                && !KeybindGUI.captureTransactionActive
-                && !KeybindGUI.profileMutationTransactionActive
-                && !Settings.writeTransactionActive
-                && !KeybindGUI.shutdownTransactionActive
-                && !KeybindGUI.uiPresentationTransactionActive) {
+            if (KeybindGUI.ActiveExclusiveOperation() = "") {
                 KeybindGUI.uiPresentationTransactionActive := true
                 KeybindGUI.uiPresentationTransactionAction := action
                 acquired := true
