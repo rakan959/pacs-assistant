@@ -26,6 +26,7 @@ UseIsolatedDataRoot("pacs-assistant-hotkey-tests")
 
 #Include ../HotkeyManager.ahk
 #Include DesktopChecks.ahk
+#Include FakeWindowList.ahk
 
 global fired := 0
 global aliasFirstFired := 0
@@ -113,15 +114,26 @@ Main() {
     }
     AssertEqual(1, Press(), "a bind survives repeated disable/re-register cycles")
 
-    ; A scoped bind must not fire when its window is not active. Nothing in this test
-    ; environment is PACS, so the predicate is false.
-    HotkeyManager.DisableAllHotkeys()
-    HotkeyManager.Register("Test", "^F13", Bump, "PACS")
-    AssertEqual(0, Press(), "a PACS-scoped bind does not fire outside PACS")
+    ; A PACS-scoped bind fires only while the exact Vue PACS window is active. The
+    ; scope predicate reads AppControl's window list, which stands in for PACS here.
+    pacs := {hwnd: 4242, title: AppControl.vuePacsTitle, exe: AppControl.vuePacsExecutable, pid: 42, active: true}
+    originalWindowDriver := AppControl.windowDriver
+    AppControl.windowDriver := FakeWindowList([pacs])
+    try {
+        HotkeyManager.DisableAllHotkeys()
+        AssertEqual(true, HotkeyManager.Register("Test", "^F13", Bump, "PACS"), "a PACS-scoped bind registers")
+        AssertEqual(1, Press(), "a PACS-scoped bind fires while PACS is active")
+        pacs.active := false
+        AssertEqual(0, Press(), "a PACS-scoped bind does not fire outside PACS")
 
-    ; ... and going back to an unscoped bind has to work, which means the scoped
-    ; variant was torn down in the HotIf context it was created in
-    HotkeyManager.DisableAllHotkeys()
+        ; Turning it off only works in the HotIf context it was created in; a variant
+        ; left on would still fire while PACS is active.
+        HotkeyManager.DisableAllHotkeys()
+        pacs.active := true
+        AssertEqual(0, Press(), "a disabled PACS-scoped bind does not fire inside PACS")
+    } finally AppControl.windowDriver := originalWindowDriver
+
+    ; ... and an unscoped bind registers and fires again afterwards
     HotkeyManager.Register("Test", "^F13", Bump, "Any")
     AssertEqual(1, Press(), "an unscoped bind fires again after being scoped")
 
