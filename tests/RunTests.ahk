@@ -58,6 +58,6 @@ TestRunner.AddTest(UIAElementIdentityTest)
 
 TestRunner.RunAll()
 
-; Exit non-zero on failure. A bare ExitApp always reported success, so any caller
-; trusting the exit code - CI included - would read a failing suite as green.
+; Exit non-zero on failure: CI reads the exit code, and a bare ExitApp reports
+; success.
 ExitApp(TestRunner.failures > 0 ? 1 : 0)

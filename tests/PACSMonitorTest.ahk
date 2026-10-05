@@ -603,6 +603,8 @@ class PACSMonitorTest {
         PACSMonitor.approvedRefreshAutomationIds := this.originalApprovedRefreshIds
         PACSMonitor.automationAcquire := this.originalAutomationAcquire
         PACSMonitor.automationRelease := this.originalAutomationRelease
+        PACSMonitor.consecutiveRefreshFailures := 0
+        PACSMonitor.refreshFailureNotified := false
         PACSMonitor.consecutiveScanFailures := 0
         PACSMonitor.scanFailureNotified := false
         PACSMonitor.refreshUnavailableNoted := false

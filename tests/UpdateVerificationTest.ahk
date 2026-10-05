@@ -282,8 +282,8 @@ class UpdateVerificationTest {
     }
 
     CallbackSubscriptionCoversEveryHandledStatus() {
-        ; The mask is derived from the named statuses; this pins it to the value the
-        ; request used before the constants were named.
+        ; The mask is derived from the named statuses; pinning its value keeps a
+        ; dropped or renamed status from silently changing the subscription.
         Assert.Equal(0x006A0800, WinHttpTextRequest.callbackFlags)
     }
 

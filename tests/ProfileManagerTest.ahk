@@ -365,9 +365,9 @@ class ProfileManagerTest {
         Assert.Equal("{Tab}", loaded.customFuncs["Custom: Saved For Later"].keys)
     }
 
-    ; IniRead trims spaces and strips outer quotes. Before values were written quoted,
-    ; keys of " " reloaded as "" and made the whole profile unloadable, and a
-    ; whitespace-only target window reloaded as "" (any window).
+    ; IniRead trims spaces and strips outer quotes, so free text is written quoted.
+    ; Unquoted, keys of " " would reload as "" and make the whole profile
+    ; unloadable, and a whitespace-only target window would reload as "" (any window).
     TestFreeTextValuesRoundTripExactly() {
         values := [" ", "Hello ", " lead", '"quoted"', "'single'", '""', "`t tab", 'a "mid" b']
         profile := ProfileManager.NewProfile()
