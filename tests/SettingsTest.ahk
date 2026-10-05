@@ -173,6 +173,10 @@ class SettingsTest {
             seen[key] := name
         }
         Assert.Equal(Settings.soundFiles.Count, seen.Count)
+        for name in Settings.alertSounds {
+            if (name != "Default Beep" && name != "Custom File")
+                Assert.True(Settings.soundFiles.Has(name), "Alert sound has no file: " name)
+        }
 
         ; These two are handled without a file
         Assert.Equal("", Settings.ResolveSoundFile("Default Beep"))
