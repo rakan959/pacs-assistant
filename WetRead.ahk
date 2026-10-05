@@ -12,6 +12,7 @@
 #Include UIA-v2/Lib/UIA.ahk
 #Include AppControl.ahk
 #Include AppLog.ahk
+#Include ClinicalNotices.ahk
 #Include Settings.ahk
 #Include ProfileManager.ahk
 #Include PowerScribe.ahk
@@ -655,7 +656,7 @@ RunPinnedWetReadWorkflow(
 ) {
     ; Establish the study-specific PACS target first. Later PowerScribe focus changes
     ; must never decide which Sticky Notes window receives the text.
-    notify := notifier ? notifier : MsgBox
+    notify := notifier ? notifier : ObjBindMethod(ClinicalNotices, "Show")
     stickyFailure := "A new Sticky Notes window for the active Vue PACS study could not be verified. Nothing was pasted"
     reportAttempted := false
     attendingRouted := false
@@ -722,7 +723,7 @@ WetRead() {
     ; Use clipboard contents; bail out if empty to avoid blank notes
     clipText := A_Clipboard
     if (clipText = "") {
-        MsgBox("No text in clipboard to paste as wet read.", "No Clipboard Text", "Icon!")
+        ClinicalNotices.Show("No text in clipboard to paste as wet read.", "No Clipboard Text", "Icon!")
         return false
     }
 
@@ -802,7 +803,7 @@ ConvertWetReadLineEndings(text) {
 ; it, and returns false.
 StopWetRead(message) {
     AppLog.Write("Wet read stopped: " message)
-    MsgBox(message, "Sticky Note Target Not Verified", "Icon!")
+    ClinicalNotices.Show(message, "Sticky Note Target Not Verified", "Icon!")
     return false
 }
 
@@ -817,7 +818,7 @@ ReportWetReadPasteResult(result, pasteMode) {
         return true
     AppLog.Write("Wet read paste not confirmed (" result.reason ")"
         . (result.error != "" ? ": " result.error : ""))
-    MsgBox(failure.text, failure.title, "Icon!")
+    ClinicalNotices.Show(failure.text, failure.title, "Icon!")
     return false
 }
 

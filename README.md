@@ -214,6 +214,7 @@ if ($process.ExitCode -ne 0) {
 | `PowerScribe.ahk` | Report reading, modality classification, attending routing |
 | `AppControl.ahk` | Restarting PACS, the save-changes prompt, window toggles |
 | `WetRead.ahk` | The wet-read workflow |
+| `ClinicalNotices.ahk` | Result dialogs of clinical commands, shown once the command releases its lease |
 | `UIAValue.ahk` | Safe UIA value read/write |
 | `UIAElementIdentity.ahk` | UIA element identity checks used when revalidating targets |
 | `PACSMonitor.ahk` | Worklist polling and new-study alerts |

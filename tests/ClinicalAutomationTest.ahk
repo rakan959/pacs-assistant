@@ -29,6 +29,8 @@ class ClinicalAutomationTest {
         "TargetedCustomCommandUsesConfirmedTarget",
         "ClinicalCommandGateRejectsNestedBuiltIn",
         "ShutdownGateRejectsNewClinicalCommand",
+        "ClinicalCommandDialogsWaitForTheLeaseRelease",
+        "NoticesShowAtOnceOutsideACommandAndAfterAFailedCommand",
         "UnavailableAttendingAssignmentHasNoWindowSideEffects",
         "AttendingRoutingUsesInjectedDependencies",
         "BlankAttendingSkipsPowerScribeWrite",
@@ -96,6 +98,7 @@ class ClinicalAutomationTest {
         this.originalActiveClinicalCommand := PACSCommands.activeClinicalCommand
         this.originalBusyNotifier := PACSCommands.busyNotifier
         this.originalCommandAvailabilityProbe := PACSCommands.commandAvailabilityProbe
+        this.originalNoticePresenter := ClinicalNotices.presenter
         this.busyNotifications := []
         PowerScribe.sessionDriver := FakePowerScribeSessionDriver()
         ProfileManager.profiles := Map()
@@ -451,6 +454,59 @@ class ClinicalAutomationTest {
         Assert.False(PACSCommands.clinicalCommandActive)
         Assert.Equal(1, this.busyNotifications.Length)
         Assert.True(InStr(this.busyNotifications[1].text, "shutting down") > 0)
+    }
+
+    ; A dialog left open under the clinical lease would refuse every other clinical
+    ; command until dismissed, so each dialog a command can end with is shown only
+    ; after the lease is released.
+    ClinicalCommandDialogsWaitForTheLeaseRelease() {
+        presented := []
+        ClinicalNotices.presenter := (text, title, options) => presented.Push(
+            {title: title, leaseHeld: PACSCommands.clinicalCommandActive}
+        )
+        unconfirmed := WetReadPasteEngine.NewResult()
+        unconfirmed.reason := "verification-error"
+        sources := Map(
+            "Sticky Note Target Not Verified", (*) => StopWetRead("stopped"),
+            "Sticky Note Not Verified", (*) => ReportWetReadPasteResult(unconfirmed, "uia"),
+            "PACS Restart Cancelled", (*) => StopRestart("stopped"),
+            "Microphone Not Selected", (*) => MicrophoneManager.ApplyNowFailed("not selected", "Microphone Not Selected"),
+            ; The Sticky Notes stop, then the attending notice.
+            "Attending Not Assigned", (*) => RunPinnedWetReadWorkflow("note", "uia", (*) => 0, (*) => 0, (*) => 0, (*) => true)
+        )
+        capturedLog := LogCapture()
+        try {
+            for title, source in sources {
+                presented.Length := 0
+                PACSCommands.RunClinicalCommand("Test command", source)
+                Assert.True(presented.Length >= 1, title " was not shown")
+                Assert.Equal(title, presented[-1].title)
+                for notice in presented
+                    Assert.False(notice.leaseHeld, notice.title " was shown under the lease")
+            }
+        } finally capturedLog.Restore()
+        Assert.Equal(0, TestRunner.dialogs.Length)
+    }
+
+    ; Outside a clinical command a notice shows at once; a notice queued by a command
+    ; that then fails still shows once the lease is released.
+    NoticesShowAtOnceOutsideACommandAndAfterAFailedCommand() {
+        presented := []
+        ClinicalNotices.presenter := (text, title, options) => presented.Push(
+            {title: title, leaseHeld: PACSCommands.clinicalCommandActive}
+        )
+
+        ClinicalNotices.Show("shown now", "Immediate")
+        Assert.Equal(1, presented.Length)
+
+        Assert.Throws(() => PACSCommands.RunClinicalCommand("Failing command", (*) => (
+            ClinicalNotices.Show("queued", "Queued"),
+            ThrowError("simulated command failure")
+        )), "simulated command failure")
+        Assert.Equal(2, presented.Length)
+        Assert.Equal("Queued", presented[2].title)
+        Assert.False(presented[2].leaseHeld)
+        Assert.False(ClinicalNotices.deferring)
     }
 
     UnavailableAttendingAssignmentHasNoWindowSideEffects() {
@@ -1209,6 +1265,9 @@ class ClinicalAutomationTest {
         PACSCommands.activeClinicalCommand := this.originalActiveClinicalCommand
         PACSCommands.busyNotifier := this.originalBusyNotifier
         PACSCommands.commandAvailabilityProbe := this.originalCommandAvailabilityProbe
+        ClinicalNotices.presenter := this.originalNoticePresenter
+        ClinicalNotices.deferring := false
+        ClinicalNotices.deferred := []
     }
 }
 

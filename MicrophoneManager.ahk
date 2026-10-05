@@ -11,6 +11,7 @@
 #Include UIAElementIdentity.ahk
 #Include ErrorText.ahk
 #Include AppLog.ahk
+#Include ClinicalNotices.ahk
 
 class NativeMicrophoneSessionDriver {
     CaptureResult() {
@@ -621,11 +622,11 @@ class MicrophoneManager {
         )
     }
 
-    ; ApplyNow runs from the user's own hotkey, so its result is a dialog; the log
-    ; keeps it for later diagnosis.
+    ; ApplyNow runs from the user's own hotkey, so its result is a dialog (shown once
+    ; the command releases its lease); the log keeps it for later diagnosis.
     static ApplyNowFailed(message, title) {
         AppLog.Write(title ": " StrReplace(message, "`n`n", " "))
-        MsgBox(message, title, "Icon!")
+        ClinicalNotices.Show(message, title, "Icon!")
         return false
     }
 }

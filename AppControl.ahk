@@ -9,6 +9,7 @@
 #Include UIA-v2/Lib/UIA.ahk
 #Include ErrorText.ahk
 #Include AppLog.ahk
+#Include ClinicalNotices.ahk
 
 /**
  * Thin wrapper around focus-sensitive AutoHotkey primitives. Tests replace this
@@ -1001,6 +1002,6 @@ StopRestart(message, detail := "", title := "PACS Restart Cancelled") {
         detail := ErrorText.Message(detail)
     text := message (detail != "" ? "`n`n" detail : "")
     AppLog.Write(title ": " StrReplace(text, "`n`n", " "))
-    MsgBox(text, title, "Icon!")
+    ClinicalNotices.Show(text, title, "Icon!")
     return false
 }

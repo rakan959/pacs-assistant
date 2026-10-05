@@ -1,4 +1,5 @@
 #Requires AutoHotkey v2.0
+#Include ClinicalNotices.ahk
 #Include MicrophoneManager.ahk
 #Include PowerScribe.ahk
 #Include AppControl.ahk
@@ -80,8 +81,12 @@ class PACSCommands {
             return false
         }
 
+        ClinicalNotices.Defer()
         try return callback.Call()
-        finally this.ReleaseClinicalAutomation()
+        finally {
+            this.ReleaseClinicalAutomation()
+            ClinicalNotices.ShowDeferred()
+        }
     }
 
     static AcquireClinicalAutomation(name) {
