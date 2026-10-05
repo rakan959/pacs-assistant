@@ -101,10 +101,8 @@ class ClinicalAutomationTest {
 
     Setup() {
         this.originalDriver := AppControl.windowDriver
-        this.originalLifecycleDriver := HasProp(AppControl, "lifecycleDriver") ? AppControl.lifecycleDriver : 0
-        this.originalPowerScribeSessionDriver := HasProp(PowerScribe, "sessionDriver")
-            ? PowerScribe.sessionDriver
-            : 0
+        this.originalLifecycleDriver := AppControl.lifecycleDriver
+        this.originalPowerScribeSessionDriver := PowerScribe.sessionDriver
         this.originalProfiles := ProfileManager.profiles
         this.originalCurrentProfile := ProfileManager.currentProfile
         this.originalClinicalCommandActive := PACSCommands.clinicalCommandActive
@@ -1047,8 +1045,7 @@ class ClinicalAutomationTest {
 
     Teardown() {
         AppControl.windowDriver := this.originalDriver
-        if this.originalLifecycleDriver
-            AppControl.lifecycleDriver := this.originalLifecycleDriver
+        AppControl.lifecycleDriver := this.originalLifecycleDriver
         PowerScribe.sessionDriver := this.originalPowerScribeSessionDriver
         ProfileManager.profiles := this.originalProfiles
         ProfileManager.currentProfile := this.originalCurrentProfile

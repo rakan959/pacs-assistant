@@ -5,7 +5,6 @@
 
 #Requires AutoHotkey v2.0
 #Include ../HotkeyManager.ahk
-#Include ../Settings.ahk
 #Include TestRunner.ahk
 #Include FakeWindowList.ahk
 
@@ -55,12 +54,6 @@ class HotkeyManagerTest {
             "ActionOne", this.func1,
             "ActionTwo", this.func2
         )
-
-        ; Isolate settings
-        this.originalSettings := Settings.settingsFile
-        this.tempSettings := TestTempPath("hotkey-scope", ".ini")
-        Settings.settingsFile := this.tempSettings
-        Settings.SaveAllSettings()
     }
 
     TestRegistersAndStoresHotkeys() {
@@ -391,8 +384,6 @@ class HotkeyManagerTest {
         HotkeyManager.DisableAllHotkeys()
         HotkeyManager.activeHotkeys.Clear()
         HotkeyManager.hotkeyFunctions := this.originalHotkeyFunctions
-        try FileDelete(Settings.settingsFile)
-        Settings.settingsFile := this.originalSettings
     }
 }
 

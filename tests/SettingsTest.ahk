@@ -51,15 +51,9 @@ class SettingsTest {
         this.originalListeners := Settings.changeListeners
         this.originalRevision := Settings.revision
         this.originalMutationGuard := Settings.mutationGuard
-        this.originalDialogAcquire := Settings.HasOwnProp("dialogAcquire")
-            ? Settings.dialogAcquire
-            : 0
-        this.originalDialogRelease := Settings.HasOwnProp("dialogRelease")
-            ? Settings.dialogRelease
-            : 0
-        this.originalDialogUnavailableNotifier := Settings.HasOwnProp("dialogUnavailableNotifier")
-            ? Settings.dialogUnavailableNotifier
-            : 0
+        this.originalDialogAcquire := Settings.dialogAcquire
+        this.originalDialogRelease := Settings.dialogRelease
+        this.originalDialogUnavailableNotifier := Settings.dialogUnavailableNotifier
         this.originalWriteTransactionActive := Settings.writeTransactionActive
         this.tempFile := TestTempPath("settings-test", ".ini")
         Settings.settingsFile := this.tempFile
@@ -457,18 +451,9 @@ class SettingsTest {
         Settings.changeListeners := this.originalListeners
         Settings.revision := this.originalRevision
         Settings.mutationGuard := this.originalMutationGuard
-        if this.originalDialogAcquire
-            Settings.dialogAcquire := this.originalDialogAcquire
-        else
-            try Settings.DeleteProp("dialogAcquire")
-        if this.originalDialogRelease
-            Settings.dialogRelease := this.originalDialogRelease
-        else
-            try Settings.DeleteProp("dialogRelease")
-        if this.originalDialogUnavailableNotifier
-            Settings.dialogUnavailableNotifier := this.originalDialogUnavailableNotifier
-        else
-            try Settings.DeleteProp("dialogUnavailableNotifier")
+        Settings.dialogAcquire := this.originalDialogAcquire
+        Settings.dialogRelease := this.originalDialogRelease
+        Settings.dialogUnavailableNotifier := this.originalDialogUnavailableNotifier
         Settings.writeTransactionActive := this.originalWriteTransactionActive
     }
 }
