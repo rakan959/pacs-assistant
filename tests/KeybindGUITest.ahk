@@ -464,6 +464,9 @@ class KeybindGUITest {
         listView := RemovableListView("Sign Report", "Ctrl + F13", "Any window")
         prompt := FakeProfileDialog("Test")
         customDialog := FakeProfileDialog("Test")
+        ; A dialog left over from another profile: without the lease check its
+        ; staleness handling would end the capture it does not own.
+        staleDialog := FakeProfileDialog("Other")
         editor := {base: CaptureMutationGuardGUI.Prototype}
         editor.confirmationDriver := AlwaysConfirmDriver()
         editor.notifications := []
@@ -497,6 +500,9 @@ class KeybindGUITest {
                 "Custom: Keep",
                 customDialog
             )
+            addFunctionResult := editor.AddFunction("Draft Report", listView, staleDialog)
+            addCustomResult := editor.AddCustomKeybind("Macro", "HELLO", "", listView, staleDialog)
+            captureStillListening := KeybindGUI.isListening
             stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath("Test"))
             storedBind := stored.binds["Sign Report"]
             stillBound := profile.binds.Has("Sign Report")
@@ -514,6 +520,11 @@ class KeybindGUITest {
         Assert.False(scopeResult)
         Assert.False(renameResult)
         Assert.False(customDeleteResult)
+        Assert.False(addFunctionResult)
+        Assert.False(addCustomResult)
+        Assert.True(captureStillListening, "another dialog's action ended the active capture")
+        Assert.False(profile.binds.Has("Draft Report"))
+        Assert.Equal(1, profile.customFuncs.Count)
         Assert.Equal("^F13", storedBind)
         Assert.True(stillBound)
         Assert.True(customStillExists)

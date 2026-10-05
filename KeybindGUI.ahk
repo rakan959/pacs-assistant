@@ -2068,6 +2068,8 @@ class KeybindGUI {
     }
 
     AddCustomKeybind(name, keys, window, listView, customGui) {
+        if !this.ProfileMutationAllowed("create a custom keybind")
+            return false
         if !this.DialogProfileIsCurrent(customGui)
             return false
         profileName := customGui.profileName
@@ -2147,6 +2149,8 @@ class KeybindGUI {
     }
 
     AddFunction(funcName, listView, selectorGui) {
+        if !this.ProfileMutationAllowed("add a function")
+            return false
         if !this.DialogProfileIsCurrent(selectorGui)
             return false
 
