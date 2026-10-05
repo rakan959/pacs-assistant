@@ -18,6 +18,9 @@ class UpdateCheckerTest {
         "TestVersionEquivalence",
         "TestAutoCheckTimerRespectsSettings",
         "TestAutomaticCheckFailuresAreLoggedOncePerOutage",
+        "TestRemindLaterDefersOnlyTheAutomaticNotice",
+        "TestManualCheckReportsASkippedVersion",
+        "TestSettingsChangeKeepsAnUpdateDeferredByRemindLater",
         "TestSettingsChangeRestartsTimer",
         "TestAutomaticCheckUsesAsyncTransport",
         "TestSynchronousAsyncFailureIsNotReportedAsStarted",
@@ -40,7 +43,7 @@ class UpdateCheckerTest {
         "TestReleaseParserKeepsAssetMetadataTogether",
         "TestReleaseParserAcceptsArrayResponse",
         "TestReleaseParserRejectsOversizedAsset",
-        "TestReleaseParserRejectsOversizedNotes",
+        "TestReleaseParserShortensOversizedNotes",
         "TestReleaseStatusDistinguishesExpectedAbsenceFromFailure",
         "TestDownloadUrlMustBelongToThisRepository",
         "TestSha256KnownVector",
@@ -240,20 +243,26 @@ class UpdateCheckerTest {
         )
     }
 
-    TestReleaseParserRejectsOversizedNotes() {
+    ; Notes are display-only: long ones are shortened, never a reason to refuse the
+    ; update. The cut never leaves half of a surrogate pair.
+    TestReleaseParserShortensOversizedNotes() {
         notes := ""
-        loop UpdateChecker.maxReleaseNotesCharacters + 1
+        loop UpdateChecker.maxReleaseNotesCharacters - 1
             notes .= "x"
+        notes .= "\ud83d\ude00tail"
         json := StrReplace(
             UpdateReleaseJson("v9.0.0"),
             '"body":"Release notes"',
             '"body":"' notes '"'
         )
 
-        Assert.Throws(
-            () => UpdateChecker.ParseReleaseResponse(json),
-            "display limit"
-        )
+        release := UpdateChecker.ParseReleaseResponse(json)
+
+        cutAt := UpdateChecker.maxReleaseNotesCharacters - 1
+        Assert.Equal(SubStr(release.notes, 1, cutAt), SubStr(notes, 1, cutAt))
+        marker := "`n`n[Release notes shortened"
+        Assert.Equal(marker, SubStr(release.notes, cutAt + 1, StrLen(marker)))
+        Assert.True(InStr(release.notes, "release page on GitHub"), release.notes)
     }
 
     TestReleaseStatusDistinguishesExpectedAbsenceFromFailure() {
@@ -475,6 +484,55 @@ class UpdateCheckerTest {
         Assert.Equal("v9.0.0", UpdateChecker.pendingUpdateInfo.latestVersion)
         Assert.Equal(0, UpdateChecker.updateDialog)
         Assert.Equal(1, this.updateNotifications.Length)
+    }
+
+    ; "Remind Me Later" quiets the hourly notice; a check the user asks for still
+    ; finds the update instead of reporting "up to date".
+    TestRemindLaterDefersOnlyTheAutomaticNotice() {
+        transport := FakeAsyncUpdateTransport()
+        UpdateChecker.transport := transport
+        SetTestSetting("SkipBetaVersions", true)
+        UpdateChecker.lastRemindTime := DllCall("GetTickCount64", "UInt64")
+
+        Assert.True(UpdateChecker.BeginAutoCheck(true))
+        transport.Resolve({status: 200, body: UpdateReleaseJson("v9.0.0")})
+        Assert.Equal(0, this.updateNotifications.Length)
+        Assert.Equal(0, UpdateChecker.pendingUpdateInfo)
+
+        ; A refused presentation lease keeps the dialog closed but shows the path
+        ; reached it.
+        UpdateChecker.dialogAcquire := (*) => false
+        Assert.True(UpdateChecker.BeginManualCheck())
+        transport.Resolve({status: 200, body: UpdateReleaseJson("v9.0.0")})
+        Assert.Equal(1, this.manualNotifications.Length)
+        Assert.Equal("Update Dialog Unavailable", this.manualNotifications[1].title)
+        Assert.Equal("v9.0.0", UpdateChecker.pendingUpdateInfo.latestVersion)
+    }
+
+    TestSettingsChangeKeepsAnUpdateDeferredByRemindLater() {
+        SetTestSetting("SkipBetaVersions", true)
+        info := ValidUpdateInfo()
+        UpdateChecker.pendingUpdateInfo := info
+        UpdateChecker.lastRemindTime := DllCall("GetTickCount64", "UInt64")
+
+        UpdateChecker.OnSettingsChanged()
+
+        Assert.True(UpdateChecker.pendingUpdateInfo = info)
+    }
+
+    TestManualCheckReportsASkippedVersion() {
+        transport := FakeAsyncUpdateTransport()
+        UpdateChecker.transport := transport
+        SetTestSetting("SkipBetaVersions", true)
+        UpdateChecker.skippedVersion := "v9.0.0"
+
+        Assert.True(UpdateChecker.BeginManualCheck())
+        transport.Resolve({status: 200, body: UpdateReleaseJson("v9.0.0")})
+
+        Assert.Equal(1, this.manualNotifications.Length)
+        Assert.Equal("Update Skipped", this.manualNotifications[1].title)
+        Assert.True(InStr(this.manualNotifications[1].text, "v9.0.0"), this.manualNotifications[1].text)
+        Assert.Equal(0, UpdateChecker.updateDialog)
     }
 
     TestManualCheckIsAsyncAndReportsNoUpdate() {

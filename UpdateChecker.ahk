@@ -172,8 +172,10 @@ class UpdateChecker {
         ; operation and must complete (or explicitly report failure), never vanish
         ; because an unrelated setting was saved while its request was in flight.
         this.LoadSkippedVersion()
+        ; Only a preference change invalidates a pending update; the reminder
+        ; defers notices, not the update itself.
         if (IsObject(this.pendingUpdateInfo)
-            && !this.UpdateInfoIsEligible(this.pendingUpdateInfo)) {
+            && !this.UpdateInfoIsEligible(this.pendingUpdateInfo, false)) {
             if this.UpdateDialogIsLive()
                 this.CloseUpdateDialog(this.updateDialog)
             this.pendingUpdateInfo := 0
@@ -416,7 +418,7 @@ class UpdateChecker {
         if (release.Has("body") && Type(release["body"]) = "String" && release["body"] != "")
             notes := release["body"]
         if (StrLen(notes) > this.maxReleaseNotesCharacters)
-            throw Error("Release notes exceed the display limit")
+            notes := this.TruncateReleaseNotes(notes)
 
         return {
             version: release["tag_name"],
@@ -450,7 +452,13 @@ class UpdateChecker {
         throw Error("GitHub release request returned HTTP " status)
     }
 
-    static ProcessReleaseResponse(response, stableOnly) {
+    /**
+     * @param respectReminder false for a check the user asked for: "Remind Me Later"
+     * defers only the automatic notice
+     * @returns The update info, or {hasUpdate: false}; when the only newer version is
+     * the one the user skipped, also skippedVersion
+     */
+    static ProcessReleaseResponse(response, stableOnly, respectReminder := true) {
         if !this.ReleaseResponseAvailable(response.status, stableOnly)
             return { hasUpdate: false }
 
@@ -468,8 +476,12 @@ class UpdateChecker {
         }
         if (stableOnly && updateInfo.isPrerelease)
             return { hasUpdate: false }
-        if !this.UpdateInfoIsEligible(updateInfo)
+        if !this.UpdateInfoIsEligible(updateInfo, respectReminder) {
+            if (latestVersion == this.skippedVersion
+                && this.CompareVersions(this.currentVersion, latestVersion) < 0)
+                return { hasUpdate: false, skippedVersion: latestVersion }
             return { hasUpdate: false }
+        }
 
         return updateInfo
     }
@@ -493,6 +505,16 @@ class UpdateChecker {
             && (DllCall("GetTickCount64", "UInt64") - this.lastRemindTime) < this.remindLaterMs)
             return false
         return this.CompareVersions(this.currentVersion, updateInfo.latestVersion) < 0
+    }
+
+    ; Notes are display-only, so long ones are cut rather than blocking the update.
+    static TruncateReleaseNotes(notes) {
+        kept := SubStr(notes, 1, this.maxReleaseNotesCharacters)
+        ; Never end on the first half of a UTF-16 surrogate pair.
+        lastCode := Ord(SubStr(kept, -1))
+        if (lastCode >= 0xD800 && lastCode <= 0xDBFF)
+            kept := SubStr(kept, 1, -1)
+        return kept "`n`n[Release notes shortened. The release page on GitHub has the full text.]"
     }
 
     static BeginManualCheck() {
@@ -568,7 +590,15 @@ class UpdateChecker {
         if !this.ClaimSlot(slot)
             return
         try {
-            updateInfo := this.ProcessReleaseResponse(response, stableOnly)
+            updateInfo := this.ProcessReleaseResponse(response, stableOnly, false)
+            if (!updateInfo.hasUpdate && HasProp(updateInfo, "skippedVersion")) {
+                this.manualResultNotifier.Call(
+                    "Version " updateInfo.skippedVersion " is available, but it was skipped with Skip This Version.",
+                    "Update Skipped",
+                    "Iconi"
+                )
+                return
+            }
             if !updateInfo.hasUpdate {
                 this.manualResultNotifier.Call(
                     "PACS Assistant is up to date.",
@@ -622,7 +652,8 @@ class UpdateChecker {
             else
                 return this.BeginManualCheck()
         }
-        if !this.UpdateInfoIsEligible(updateInfo) {
+        ; Every caller is a user request, so "Remind Me Later" does not apply here.
+        if !this.UpdateInfoIsEligible(updateInfo, false) {
             if (IsObject(this.pendingUpdateInfo) && this.pendingUpdateInfo = updateInfo)
                 this.pendingUpdateInfo := 0
             return fromCache ? this.BeginManualCheck() : false
