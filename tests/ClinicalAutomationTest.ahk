@@ -21,6 +21,7 @@ class ClinicalAutomationTest {
         "BuiltInClinicalCommandUsesConfirmedTarget",
         "WindowToggleRevalidatesUniqueSessionBeforeMutation",
         "WindowToggleMinimizesAVisibleWindowAndRestoresAMinimizedOne",
+        "PowerScribeToggleCommandTargetsTheExactReportingWindow",
         "NativePowerScribeCaptureRejectsImpostorAndDuplicate",
         "NativePowerScribeLivenessRequiresExactIdentity",
         "TargetedCustomCommandUsesConfirmedTarget",
@@ -260,6 +261,31 @@ class ClinicalAutomationTest {
         Assert.True(AppControl.ToggleExactWindow(spec))
         Assert.Equal(1, driver.minimizeCalls)
         Assert.Equal(1, driver.activateCalls)
+    }
+
+    ; The registered command, not a helper, decides which window it toggles: only
+    ; the exact PowerScribe reporting window, never a same-titled impostor.
+    PowerScribeToggleCommandTargetsTheExactReportingWindow() {
+        reporting := ToggleRaceWindowDriver([{
+            hwnd: 601,
+            title: AppControl.powerScribeReportingTitle,
+            exe: AppControl.powerScribeExecutable,
+            pid: 77
+        }])
+        AppControl.windowDriver := reporting
+        PACSCommands.commands["Toggle PowerScribe Window"].Call()
+        Assert.Equal(1, reporting.minimizeCalls)
+
+        impostor := ToggleRaceWindowDriver([{
+            hwnd: 602,
+            title: AppControl.powerScribeReportingTitle,
+            exe: "notepad.exe",
+            pid: 78
+        }])
+        AppControl.windowDriver := impostor
+        PACSCommands.commands["Toggle PowerScribe Window"].Call()
+        Assert.Equal(0, impostor.minimizeCalls)
+        Assert.Equal(0, impostor.activateCalls)
     }
 
     NativePowerScribeCaptureRejectsImpostorAndDuplicate() {

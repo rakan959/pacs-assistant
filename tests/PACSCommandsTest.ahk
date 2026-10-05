@@ -11,7 +11,6 @@ class PACSCommandsTest {
         "TestModalityClassification",
         "TestModalityNamesCoverEveryRule",
         "TestLooksLikeReport",
-        "TestPowerScribeToggleUsesExactSpec",
         "TestEpicToggleFailsClosedWithoutCapturedIdentity"
     ]
 
@@ -120,12 +119,6 @@ class PACSCommandsTest {
         Assert.False(PowerScribe.LooksLikeReport(""))
         Assert.False(PowerScribe.LooksLikeReport("Smith, John"))
         Assert.False(PowerScribe.LooksLikeReport("Search"))
-    }
-
-    TestPowerScribeToggleUsesExactSpec() {
-        spec := PACSCommands.PowerScribeToggleTarget()
-        Assert.Equal(AppControl.powerScribeReportingTitle, spec.title)
-        Assert.Equal(AppControl.powerScribeExecutable, spec.exe)
     }
 
     TestEpicToggleFailsClosedWithoutCapturedIdentity() {

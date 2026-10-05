@@ -23,7 +23,7 @@ class PACSCommands {
         ["Sign Report", (*) => PowerScribe.SendKeys("{F12}")],
         ["Open/Force Restart PACS", (*) => RestartPACS()],
         ["Paste Wet Read", (*) => WetRead()],
-        ["Toggle PowerScribe Window", (*) => AppControl.ToggleExactWindow(PACSCommands.PowerScribeToggleTarget())],
+        ["Toggle PowerScribe Window", (*) => AppControl.ToggleExactWindow(AppControl.PowerScribeWindowSpec())],
         ["Toggle EPIC Window", (*) => PACSCommands.ToggleEpicWindow()],
         ["Next Series", (*) => AppControl.SendKeysToExactWindow(AppControl.VuePacsClientWindowSpec(), "{Right}")],
         ["Previous Series", (*) => AppControl.SendKeysToExactWindow(AppControl.VuePacsClientWindowSpec(), "{Left}")],
@@ -44,10 +44,6 @@ class PACSCommands {
     ; closure made in the loop would find them unset when the hotkey fires.
     static ClinicalCommand(name, action) {
         return (*) => PACSCommands.RunClinicalCommand(name, action)
-    }
-
-    static PowerScribeToggleTarget() {
-        return AppControl.PowerScribeWindowSpec()
     }
 
     static ToggleEpicWindow() {
