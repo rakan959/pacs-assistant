@@ -533,7 +533,7 @@ class KeybindGUITest {
         PACSCommands.activeClinicalCommand := "Paste Wet Read"
 
         mutationAllowed := editor.ProfileMutationAllowed("change profiles")
-        closeResult := editor.CloseMainWindow()
+        closeResult := editor.RequestExit()
 
         Assert.False(mutationAllowed)
         Assert.False(closeResult)
@@ -1729,7 +1729,7 @@ class KeybindGUITest {
         profile.scopes["Sign Report"] := "PACS"
         editor.MarkProfileDirty("Test")
 
-        result := editor.CloseMainWindow()
+        result := editor.RequestExit()
         stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath("Test"))
         persistedScope := stored.scopes["Sign Report"]
         dirty := editor.IsProfileDirty("Test")

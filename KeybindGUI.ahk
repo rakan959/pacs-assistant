@@ -96,7 +96,7 @@ class KeybindGUI {
         ; Close hides the window after any callback that does not return true. Every
         ; successful path destroys the window or exits, so a refused close must keep
         ; it visible rather than strand the app with no window.
-        this.gui.OnEvent("Close", (*) => (this.CloseMainWindow(), true))
+        this.gui.OnEvent("Close", (*) => (this.RequestExit(), true))
         this.gui.Show()
 
         if applyBinds
@@ -119,12 +119,6 @@ class KeybindGUI {
             this.gui := ""
             return this.ShowProfileSelector()
         } finally this.EndProfileMutationTransaction()
-    }
-
-    CloseMainWindow() {
-        if !this.ProfileMutationAllowed("close PACS Assistant")
-            return false
-        return this.RequestExit()
     }
 
     RequestExit(exitCode := 0) {
