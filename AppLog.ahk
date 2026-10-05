@@ -32,9 +32,10 @@ class AppLog {
         }
     }
 
-    ; Logs a thrown value with its type, location and call stack.
-    static WriteError(thrown) {
-        entry := ErrorText.Describe(thrown)
+    ; Logs a thrown value with its type, location and call stack, after context
+    ; ("<context>: ") when one is given.
+    static WriteError(thrown, context := "") {
+        entry := (context != "" ? context ": " : "") ErrorText.Describe(thrown)
         if (IsObject(thrown) && HasProp(thrown, "Stack") && thrown.Stack != "")
             entry .= "`n" RTrim(thrown.Stack, "`r`n")
         return this.Write(entry)

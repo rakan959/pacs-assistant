@@ -36,11 +36,13 @@ class AppLogTest {
 
         Assert.True(AppLog.WriteError(thrown))
         Assert.True(AppLog.WriteError("plain text"))
+        Assert.True(AppLog.WriteError(thrown, "Saving settings"))
 
         text := this.capturedLog.Text()
         Assert.True(InStr(text, " ValueError: bad interval (in SaveSettings) at "), text)
         Assert.True(InStr(text, "`n" RTrim(thrown.Stack, "`r`n") "`n"), "The call stack follows the entry")
         Assert.True(InStr(text, " String: plain text`n"), text)
+        Assert.True(InStr(text, " Saving settings: ValueError: bad interval (in SaveSettings) at "), text)
     }
 
     WriteNeverThrows() {

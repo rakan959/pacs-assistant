@@ -55,6 +55,7 @@ class WetReadTest {
         "RoutingFailureReportsTheActualCause",
         "StickyOpenerFailureAlsoReportsAttendingOutcome",
         "ThrowingStickyOpenerStillReportsAttendingOutcome",
+        "UnexpectedWorkflowFaultsAreLoggedWithTheirStack",
         "ThrowingReportCaptureStillPastesAndReportsAttendingOutcome",
         "StickyTargetIsPinnedBeforePowerScribeRouting"
     ]
@@ -641,6 +642,43 @@ class WetReadTest {
         ; PowerScribe was never asked, so it must not be blamed.
         Assert.True(InStr(notifications[2].text, "stopped before the report was read"), notifications[2].text)
         Assert.False(InStr(notifications[2].text, "PowerScribe"), notifications[2].text)
+    }
+
+    ; A fault the dialogs only summarize is logged with its stack. The routine
+    ; routing outcome (an attending PowerScribe cannot select) is not logged.
+    UnexpectedWorkflowFaultsAreLoggedWithTheirStack() {
+        notifications := []
+        notify := RecordWetReadNotification.Bind(notifications)
+        session := {stickyHwnd: 1}
+        capturedLog := LogCapture()
+        try {
+            RunPinnedWetReadWorkflow("wet read", "uia",
+                (*) => {}.missingProperty, (*) => {text: "", session: 0}, (*) => true, (*) => true, notify)
+            openerFaults := capturedLog.Count("the Sticky Notes target could not be verified: PropertyError")
+            RunPinnedWetReadWorkflow("wet read", "uia",
+                (*) => session, (*) => {}.missingProperty, (*) => true, (*) => true, notify)
+            captureFaults := capturedLog.Count("could not read the PowerScribe report: PropertyError")
+            RunPinnedWetReadWorkflow("wet read", "uia",
+                (*) => session, (*) => {text: "EXAMINATION: CT HEAD", session: 0},
+                (*) => FakeEarlyWetReadExit.Throw("attending 'Dr. A' cannot be selected in PowerScribe automatically"),
+                (*) => true, notify)
+            RunPinnedWetReadWorkflow("wet read", "uia",
+                (*) => session, (*) => {text: "EXAMINATION: CT HEAD", session: 0},
+                (*) => Integer("not a number"), (*) => true, notify)
+            routingFaults := capturedLog.Count("Attending routing failed: TypeError")
+            loggedEntries := 0
+            for line in StrSplit(capturedLog.Text(), "`n") {
+                if RegExMatch(line, "^\d{4}-\d{2}-\d{2} ")
+                    loggedEntries++
+            }
+            stackLines := capturedLog.Count("WetReadTest.ahk (")
+        } finally capturedLog.Restore()
+
+        Assert.Equal(1, openerFaults)
+        Assert.Equal(1, captureFaults)
+        Assert.Equal(1, routingFaults)
+        Assert.Equal(3, loggedEntries)
+        Assert.True(stackLines >= 3, "each logged fault carries its call stack")
     }
 
     ThrowingStickyOpenerStillReportsAttendingOutcome() {

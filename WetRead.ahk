@@ -645,6 +645,7 @@ RunPinnedWetReadWorkflow(
         try {
             stickySession := openSticky.Call()
         } catch Any as err {
+            AppLog.WriteError(err, "Wet read stopped: the Sticky Notes target could not be verified")
             notify.Call(stickyFailure ": " ErrorText.Message(err), "Sticky Note Target Not Verified", "Icon!")
             return false
         }
@@ -656,8 +657,10 @@ RunPinnedWetReadWorkflow(
         reportAttempted := true
         reportCapture := 0
         try reportCapture := captureReport.Call()
-        catch as err
+        catch as err {
+            AppLog.WriteError(err, "Wet read could not read the PowerScribe report")
             attendingError := err
+        }
         if !attendingError {
             if (!IsObject(reportCapture)
                 || !HasProp(reportCapture, "text")
@@ -672,8 +675,14 @@ RunPinnedWetReadWorkflow(
             try {
                 routeAttending.Call(haystack, reportCapture.session)
                 attendingRouted := true
-            } catch as err
+            } catch as err {
+                ; A plain Error is a routing outcome the dialog states (an unmatched
+                ; modality, an attending PowerScribe cannot select); any other type
+                ; is a fault worth its stack.
+                if !(Type(err) == "Error")
+                    AppLog.WriteError(err, "Attending routing failed")
                 attendingError := err
+            }
         }
 
         return pasteAction.Call(clipText, pasteMode, stickySession)
