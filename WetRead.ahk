@@ -507,7 +507,9 @@ class WetReadPasteEngine {
         return {
             success: false,
             unsupported: false,
-            restored: false,
+            ; The note is proven to still hold its original value. The engine never
+            ; writes it back; this only records that nothing was changed.
+            unchanged: false,
             reason: "",
             error: ""
         }
@@ -545,12 +547,12 @@ class WetReadPasteEngine {
             result.unsupported := true
             ; The driver's unsupported result guarantees that no write occurred,
             ; and the exact original value was proven at the precondition boundary.
-            result.restored := true
+            result.unchanged := true
             result.reason := "unsupported"
             return result
         }
 
-        result.restored := false
+        result.unchanged := false
         if writeError {
             result.reason := "error"
             this.AppendError(result, writeError.Message)
@@ -573,7 +575,7 @@ class WetReadPasteEngine {
             return result
         }
         if (observedValue == originalValue) {
-            result.restored := true
+            result.unchanged := true
             result.reason := "verification"
             return result
         }
@@ -808,15 +810,21 @@ WetReadPasteFailureDialog(result, pasteMode) {
             title: "Sticky Note Not Verified"
         }
     }
-    if !result.restored {
+    if (result.reason = "verification-error") {
         return {
-            text: "The wet read failed and PACS Assistant could not restore the previous sticky note. Keep the window open and verify the note manually.",
-            title: "Sticky Note Restore Failed"
+            text: "PACS Assistant could not read the note back after writing it, so the wet read is not confirmed. No retry or rollback was attempted. Keep the window open and check the note before pasting again.",
+            title: "Sticky Note Not Verified"
+        }
+    }
+    if result.unchanged {
+        return {
+            text: "The wet read was not pasted. The sticky note still matches its original value; verify it before closing the window.",
+            title: "Paste Failed"
         }
     }
     return {
-        text: "The wet read was not pasted. The sticky note still matches its original value; verify it before closing the window.",
-        title: "Paste Failed"
+        text: "PACS Assistant could not confirm the wet read. Keep the window open and check the note before pasting again.",
+        title: "Sticky Note Not Verified"
     }
 }
 

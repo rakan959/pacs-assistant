@@ -23,6 +23,7 @@ class WetReadTest {
         "StickyRootMustBelongToPacsProcess",
         "StickyOpenerRejectsSameProcessWrongWindowButton",
         "NativeStickyButtonReportsWhetherClickActioned",
+        "AttendingFailureMessagesReadAsOneSentence",
         "StickyOpenerRejectsAmbiguousSameWindowButtons",
         "StickyOpenerRejectsUnreadableCandidateAlongsideValidButton",
         "StickyOpenerRejectsTitleChangeBeforeInvoke",
@@ -77,7 +78,7 @@ class WetReadTest {
 
         Assert.False(result.success)
         Assert.True(result.unsupported)
-        Assert.True(result.restored)
+        Assert.True(result.unchanged)
         Assert.Equal("existing note", driver.fieldValue)
         Assert.Equal(0, driver.controlCalls)
     }
@@ -98,7 +99,7 @@ class WetReadTest {
 
         Assert.True(result.success)
         Assert.False(result.unsupported)
-        Assert.False(result.restored)
+        Assert.False(result.unchanged)
         Assert.Equal("new wet read", field.storedValue)
         Assert.Equal(1, field.writeCalls)
     }
@@ -110,7 +111,7 @@ class WetReadTest {
         result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
 
         Assert.False(result.success)
-        Assert.False(result.restored)
+        Assert.False(result.unchanged)
         Assert.Equal("value-changed", result.reason)
         Assert.Equal("partial value", driver.fieldValue)
         Assert.Equal(1, driver.uiaCalls)
@@ -125,7 +126,7 @@ class WetReadTest {
 
         Assert.False(result.success)
         Assert.False(result.unsupported)
-        Assert.False(result.restored)
+        Assert.False(result.unchanged)
         Assert.Equal("partial value", driver.fieldValue)
         Assert.Equal(1, driver.uiaCalls)
     }
@@ -137,7 +138,7 @@ class WetReadTest {
         result := WetReadPasteEngine.Paste(1, "new wet read", "control", driver)
 
         Assert.False(result.success)
-        Assert.False(result.restored)
+        Assert.False(result.unchanged)
         Assert.Equal("value-changed", result.reason)
         Assert.Equal("partial value", driver.fieldValue)
         Assert.Equal(1, driver.controlCalls)
@@ -151,7 +152,7 @@ class WetReadTest {
 
         Assert.False(result.success)
         Assert.True(result.unsupported)
-        Assert.True(result.restored)
+        Assert.True(result.unchanged)
         Assert.Equal("existing note", driver.fieldValue)
         Assert.Equal(1, driver.controlCalls)
     }
@@ -165,7 +166,7 @@ class WetReadTest {
         result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
 
         Assert.False(result.success)
-        Assert.False(result.restored)
+        Assert.False(result.unchanged)
         Assert.Equal("precondition-changed", result.reason)
         Assert.Equal(0, driver.uiaCalls)
         Assert.Equal(0, driver.controlCalls)
@@ -178,7 +179,7 @@ class WetReadTest {
         result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
 
         Assert.False(result.success)
-        Assert.False(result.restored)
+        Assert.False(result.unchanged)
         Assert.Equal("value-changed", result.reason)
         Assert.Equal("user's newer note", driver.fieldValue)
         Assert.Equal(1, driver.uiaCalls)
@@ -434,12 +435,12 @@ class WetReadTest {
     }
 
     PasteFailureDialogNamesEachOutcome() {
-        Assert.Equal(0, WetReadPasteFailureDialog({success: true, unsupported: false, restored: false, reason: ""}, "uia"))
+        Assert.Equal(0, WetReadPasteFailureDialog({success: true, unsupported: false, unchanged: false, reason: ""}, "uia"))
 
-        unsupported := WetReadPasteFailureDialog({success: false, unsupported: true, restored: true, reason: "unsupported"}, "uia")
+        unsupported := WetReadPasteFailureDialog({success: false, unsupported: true, unchanged: true, reason: "unsupported"}, "uia")
         Assert.Equal("Paste Method Unavailable", unsupported.title)
         Assert.True(InStr(unsupported.text, "UIA Value method"), unsupported.text)
-        unsupportedControl := WetReadPasteFailureDialog({success: false, unsupported: true, restored: true, reason: "unsupported"}, "control")
+        unsupportedControl := WetReadPasteFailureDialog({success: false, unsupported: true, unchanged: true, reason: "unsupported"}, "control")
         Assert.True(InStr(unsupportedControl.text, "ControlSetText method"), unsupportedControl.text)
 
         expectedTitles := [
@@ -447,16 +448,24 @@ class WetReadTest {
             ["precondition-changed", false, "Sticky Note Changed"],
             ["read", false, "Sticky Note Not Verified"],
             ["precondition-read", false, "Sticky Note Not Verified"],
-            ["error", false, "Sticky Note Restore Failed"],
+            ["verification-error", false, "Sticky Note Not Verified"],
             ["verification", true, "Paste Failed"]
         ]
         for expected in expectedTitles {
             dialog := WetReadPasteFailureDialog(
-                {success: false, unsupported: false, restored: expected[2], reason: expected[1]},
+                {success: false, unsupported: false, unchanged: expected[2], reason: expected[1]},
                 "uia"
             )
             Assert.Equal(expected[3], dialog.title, "Wrong dialog for reason '" expected[1] "'")
         }
+
+        ; The write may have happened, and the engine never restores.
+        unconfirmed := WetReadPasteFailureDialog(
+            {success: false, unsupported: false, unchanged: false, reason: "verification-error"},
+            "uia"
+        )
+        Assert.True(InStr(unconfirmed.text, "not confirmed"), unconfirmed.text)
+        Assert.False(InStr(unconfirmed.text, "restore"), unconfirmed.text)
     }
 
     LineEndingConversionProducesCrlfOnly() {
@@ -549,6 +558,21 @@ class WetReadTest {
 
         Assert.False(driver.WaitForValue(1, "new wet read", 150))
         Assert.True(driver.WaitForValue(1, "New Wet Read", 150))
+    }
+
+    ; The routing error is a cause; AttendingFailureMessage adds the instruction once.
+    AttendingFailureMessagesReadAsOneSentence() {
+        Assert.Equal(
+            "The report was read, but the attending could not be assigned: attending 'Smith' cannot be selected in PowerScribe automatically. Set it manually.",
+            AttendingFailureMessage("EXAMINATION: CT CHEST", Error("attending 'Smith' cannot be selected in PowerScribe automatically"))
+        )
+        try AttendingRouting.Route("EXAMINATION: PET UNKNOWN", (*) => "Smith", (*) => false)
+        catch Error as err
+            routingError := err
+        Assert.Equal(
+            "The report was read, but the attending could not be assigned: the examination did not match a supported modality. Set it manually.",
+            AttendingFailureMessage("EXAMINATION: PET UNKNOWN", routingError)
+        )
     }
 
     RoutingFailureReportsTheActualCause() {

@@ -33,7 +33,8 @@ class MicrophoneManagerTest {
         "ActiveClinicalLeaseSkipsBackgroundMicrophoneCheck",
         "RecycledWindowHandleWithNewProcessStartsANewLoginSession",
         "MonitoringStartsOnlyWithSwapEnabledAndANamedMicrophone",
-        "ApplyNowNamesEachFailureAndKeepsTheResolutionError"
+        "ApplyNowNamesEachFailureAndKeepsTheResolutionError",
+        "AmbiguousNameReasonReachesBothNotices"
     ]
 
     MonitoringStartsOnlyWithSwapEnabledAndANamedMicrophone() {
@@ -79,6 +80,27 @@ class MicrophoneManagerTest {
         Assert.Equal("PowerScribe Not Verified", TestRunner.dialogs[2].title)
         Assert.True(InStr(TestRunner.dialogs[2].text, "simulated provider uncertainty"), TestRunner.dialogs[2].text)
         Assert.Equal("PowerScribe Not Running", TestRunner.dialogs[3].title)
+    }
+
+    ; "PowerMic" matches two devices: the advice must not blame the name's spelling.
+    AmbiguousNameReasonReachesBothNotices() {
+        fixture := MicrophoneFixture(["PowerMic II", "PowerMic III"])
+        MicrophoneManager.sessionDriver := fixture.driver
+        originalName := Settings.Get("MicrophoneName")
+        try {
+            SetTestSetting("MicrophoneName", "PowerMic")
+            Assert.False(MicrophoneManager.ApplyNow())
+        } finally SetTestSetting("MicrophoneName", originalName)
+
+        Assert.Equal("Microphone Not Selected", TestRunner.dialogs[1].title)
+        Assert.Equal(
+            "Could not select microphone 'PowerMic': the microphone name matches multiple devices.",
+            TestRunner.dialogs[1].text
+        )
+
+        MicrophoneManager.attempts := MicrophoneManager.maxAttempts
+        MicrophoneManager.RecordSelectionFailure("PowerMic")
+        Assert.True(InStr(this.notifications[1].text, "Last error: the microphone name matches multiple devices"), this.notifications[1].text)
     }
 
     Setup() {

@@ -18,6 +18,7 @@ class UpdateCheckerTest {
         "TestAutoCheckTimerRespectsSettings",
         "TestAutomaticCheckFailuresAreLoggedOncePerOutage",
         "TestRemindLaterDefersOnlyTheAutomaticNotice",
+        "TestRemindLaterAnnouncesTheVersionAgainAfterTheDelay",
         "TestManualCheckReportsASkippedVersion",
         "TestSettingsChangeKeepsAnUpdateDeferredByRemindLater",
         "TestSettingsChangeRestartsTimer",
@@ -515,6 +516,29 @@ class UpdateCheckerTest {
         UpdateChecker.OnSettingsChanged()
 
         Assert.True(UpdateChecker.pendingUpdateInfo = info)
+    }
+
+    TestRemindLaterAnnouncesTheVersionAgainAfterTheDelay() {
+        transport := FakeAsyncUpdateTransport()
+        UpdateChecker.transport := transport
+        SetTestSetting("SkipBetaVersions", true)
+        check := () => (
+            UpdateChecker.BeginAutoCheck(true),
+            transport.Resolve({status: 200, body: UpdateReleaseJson("v9.0.0")})
+        )
+
+        check()
+        Assert.Equal(1, this.updateNotifications.Length)
+
+        UpdateChecker.RemindLater()
+        check()
+        Assert.Equal(1, this.updateNotifications.Length)
+
+        UpdateChecker.lastRemindTime -= UpdateChecker.remindLaterMs + 1000
+        check()
+        Assert.Equal(2, this.updateNotifications.Length)
+        check()
+        Assert.Equal(2, this.updateNotifications.Length)
     }
 
     TestManualCheckReportsASkippedVersion() {

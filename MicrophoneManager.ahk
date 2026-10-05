@@ -427,7 +427,7 @@ class MicrophoneManager {
         if !current
             return false
         itemResult := this.ResolveMicrophoneItemResult(current.root, current.combo, micName)
-        if (itemResult.status == "error")
+        if (itemResult.error != "")
             this.RecordOperationalError(itemResult.error)
         if !(itemResult.status == "found") {
             this.CollapseVerifiedCombo(session, combo)
@@ -446,7 +446,7 @@ class MicrophoneManager {
         if !current
             return false
         liveResult := this.ResolveMicrophoneItemResult(current.root, current.combo, micName)
-        if (liveResult.status == "error")
+        if (liveResult.error != "")
             this.RecordOperationalError(liveResult.error)
         if !(liveResult.status == "found") {
             this.CollapseVerifiedCombo(session, combo)
@@ -488,7 +488,7 @@ class MicrophoneManager {
             finalCombo.combo,
             liveResolved.name
         )
-        if (finalItemResult.status == "error")
+        if (finalItemResult.error != "")
             this.RecordOperationalError(finalItemResult.error)
         if !(finalItemResult.status == "found") {
             this.CollapseVerifiedCombo(session, combo)
@@ -589,10 +589,15 @@ class MicrophoneManager {
                 "Microphone Selector Not Verified"
             )
 
+        this.lastError := ""
         if this.SelectMicrophone(session, comboResult.combo, micName)
             return true
+        ; SelectMicrophone records why, e.g. a name that matches several devices.
         return this.ApplyNowFailed(
-            "Could not select microphone '" micName "'. Check that the name matches an entry in the PowerScribe list.",
+            "Could not select microphone '" micName "'"
+                . (this.lastError != ""
+                    ? ": " this.lastError "."
+                    : ". Check that the name matches an entry in the PowerScribe list."),
             "Microphone Not Selected"
         )
     }

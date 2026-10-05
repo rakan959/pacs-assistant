@@ -212,14 +212,11 @@ class AttendingRouting {
     static Route(reportText, attendingLookup, attendingWriter) {
         modality := ReportModality.Classify(reportText)
         if (modality = ReportModality.fallback)
-            throw Error("The examination did not match a supported modality; assign the attending manually")
+            throw Error("the examination did not match a supported modality")
         attending := attendingLookup.Call(modality)
 
         if (attending != "" && !attendingWriter.Call(attending))
-            throw Error(
-                "PACS Assistant could not safely assign attending '" attending
-                "'. Assign that attending manually in PowerScribe."
-            )
+            throw Error("attending '" attending "' cannot be selected in PowerScribe automatically")
 
         return modality
     }

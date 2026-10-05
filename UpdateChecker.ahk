@@ -29,7 +29,7 @@ class UpdateChecker {
     static shutdownCoordinator := 0
     static autoCheckIntervalMs := 60 * 60 * 1000
     static autoCheckFailureLogged := false
-    ; "Remind Me Later" suppresses the dialog for this long.
+    ; "Remind Me Later" defers the automatic update notice for this long.
     static remindLaterMs := 4 * 60 * 60 * 1000
     static maxUpdateSizeBytes := 100 * 1024 * 1024
     static maxMetadataSizeBytes := 1024 * 1024
@@ -621,10 +621,9 @@ class UpdateChecker {
     /**
      * Shows the update dialog.
      * @param updateInfo Result of an earlier asynchronous release check. Callers that
-     * already checked pass theirs; asking again cost a second HTTP round trip against
-     * an unauthenticated 60/hour GitHub limit, and could return a different answer -
-     * the rate-limit and remind-later gates would suppress a dialog the first call had
-     * already authorised.
+     * already checked pass theirs; asking again costs a second HTTP round trip against
+     * an unauthenticated 60/hour GitHub limit and can return a different answer from
+     * the one the caller acted on.
      */
     static ShowUpdateDialog(updateInfo?) {
         fromCache := !IsSet(updateInfo)
@@ -711,10 +710,7 @@ class UpdateChecker {
                 saveChoices() && this.PerformUpdate(updateInfo, updateGui)
             ))
             updateGui.Add("Button", "x+10 w120", "Remind Me Later").OnEvent("Click", (*) => (
-                saveChoices() && (
-                    this.lastRemindTime := DllCall("GetTickCount64", "UInt64"),
-                    this.CloseUpdateDialog(updateGui)
-                )
+                saveChoices() && (this.RemindLater(), this.CloseUpdateDialog(updateGui))
             ))
             updateGui.Add("Button", "x+10 w120", "Skip This Version").OnEvent("Click", (*) => (
                 saveSkippedChoices() && this.CloseUpdateDialog(updateGui)
@@ -726,6 +722,13 @@ class UpdateChecker {
             updateGui.Show()
             return updateGui
         } finally this.dialogRelease.Call()
+    }
+
+    ; Defers the automatic notice for remindLaterMs. The version counts as not yet
+    ; announced, so the first automatic check after the delay announces it again.
+    static RemindLater() {
+        this.lastRemindTime := DllCall("GetTickCount64", "UInt64")
+        this.notifiedVersion := ""
     }
 
     static UpdateDialogIsLive() {

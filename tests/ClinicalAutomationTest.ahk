@@ -415,7 +415,7 @@ class ClinicalAutomationTest {
                 (*) => lookups++,
                 (*) => writes++
             ),
-            "manual"
+            "did not match a supported modality"
         )
         Assert.Equal(0, lookups)
         Assert.Equal(0, writes)
@@ -430,7 +430,7 @@ class ClinicalAutomationTest {
 
         Assert.Throws(
             () => CheckAttending("EXAMINATION: CT CHEST"),
-            "could not safely assign attending 'Smith'"
+            "attending 'Smith' cannot be selected in PowerScribe automatically"
         )
     }
 
