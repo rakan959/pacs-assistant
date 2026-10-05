@@ -22,6 +22,8 @@ class KeybindGUI {
     static captureOwnerGui := 0
     static profileMutationRevisions := Map()
     static shutdownAuthorized := false
+    ; Notices raised while the profile-mutation lease is held; see NotifyUser.
+    static deferredNotices := []
     ; The V option would pass the selected key through to the foreground application.
     ; Capture is intentionally suppressing: the key is configuration data only.
     static inputHookOptions := ""
@@ -437,7 +439,7 @@ class KeybindGUI {
     RequireCurrentProfileSelector(selectorGui) {
         if this.ProfileSelectorIsCurrent(selectorGui)
             return true
-        this.NotifyUnavailable(
+        this.NotifyNonModal(
             "The profile selector changed or closed before that action ran. Reopen it and try again.",
             "Profile Selector Changed",
             "Icon!"
@@ -618,7 +620,7 @@ class KeybindGUI {
                 this.ShowProfileSelector()  ; Refresh the selector to show updated default
                 return true
             }
-            MsgBox(
+            this.NotifyUser(
                 this.ProfileStorageFailureText("Failed to set default profile."),
                 "Profile Update Failed",
                 "Icon!"
@@ -1036,7 +1038,7 @@ class KeybindGUI {
                 )
                 ProfileManager.SaveProfile(profileName, savedProfile)
             } catch as err {
-                MsgBox("The profile could not be saved. The previous file was left unchanged.`n`n" err.Message, "Save Failed", "Icon!")
+                this.NotifyUser("The profile could not be saved. The previous file was left unchanged.`n`n" err.Message, "Save Failed", "Icon!")
                 return false
             }
 
@@ -1074,7 +1076,7 @@ class KeybindGUI {
                 )
             }
 
-            MsgBox("Profile saved successfully.", "Profile Saved", "Iconi")
+            this.NotifyNonModal("Profile saved successfully.", "Profile Saved", "Iconi")
             this.ClearProfileDirty(profileName)
             return true
         } finally this.EndProfileMutationTransaction()
@@ -1299,7 +1301,7 @@ class KeybindGUI {
             for item in failed {
                 errMsg .= "- " item "`n"
             }
-            MsgBox(RTrim(errMsg, "`n"), "Keybind Errors", "Icon!")
+            this.NotifyUser(RTrim(errMsg, "`n"), "Keybind Errors", "Icon!")
         }
         return failed.Length = 0
     }
@@ -1322,13 +1324,34 @@ class KeybindGUI {
         return MsgBox(message, title, "YesNo Icon!") = "Yes"
     }
 
+    /**
+     * Shows a modal notice. Under the profile-mutation lease the notice waits until
+     * EndProfileMutationTransaction releases it: the lease refuses clinical commands
+     * and pauses background monitoring, so a dialog left open under it would stop
+     * both until dismissed.
+     */
     NotifyUser(message, title, options := "") {
+        if ExclusiveOperations.profileMutationActive
+            KeybindGUI.deferredNotices.Push({message: message, title: title, options: options})
+        else
+            this.ShowNotice(message, title, options)
+    }
+
+    ShowNotice(message, title, options := "") {
         if this.HasOwnProp("notificationDriver")
             return this.notificationDriver.Notify(message, title, options)
         return MsgBox(message, title, options)
     }
 
-    NotifyUnavailable(message, title, options := "") {
+    ShowDeferredNotices() {
+        notices := KeybindGUI.deferredNotices
+        KeybindGUI.deferredNotices := []
+        for notice in notices
+            this.ShowNotice(notice.message, notice.title, notice.options)
+    }
+
+    ; Non-modal: for messages that need no acknowledgement.
+    NotifyNonModal(message, title, options := "") {
         if this.HasOwnProp("notificationDriver")
             return this.notificationDriver.Notify(message, title, options)
         return TrayTip(message, title, options)
@@ -1363,7 +1386,7 @@ class KeybindGUI {
                     . ". Wait for that operation to finish before you " action "."
                 title := "Shutdown In Progress"
         }
-        this.NotifyUnavailable(message, title, "Icon!")
+        this.NotifyNonModal(message, title, "Icon!")
         return false
     }
 
@@ -1380,6 +1403,7 @@ class KeybindGUI {
 
     EndProfileMutationTransaction() {
         ExclusiveOperations.End("profileMutation")
+        this.ShowDeferredNotices()
     }
 
     BeginCaptureTransaction(action := "start key capture") {
@@ -1746,7 +1770,7 @@ class KeybindGUI {
                 }
                 return true
             }
-            MsgBox(
+            this.NotifyUser(
                 this.ProfileStorageFailureText(
                     "Failed to rename profile. The name may already be in use."
                 ),
@@ -2460,7 +2484,7 @@ class KeybindGUI {
                 return false
             try ProfileManager.SaveProfile(profileName, candidate)
             catch as err {
-                MsgBox("The attending assignments could not be saved. The previous file was left unchanged.`n`n" err.Message, "Save Failed", "Icon!")
+                this.NotifyUser("The attending assignments could not be saved. The previous file was left unchanged.`n`n" err.Message, "Save Failed", "Icon!")
                 return false
             }
             ProfileManager.profiles[profileName] := candidate

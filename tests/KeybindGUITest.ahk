@@ -60,6 +60,7 @@ class KeybindGUITest {
         "TestDirtyScopeEditBlocksProfileSwitchWhenCancelled",
         "TestClosingSavesDirtyProfileBeforeExit",
         "TestShutdownLeaseIsReleasedWhenTheDirtyPromptThrowsANonError",
+        "TestNoticesUnderTheProfileLeaseWaitForItsRelease",
         "TestProfileSwitchCanDiscardDirtyChanges",
         "TestFailedCustomDeletePreservesLiveProfile",
         "TestRemoveFunctionKeepsProfileAndRowWhenNativeOffFails",
@@ -90,11 +91,13 @@ class KeybindGUITest {
         this.originalCaptureOwnerGui := KeybindGUI.captureOwnerGui
         this.originalProfileMutationRevisions := KeybindGUI.profileMutationRevisions
         this.originalShutdownAuthorized := KeybindGUI.shutdownAuthorized
+        this.originalDeferredNotices := KeybindGUI.deferredNotices
         this.originalCommandAvailabilityProbe := PACSCommands.commandAvailabilityProbe
         KeybindGUI.captureRuntimeProfile := 0
         KeybindGUI.captureOwnerGui := 0
         KeybindGUI.profileMutationRevisions := Map()
         KeybindGUI.shutdownAuthorized := false
+        KeybindGUI.deferredNotices := []
         PACSCommands.commandAvailabilityProbe := (*) => true
 
         ; Tests replace the loaded profiles and the listening state freely; Teardown
@@ -125,6 +128,7 @@ class KeybindGUITest {
         KeybindGUI.captureOwnerGui := this.originalCaptureOwnerGui
         KeybindGUI.profileMutationRevisions := this.originalProfileMutationRevisions
         KeybindGUI.shutdownAuthorized := this.originalShutdownAuthorized
+        KeybindGUI.deferredNotices := this.originalDeferredNotices
         PACSCommands.commandAvailabilityProbe := this.originalCommandAvailabilityProbe
         ProfileManager.profiles := this.originalProfiles
         ProfileManager.currentProfile := this.originalCurrentProfile
@@ -1775,6 +1779,29 @@ class KeybindGUITest {
         Assert.Equal("", ExclusiveOperations.Active())
     }
 
+    ; The profile-mutation lease refuses clinical commands, so a modal notice shown
+    ; under it would keep them refused until the user dismissed it.
+    TestNoticesUnderTheProfileLeaseWaitForItsRelease() {
+        notifications := LeaseObservingNotificationDriver()
+        editor := {base: KeybindGUI.Prototype, gui: "", notificationDriver: notifications}
+
+        Assert.True(editor.BeginProfileMutationTransaction("save the profile"))
+        editor.NotifyUser("first", "Save Failed", "Icon!")
+        editor.NotifyUser("second", "Keybind Errors", "Icon!")
+        Assert.Equal(0, notifications.calls.Length)
+
+        editor.EndProfileMutationTransaction()
+        Assert.Equal(2, notifications.calls.Length)
+        Assert.Equal("first", notifications.calls[1].message)
+        Assert.Equal("second", notifications.calls[2].message)
+        Assert.False(notifications.calls[1].leaseHeld)
+        Assert.Equal(0, KeybindGUI.deferredNotices.Length)
+
+        ; Without the lease a notice shows at once.
+        editor.NotifyUser("third", "Profile Changed", "Icon!")
+        Assert.Equal(3, notifications.calls.Length)
+    }
+
     TestProfileSwitchCanDiscardDirtyChanges() {
         tempRoot := TestTempPath("pacs-dirty-discard")
         profile := ProfileManager.NewProfile()
@@ -2844,6 +2871,17 @@ class CapturingNotificationDriver {
 
     Notify(message, *) {
         this.message := message
+        return "OK"
+    }
+}
+
+class LeaseObservingNotificationDriver {
+    __New() {
+        this.calls := []
+    }
+
+    Notify(message, *) {
+        this.calls.Push({message: message, leaseHeld: ExclusiveOperations.profileMutationActive})
         return "OK"
     }
 }
