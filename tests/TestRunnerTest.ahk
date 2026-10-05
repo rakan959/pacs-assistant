@@ -217,7 +217,8 @@ class TestRunnerTest {
     }
 
     ; The exit codes the README documents for CI, observed from a separate process:
-    ; 10 for an uncaught error, 11 for a run that exits before every test ran.
+    ; 10 for an uncaught error, 11 for a run that exits before every test ran or
+    ; that ran no test at all.
     HarnessExitCodesReachTheProcess() {
         SplitPath(A_LineFile, , &testsDir)
         root := TestTempPath("pacs-harness-exit")
@@ -225,6 +226,7 @@ class TestRunnerTest {
         preamble := "
         (
         #Requires AutoHotkey v2.0
+        #SingleInstance Off
         #Warn All, StdOut
         #Include %TESTS%\HarnessErrors.ahk
         OnError(OnError_StdErr)
@@ -249,17 +251,29 @@ class TestRunnerTest {
             TestRunner.RunAll()
             ExitApp(0)
             )", testsDir)
+            empty := this.RunChildScript(root "\empty.ahk", preamble "`n" "
+            (
+            #Include %TESTS%\TestRunner.ahk
+            TestRunner.RunAll()
+            ExitApp(0)
+            )", testsDir)
         } finally DirDelete(root, true)
 
         Assert.Equal(10, uncaught)
         Assert.Equal(11, incomplete)
+        Assert.Equal(11, empty)
     }
 
     ; Writes a script that includes harness files from testsDir and runs it in a new
-    ; interpreter. Returns the process exit code.
+    ; interpreter. Returns the process exit code. The child's output goes to nul
+    ; through cmd, so it has the stdout a CI runner gives the real suite.
     RunChildScript(path, text, testsDir) {
         FileAppend(StrReplace(text, "%TESTS%", testsDir), path, "UTF-8")
-        return RunWait(Format('"{1}" /ErrorStdOut "{2}"', A_AhkPath, path), , "Hide")
+        return RunWait(
+            Format('"{1}" /c ""{2}" /ErrorStdOut "{3}" >nul 2>&1"', A_ComSpec, A_AhkPath, path),
+            ,
+            "Hide"
+        )
     }
 
     RunProbe(testClass) {
