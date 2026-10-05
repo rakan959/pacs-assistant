@@ -78,10 +78,6 @@ class NativeAppLifecycleDriver {
         return ProcessExist(target)
     }
 
-    FindWindow(target) {
-        return WinExist(target)
-    }
-
     ProcessExists(pid) {
         return ProcessExist(pid) != 0
     }
@@ -351,30 +347,19 @@ class AppControl {
         return sessions.Length = 1 ? sessions[1] : 0
     }
 
-    static ExactSessionIsUniqueAcross(session, specs) {
-        try current := this.ResolveUniqueExactWindowAcross(specs)
-        catch
-            return false
-        return current
-            && current.hwnd = session.hwnd
-            && current.processId = session.processId
-    }
-
     static IsUniqueExactWindowActive(specs) {
         try session := this.ResolveUniqueExactWindowAcross(specs)
         catch
             return false
-        if !session || !this.ExactSessionIsUniqueAcross(session, specs)
+        if !session
             return false
         try return this.windowDriver.IsActive(session.target)
         return false
     }
 
+    ; Still the only exact window for its title and executable, under the same HWND
+    ; and process.
     static ExactSessionIsUniqueAndLive(session) {
-        return this.ExactSessionIsLive(session, true)
-    }
-
-    static ExactSessionIsLive(session, requireUnique := false) {
         if (!session
             || !HasProp(session, "hwnd")
             || !HasProp(session, "processId")
@@ -386,14 +371,9 @@ class AppControl {
         )
         catch
             return false
-        if (requireUnique && sessions.Length != 1)
-            return false
-        for liveSession in sessions {
-            if (liveSession.hwnd = session.hwnd
-                && liveSession.processId = session.processId)
-                return true
-        }
-        return false
+        return sessions.Length = 1
+            && sessions[1].hwnd = session.hwnd
+            && sessions[1].processId = session.processId
     }
 
     static SendKeysToExactWindow(spec, keys) {
@@ -985,7 +965,7 @@ RestartPACS(driver := 0) {
         detail := IsObject(quiescence) && HasProp(quiescence, "error")
             ? quiescence.error
             : "restart target state could not be verified"
-        return StopRestart("A clinical client reappeared before launch. The restart was cancelled.", detail)
+        return StopRestart("The clinical clients could not be verified as stopped before launch. The restart was cancelled.", detail)
     }
 
     ; The shortcut sits on either the all-users desktop or this user's own desktop.

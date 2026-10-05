@@ -19,7 +19,7 @@ class ClinicalAutomationTest {
         "BuiltInClinicalCommandUsesConfirmedTarget",
         "WindowToggleRevalidatesUniqueSessionBeforeMutation",
         "NativePowerScribeCaptureRejectsImpostorAndDuplicate",
-        "NativePowerScribeHandleResolverRequiresExactIdentity",
+        "NativePowerScribeLivenessRequiresExactIdentity",
         "TargetedCustomCommandUsesConfirmedTarget",
         "ClinicalCommandGateRejectsNestedBuiltIn",
         "ShutdownGateRejectsNewClinicalCommand",
@@ -267,7 +267,7 @@ class ClinicalAutomationTest {
         Assert.Equal(0, nativeDriver.Capture())
     }
 
-    NativePowerScribeHandleResolverRequiresExactIdentity() {
+    NativePowerScribeLivenessRequiresExactIdentity() {
         nativeDriver := NativePowerScribeSessionDriver()
         expected := {
             hwnd: 601,
@@ -275,35 +275,38 @@ class ClinicalAutomationTest {
             exe: AppControl.powerScribeExecutable,
             pid: 77
         }
-
         AppControl.windowDriver := FakeExactWindowDriver([expected])
-        session := nativeDriver.SessionFromHandle(expected.hwnd)
-        Assert.Equal(expected.hwnd, session.hwnd)
-        Assert.Equal(expected.pid, session.processId)
+        session := nativeDriver.Capture()
+        Assert.True(nativeDriver.IsLive(session))
 
-        AppControl.windowDriver := FakeExactWindowDriver([{
+        ; The same HWND under another title, executable or process is not this session.
+        for changed in [
+            {hwnd: 601, title: expected.title " Extra", exe: expected.exe, pid: 77},
+            {hwnd: 601, title: expected.title, exe: "not-powerscribe.exe", pid: 77},
+            {hwnd: 601, title: expected.title, exe: expected.exe, pid: 78}
+        ] {
+            AppControl.windowDriver := FakeExactWindowDriver([changed])
+            Assert.False(nativeDriver.IsLive(session), changed.title " / " changed.exe " / " changed.pid)
+        }
+
+        ; A second exact reporting window makes the target ambiguous.
+        AppControl.windowDriver := FakeExactWindowDriver([expected, {
             hwnd: 602,
-            title: AppControl.powerScribeReportingTitle " Extra",
-            exe: AppControl.powerScribeExecutable,
-            pid: 77
+            title: expected.title,
+            exe: expected.exe,
+            pid: 79
         }])
-        Assert.Equal(0, nativeDriver.SessionFromHandle(602))
+        Assert.False(nativeDriver.IsLive(session))
 
-        AppControl.windowDriver := FakeExactWindowDriver([{
+        ; A session captured for another window is never PowerScribe.
+        AppControl.windowDriver := FakeExactWindowDriver([{hwnd: 603, title: "Other", exe: expected.exe, pid: 77}])
+        Assert.False(nativeDriver.IsLive({
             hwnd: 603,
-            title: AppControl.powerScribeReportingTitle,
-            exe: "not-powerscribe.exe",
-            pid: 77
-        }])
-        Assert.Equal(0, nativeDriver.SessionFromHandle(603))
-
-        AppControl.windowDriver := FakeExactWindowDriver([{
-            hwnd: 604,
-            title: AppControl.powerScribeReportingTitle,
-            exe: AppControl.powerScribeExecutable,
-            pid: 0
-        }])
-        Assert.Equal(0, nativeDriver.SessionFromHandle(604))
+            target: "ahk_id 603",
+            processId: 77,
+            title: "Other",
+            exe: expected.exe
+        }))
     }
 
     TargetedCustomCommandUsesConfirmedTarget() {
@@ -1437,12 +1440,6 @@ class FakeAppLifecycleDriver {
         return this.processAvailable ? 4242 : 0
     }
 
-    FindWindow(target) {
-        if (this.mode = "close-error")
-            return 31337
-        return 0
-    }
-
     ListWindowsByExecutable(*) {
         return this.mode = "close-error" ? [31337] : []
     }
@@ -1518,10 +1515,6 @@ class SharedHostWindowLifecycleDriver {
     FindProcess(*) {
         this.processLookupCalls++
         return 4242
-    }
-
-    FindWindow(*) {
-        return this.windows.Length ? this.windows[1] : 0
     }
 
     ListWindowsByExecutable(*) {

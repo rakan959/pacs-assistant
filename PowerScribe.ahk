@@ -17,42 +17,18 @@ class NativePowerScribeSessionDriver {
         return session
     }
 
-    SessionFromHandle(hwnd) {
-        if (hwnd <= 0)
-            return 0
-        target := "ahk_id " hwnd
-        try {
-            title := AppControl.windowDriver.GetTitle(hwnd)
-            executable := AppControl.windowDriver.GetProcessName(hwnd)
-            processId := AppControl.windowDriver.GetProcessId(hwnd)
-        } catch {
-            return 0
-        }
-        if (!(title == AppControl.powerScribeReportingTitle)
-            || StrCompare(executable, AppControl.powerScribeExecutable, false) != 0
-            || processId <= 0)
-            return 0
-        return {
-            hwnd: hwnd,
-            target: target,
-            processId: processId,
-            title: AppControl.powerScribeReportingTitle,
-            exe: AppControl.powerScribeExecutable
-        }
-    }
-
+    ; Still the one exact PowerScribe reporting window, under the same HWND and
+    ; process, that the session was captured from.
     IsLive(session) {
-        if (!IsObject(session)
-            || !HasProp(session, "hwnd")
-            || !HasProp(session, "target")
-            || !HasProp(session, "processId"))
-            return false
-        current := this.SessionFromHandle(session.hwnd)
-        return current
-            && AppControl.ExactSessionIsUniqueAndLive(current)
-            && current.hwnd = session.hwnd
-            && current.processId = session.processId
-            && current.target == session.target
+        return IsObject(session)
+            && HasProp(session, "hwnd")
+            && HasProp(session, "target")
+            && HasProp(session, "title")
+            && HasProp(session, "exe")
+            && session.target == "ahk_id " session.hwnd
+            && session.title == AppControl.powerScribeReportingTitle
+            && StrCompare(session.exe, AppControl.powerScribeExecutable, false) = 0
+            && AppControl.ExactSessionIsUniqueAndLive(session)
     }
 
     Root(session) {
@@ -121,10 +97,7 @@ class PowerScribe {
         session := this.sessionDriver.Capture()
         if !session
             return {text: "", session: 0}
-        text := this.ReadReportText(session)
-        if (text != "")
-            session.reportText := text
-        return {text: text, session: session}
+        return {text: this.ReadReportText(session), session: session}
     }
 
     static ReadReportText(session) {

@@ -22,6 +22,7 @@ class WetReadTest {
         "UnreadableNativeFieldFailsClosed",
         "StickyRootMustBelongToPacsProcess",
         "StickyOpenerRejectsSameProcessWrongWindowButton",
+        "NativeStickyButtonReportsWhetherClickActioned",
         "StickyOpenerRejectsAmbiguousSameWindowButtons",
         "StickyOpenerRejectsUnreadableCandidateAlongsideValidButton",
         "StickyOpenerRejectsTitleChangeBeforeInvoke",
@@ -560,6 +561,16 @@ class WetReadTest {
         Assert.False(InStr(message, "Could not read the report") > 0)
     }
 
+    ; UIA-v2's semantic Click() returns the pattern it used, or 0 when nothing
+    ; actioned the button.
+    NativeStickyButtonReportsWhetherClickActioned() {
+        driver := NativeStickyNoteWindowDriver()
+
+        Assert.True(driver.InvokeStickyButton(FakeClickResult("Invoke")))
+        Assert.False(driver.InvokeStickyButton(FakeClickResult(0)))
+        Assert.False(driver.InvokeStickyButton(FakeClickResult(Error("simulated UIA failure"))))
+    }
+
     StickyOpenerFailureAlsoReportsAttendingOutcome() {
         notifications := []
         captureCalls := 0
@@ -580,6 +591,9 @@ class WetReadTest {
         Assert.Equal("Sticky Note Target Not Verified", notifications[1].title)
         Assert.Equal("Attending Not Assigned", notifications[2].title)
         Assert.True(InStr(notifications[2].text, "Set it manually") > 0)
+        ; PowerScribe was never asked, so it must not be blamed.
+        Assert.True(InStr(notifications[2].text, "stopped before the report was read"), notifications[2].text)
+        Assert.False(InStr(notifications[2].text, "PowerScribe"), notifications[2].text)
     }
 
     ThrowingStickyOpenerStillReportsAttendingOutcome() {
@@ -606,6 +620,9 @@ class WetReadTest {
         Assert.Equal("Sticky Note Target Not Verified", notifications[1].title)
         Assert.True(InStr(notifications[1].text, "simulated opener failure") > 0)
         Assert.Equal("Attending Not Assigned", notifications[2].title)
+        ; The opener error is reported once, in the sticky notice.
+        Assert.False(InStr(notifications[2].text, "simulated opener failure"), notifications[2].text)
+        Assert.True(InStr(notifications[2].text, "stopped before the report was read"), notifications[2].text)
     }
 
     ThrowingReportCaptureStillPastesAndReportsAttendingOutcome() {
@@ -1011,5 +1028,17 @@ class PrimitiveStickyNoteWindowDriver extends NativeStickyNoteWindowDriver {
         if this.siblingOnActivation
             this.AddWindow(this.siblingOnActivation, "Sticky Notes", 100)
         return this.activationSucceeds
+    }
+}
+
+class FakeClickResult {
+    __New(result) {
+        this.result := result
+    }
+
+    Click(*) {
+        if (this.result is Error)
+            throw this.result
+        return this.result
     }
 }

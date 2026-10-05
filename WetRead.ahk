@@ -77,13 +77,11 @@ class NativeStickyNoteWindowDriver {
         return false
     }
 
+    ; UIA-v2's semantic Click() returns the pattern it used, or 0 when no pattern
+    ; actioned the element.
     InvokeStickyButton(button) {
-        try {
-            button.Click()
-            return true
-        } catch {
-            return false
-        }
+        try return !!button.Click()
+        return false
     }
 
     WaitForActiveSticky(processId, timeoutSeconds) {
@@ -330,7 +328,7 @@ class NativeWetReadControlDriver {
  */
 class NativeWetReadDriver {
     __New(
-        targetTitle := "Sticky Notes",
+        targetTitle,
         focusDriver := NativeWetReadFocusDriver(),
         controlDriver := NativeWetReadControlDriver()
     ) {
@@ -488,7 +486,7 @@ class NativeWetReadDriver {
 class WetReadPasteEngine {
     static verifyTimeoutMs := 2000
 
-    static Paste(field, text, mode, driver := NativeWetReadDriver()) {
+    static Paste(field, text, mode, driver) {
         result := this.NewResult()
         if (mode != "uia" && mode != "control") {
             result.reason := "invalid-mode"
@@ -594,8 +592,10 @@ class WetReadPasteEngine {
 }
 
 /**
- * Assigns the current report to the profile's attending for its modality. A blank
- * assignment leaves PowerScribe's default unchanged.
+ * Routes the report to the attending the profile assigns to its modality. A blank
+ * assignment leaves PowerScribe's default unchanged; any other assignment throws
+ * until PowerScribe.SetAttending can drive the attending picker safely, so the
+ * caller reports the attending as a manual step.
  */
 CheckAttending(reportText, powerScribeSession := 0) {
     return AttendingRouting.Route(
@@ -632,6 +632,7 @@ RunPinnedWetReadWorkflow(
     ; must never decide which Sticky Notes window receives the text.
     notify := notifier ? notifier : MsgBox
     stickyFailure := "A new Sticky Notes window for the active Vue PACS study could not be verified. Nothing was pasted"
+    reportAttempted := false
     attendingRouted := false
     attendingError := 0
     haystack := ""
@@ -639,8 +640,7 @@ RunPinnedWetReadWorkflow(
         stickySession := 0
         try {
             stickySession := openSticky.Call()
-        } catch as err {
-            attendingError := err
+        } catch Any as err {
             notify.Call(stickyFailure ": " ErrorText.Message(err), "Sticky Note Target Not Verified", "Icon!")
             return false
         }
@@ -649,6 +649,7 @@ RunPinnedWetReadWorkflow(
             return false
         }
 
+        reportAttempted := true
         reportCapture := 0
         try reportCapture := captureReport.Call()
         catch as err
@@ -673,8 +674,12 @@ RunPinnedWetReadWorkflow(
 
         return pasteAction.Call(clipText, pasteMode, stickySession)
     } finally {
-        if !attendingRouted
-            notify.Call(AttendingFailureMessage(haystack, attendingError), "Attending Not Assigned", "Icon!")
+        if !attendingRouted {
+            message := reportAttempted
+                ? AttendingFailureMessage(haystack, attendingError)
+                : "The wet read stopped before the report was read, so the attending was not assigned. Set it manually."
+            notify.Call(message, "Attending Not Assigned", "Icon!")
+        }
     }
 }
 
@@ -683,14 +688,13 @@ WetRead() {
     clipText := A_Clipboard
     if (clipText = "") {
         MsgBox("No text in clipboard to paste as wet read.", "No Clipboard Text", "Icon!")
-        return
+        return false
     }
 
     ; Choose paste strategy before any window focus changes
     pasteMode := PromptWetReadMode()
-    if (pasteMode = "cancel") {
-        return
-    }
+    if (pasteMode = "cancel")
+        return false
 
     return RunPinnedWetReadWorkflow(
         clipText,
@@ -709,27 +713,27 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
         || !HasProp(stickySession, "driver")
         || !stickySession.driver.ActivateSticky(stickySession)) {
         MsgBox("The pinned Sticky Notes window is no longer the verified target. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-        return
+        return false
     }
     sticky := stickySession.driver.GetRoot(stickySession.stickyHwnd)
     if (!sticky
         || !NativeWetReadDriver.IsExpectedStickyRoot(stickySession.pacsRoot, sticky)) {
         MsgBox("The pinned Sticky Notes UI target could not be reacquired. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-        return
+        return false
     }
     try {
         if (sticky.WinId != stickySession.stickyHwnd) {
             MsgBox("The pinned Sticky Notes UI target changed. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-            return
+            return false
         }
     } catch {
         MsgBox("The pinned Sticky Notes UI target could not be verified. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-        return
+        return false
     }
     try wetReadDriver := NativeWetReadDriver.ForRoot(sticky)
     catch {
         MsgBox("Sticky Notes window identity could not be pinned. Nothing was pasted.", "Sticky Note Target Not Verified", "Icon!")
-        return
+        return false
     }
     ; Get note input field
     noteField := ""
@@ -741,11 +745,11 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
     }
     if (!noteField) {
         MsgBox("Could not locate Sticky Notes text field.", "Sticky Note Target Not Verified", "Icon!")
-        return
+        return false
     }
     if !NativeWetReadDriver.IsExpectedNoteField(sticky, noteField) {
         MsgBox("Sticky Notes returned an unexpected text target. Nothing was pasted; verify the window and try again.", "Sticky Note Target Not Verified", "Icon!")
-        return
+        return false
     }
 
     if Settings.Get("AutoConvertWetReadLineEndings")
@@ -759,9 +763,10 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
     )
 
     failure := WetReadPasteFailureDialog(result, pasteMode)
-    if failure
-        MsgBox(failure.text, failure.title, "Icon!")
-    return
+    if !failure
+        return true
+    MsgBox(failure.text, failure.title, "Icon!")
+    return false
 }
 
 ; Sticky Notes expects CRLF; a bare LF from the clipboard renders as one long line.

@@ -24,6 +24,7 @@ class UpdateCheckerTest {
         "TestSettingsChangeRestartsTimer",
         "TestAutomaticCheckUsesAsyncTransport",
         "TestSynchronousAsyncFailureIsNotReportedAsStarted",
+        "TestRequestWithoutAHandleIsReportedAsNotStarted",
         "TestAutomaticCheckNeverOpensAnActivatingDialog",
         "TestManualCheckIsAsyncAndReportsNoUpdate",
         "TestSettingsChangeDoesNotSilentlyCancelManualCheck",
@@ -456,6 +457,21 @@ class UpdateCheckerTest {
         } finally capturedLog.Restore()
     }
 
+    TestRequestWithoutAHandleIsReportedAsNotStarted() {
+        UpdateChecker.transport := NullHandleAsyncTransport()
+        capturedLog := LogCapture()
+        try {
+            Assert.False(UpdateChecker.BeginAutoCheck(true))
+            Assert.Equal(0, UpdateChecker.activeRequest)
+            Assert.Equal(1, capturedLog.Count("Automatic update check failed: Error: The update request returned no handle"))
+        } finally capturedLog.Restore()
+
+        Assert.False(UpdateChecker.BeginManualCheck())
+        Assert.Equal(0, UpdateChecker.activeRequest)
+        Assert.Equal(1, this.manualNotifications.Length)
+        Assert.True(InStr(this.manualNotifications[1].text, "could not start"), this.manualNotifications[1].text)
+    }
+
     TestSynchronousAsyncFailureIsNotReportedAsStarted() {
         UpdateChecker.transport := SynchronousFailingAsyncTransport()
 
@@ -843,6 +859,12 @@ class FakeAsyncUpdateHandle {
 
     Cancel() {
         this.cancelled := true
+    }
+}
+
+class NullHandleAsyncTransport {
+    GetTextAsync(*) {
+        return 0
     }
 }
 

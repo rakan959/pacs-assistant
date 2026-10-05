@@ -80,7 +80,7 @@ class UpdateChecker {
         if !this.activeRequest
             return
         slot := this.activeRequest
-        if (HasProp(slot, "manual") && slot.manual && !cancelManualCheck)
+        if (slot.manual && !cancelManualCheck)
             return
         this.activeRequest := 0
         slot.completed := true
@@ -96,33 +96,40 @@ class UpdateChecker {
         if (!force && !this.updateCheckEligibleProbe.Call())
             return false
 
+        start := this.StartCheck(false)
+        if start.error
+            this.RecordAutoCheckFailure(start.error)
+        return start.started
+    }
+
+    /**
+     * Starts the release-metadata request for a new check and makes it the active
+     * request. Its completion and failure go to the Complete/Fail method of the
+     * matching kind.
+     * @returns {started, error}: started when the request is in flight; error when
+     * it could not start, 0 when it already finished synchronously
+     */
+    static StartCheck(manual) {
         stableOnly := Settings.Get("SkipBetaVersions")
         url := stableOnly ? this.latestStableUrl : this.newestReleaseUrl
-        slot := {handle: 0, completed: false}
+        slot := {handle: 0, completed: false, manual: manual}
         this.activeRequest := slot
-
         try {
             slot.handle := this.transport.GetTextAsync(
                 url,
-                ObjBindMethod(this, "CompleteAutoCheck", slot, stableOnly),
-                ObjBindMethod(this, "FailAutoCheck", slot),
+                ObjBindMethod(this, manual ? "CompleteManualCheck" : "CompleteAutoCheck", slot, stableOnly),
+                ObjBindMethod(this, manual ? "FailManualCheck" : "FailAutoCheck", slot),
                 this.maxMetadataSizeBytes
             )
         } catch as err {
-            slot.completed := true
-            slot.handle := 0
-            if (this.activeRequest = slot)
-                this.activeRequest := 0
-            this.RecordAutoCheckFailure(err)
-            return false
+            this.ClaimSlot(slot)
+            return {started: false, error: err}
         }
-
-        if !slot.handle {
-            if (this.activeRequest = slot)
-                this.activeRequest := 0
-            return false
-        }
-        return true
+        if slot.handle
+            return {started: true, error: 0}
+        if (this.activeRequest = slot)
+            this.activeRequest := 0
+        return {started: false, error: slot.completed ? 0 : Error("The update request returned no handle")}
     }
 
     static CompleteAutoCheck(slot, stableOnly, response) {
@@ -543,39 +550,14 @@ class UpdateChecker {
             return false
         }
 
-        stableOnly := Settings.Get("SkipBetaVersions")
-        url := stableOnly ? this.latestStableUrl : this.newestReleaseUrl
-        slot := {handle: 0, completed: false, manual: true}
-        this.activeRequest := slot
-        try {
-            slot.handle := this.transport.GetTextAsync(
-                url,
-                ObjBindMethod(this, "CompleteManualCheck", slot, stableOnly),
-                ObjBindMethod(this, "FailManualCheck", slot),
-                this.maxMetadataSizeBytes
-            )
-        } catch as err {
-            slot.completed := true
-            slot.handle := 0
-            if (this.activeRequest = slot)
-                this.activeRequest := 0
-            this.manualResultNotifier.Call(
-                "The update check could not start: " err.Message,
-                "Update Check Failed",
-                "Icon!"
-            )
-            return false
-        }
-        if !slot.handle {
-            if (this.activeRequest = slot)
-                this.activeRequest := 0
-            if !slot.completed {
+        start := this.StartCheck(true)
+        if !start.started {
+            if start.error
                 this.manualResultNotifier.Call(
-                    "The update check could not start.",
+                    "The update check could not start: " ErrorText.Message(start.error),
                     "Update Check Failed",
                     "Icon!"
                 )
-            }
             return false
         }
         try this.updateAvailableNotifier.Call(

@@ -376,6 +376,7 @@ Assert-NotMatches $main '(?m)^#SingleInstance\s+Force\s*$' 'Force replacement by
 Assert-Matches $main 'OnExit\(\(exitReason, exitCode\) => kbGUI\.HandleProcessExit\(exitReason, exitCode\)\)' 'Tray and external exits must use the authoritative shutdown coordinator.'
 Assert-Matches $main 'UpdateChecker\.shutdownCoordinator\s*:=\s*kbGUI' 'Self-update must use the same shutdown coordinator as normal exit.'
 Assert-Matches $main 'PACSCommands\.commandAvailabilityProbe\s*:=\s*\(\*\)\s*=>\s*ExclusiveOperations\.Active\("clinical"\)\s*=\s*""' 'Clinical commands must be gated by every other exclusive operation through the shared classifier.'
+Assert-Matches $main 'UpdateChecker\.clinicalActivityProbe\s*:=\s*\(\*\)\s*=>\s*PACSCommands\.clinicalCommandActive' 'Self-update must see an active clinical command.'
 Assert-Matches $main 'Settings\.mutationGuard\s*:=\s*\(\*\)\s*=>\s*ExclusiveOperations\.Active\("settingsWrite"\)\s*=\s*""' 'Settings writes must be gated by every other exclusive operation through the shared classifier.'
 Assert-Matches $exclusiveOperations '(?s)static kinds := \[\s*"clinical",\s*"capture",\s*"profileMutation",\s*"settingsWrite",\s*"uiPresentation",\s*"shutdown"\s*\]' 'The exclusive-operation classifier must cover clinical, capture, profile, settings, dialog presentation and shutdown leases.'
 Assert-NotMatches $guiSmoke '\{\s*base:\s*KeybindGUI\.Prototype' 'The GUI smoke test must construct a real KeybindGUI instance so instance-property initialization is exercised.'

@@ -59,7 +59,6 @@ class MicrophoneManager {
     static attemptedProcessId := 0
     static attempts := 0
     static maxAttempts := 3
-    static pickerPresent := false
     static failureNotified := false
     static lastError := ""
     static notifier := (text, title, options) => TrayTip(text, title, options)
@@ -87,7 +86,6 @@ class MicrophoneManager {
         }
         this.attemptedWindow := 0
         this.attemptedProcessId := 0
-        this.pickerPresent := false
         this.ResetAttemptState()
     }
 
@@ -115,7 +113,6 @@ class MicrophoneManager {
                 ; PowerScribe closed - allow the next login to be handled
                 this.attemptedWindow := 0
                 this.attemptedProcessId := 0
-                this.pickerPresent := false
                 this.ResetAttemptState()
                 return
             }
@@ -201,7 +198,6 @@ class MicrophoneManager {
             return false
         this.attemptedWindow := session.hwnd
         this.attemptedProcessId := session.processId
-        this.pickerPresent := false
         this.ResetAttemptState()
         return true
     }
@@ -210,13 +206,8 @@ class MicrophoneManager {
     ; and ambiguity are uncertainty, not evidence of disappearance, and must continue
     ; consuming the same bounded retry budget.
     static RecordPickerPresence(present) {
-        present := present ? true : false
-        if present {
-            this.pickerPresent := true
-            return
-        }
-        this.pickerPresent := present
-        this.ResetAttemptState()
+        if !present
+            this.ResetAttemptState()
     }
 
     static RecordOperationalError(err) {
