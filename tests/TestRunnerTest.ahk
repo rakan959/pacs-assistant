@@ -6,6 +6,7 @@ class TestRunnerTest {
         "EqualRejectsCaseOnlyAndTypeOnlyDifferences",
         "NotEqualAcceptsCaseOnlyAndTypeOnlyDifferences",
         "FailedAssertionNamesTheTestLineAndShowsObjects",
+        "CustomAssertionMessageKeepsTheDetail",
         "TemporaryPathsAreUniqueAndProcessScoped",
         "StorageIsIsolatedFromTheScriptFolder",
         "SetupFailureIsCountedAndDoesNotStopTheClass",
@@ -74,6 +75,20 @@ class TestRunnerTest {
             Assert.Equal(A_LineFile, failure.File)
             Assert.Equal(lines[A_Index], failure.Line)
         }
+    }
+
+    CustomAssertionMessageKeepsTheDetail() {
+        messages := []
+        try Assert.Throws(() => FakeEarlyFailure.Throw("Duplicate key"), "Expected ':'", "JSON was not rejected as expected")
+        catch Error as err
+            messages.Push(err.Message)
+        try Assert.Equal(1, 2, "counts differ")
+        catch Error as err
+            messages.Push(err.Message)
+
+        Assert.Equal(2, messages.Length)
+        Assert.Equal("JSON was not rejected as expected (expected an error containing 'Expected ':'' but got 'Duplicate key')", messages[1])
+        Assert.Equal("counts differ (expected '1' but got '2')", messages[2])
     }
 
     NotEqualAcceptsCaseOnlyAndTypeOnlyDifferences() {
@@ -418,5 +433,11 @@ class DialogProbe {
 
     SeesNone() {
         DialogProbe.observed.Push(TestRunner.dialogs.Length)
+    }
+}
+
+class FakeEarlyFailure {
+    static Throw(message) {
+        throw Error(message)
     }
 }

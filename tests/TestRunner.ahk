@@ -171,19 +171,19 @@ class TestRunner {
 class Assert {
     static Equal(expected, actual, message := "") {
         if !this.ExactlyEqual(expected, actual)
-            throw Error(message ? message : Format(
-                "Expected '{1}' but got '{2}'",
+            throw Error(this.Failure(message, Format(
+                "expected '{1}' but got '{2}'",
                 this.Show(expected),
                 this.Show(actual)
-            ), -1)
+            )), -1)
     }
 
     static NotEqual(expected, actual, message := "") {
         if this.ExactlyEqual(expected, actual)
-            throw Error(message ? message : Format(
-                "Expected value different from '{1}'",
+            throw Error(this.Failure(message, Format(
+                "expected a value different from '{1}'",
                 this.Show(expected)
-            ), -1)
+            )), -1)
     }
 
     static ExactlyEqual(expected, actual) {
@@ -195,14 +195,22 @@ class Assert {
         return IsObject(value) ? "<" Type(value) ">" : value
     }
 
+    ; A caller's message leads and the computed detail follows in parentheses, so
+    ; the failure still says what actually happened.
+    static Failure(message, detail) {
+        return message = ""
+            ? StrUpper(SubStr(detail, 1, 1)) SubStr(detail, 2)
+            : message " (" detail ")"
+    }
+
     static True(value, message := "") {
         if (!value)
-            throw Error(message ? message : "Expected true but got false", -1)
+            throw Error(this.Failure(message, "expected true but got false"), -1)
     }
 
     static False(value, message := "") {
         if (value)
-            throw Error(message ? message : "Expected false but got true", -1)
+            throw Error(this.Failure(message, "expected false but got true"), -1)
     }
 
     static Throws(callback, expectedError := "", message := "") {
@@ -213,15 +221,15 @@ class Assert {
         } catch Any as err {
             threw := true
             if (expectedError && !InStr(ErrorText.Message(err), expectedError))
-                throw Error(message ? message : Format(
-                    "Expected error containing '{1}' but got '{2}'",
+                throw Error(this.Failure(message, Format(
+                    "expected an error containing '{1}' but got '{2}'",
                     expectedError,
                     ErrorText.Message(err)
-                ), -1)
+                )), -1)
         }
 
         if !threw
-            throw Error(message ? message : "Expected function to throw an error", -1)
+            throw Error(this.Failure(message, "expected the function to throw an error"), -1)
     }
 }
 
