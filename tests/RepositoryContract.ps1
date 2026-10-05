@@ -136,22 +136,25 @@ foreach ($ahkSource in $ahkSources) {
     }
 }
 
-Assert-Matches $workflow '(?m)^\s*contents:\s*read\s*$' 'The default workflow token permission must be contents: read.'
+Assert-Matches $workflow '(?m)^permissions:\s*\r?\n  contents:\s*read\s*$' 'The top-level workflow token permission must be contents: read.'
+Assert-NotMatches $workflow '(?m)^\s*permissions:\s*(read|write)-all\s*$' 'Workflow token permissions must name each scope, not read-all or write-all.'
 Assert-Matches $workflow '(?ms)^\s{2}release:\s.*?^\s{4}permissions:\s*\r?\n\s{6}contents:\s*write\s*$' 'Only the release job may request contents: write.'
-if ([regex]::Matches($workflow, '(?m)^\s*contents:\s*write\s*$').Count -ne 1) {
-    $failures.Add('Exactly one job, the release job, may request contents: write.')
+# Any scope (contents, actions, id-token, ...) counts: the release job's contents:
+# write is the only write permission in the workflow.
+if ([regex]::Matches($workflow, '(?m)^\s*[a-z-]+:\s*write\s*$').Count -ne 1) {
+    $failures.Add('Exactly one write permission, the release job''s contents: write, may appear in the workflow.')
 }
 Assert-Matches $workflow '(?m)^\s*runs-on:\s*windows-2025\s*$' 'The build job must use a versioned Windows runner image.'
 Assert-Matches $workflow '(?m)^\s*runs-on:\s*ubuntu-24\.04\s*$' 'The release job must use a versioned Ubuntu runner image.'
 Assert-NotMatches $workflow '(?m)^\s*runs-on:\s*\S+-latest\s*$' 'Workflow runner labels must not float on -latest.'
 Assert-Matches $workflow '(?m)^\s*& tests/RepositoryContract\.ps1\s*$' 'CI must run the repository contract check.'
-Assert-Matches $workflow '(?m)^\s*& scripts/GenerateVersion\.ps1\b' 'CI must generate Version.ahk through the tested version script.'
-Assert-Matches $workflow '(?m)^\s*licenses/AutoHotkey-v2\.0\.26\.txt\s*$' 'Release artifacts must include the AutoHotkey runtime license.'
-Assert-Matches $workflow 'https://github\.com/AutoHotkey/AutoHotkey/archive/refs/tags/v\$\(\$env:AUTOHOTKEY_VERSION\)\.zip' 'CI must download source from the exact AutoHotkey version tag.'
 # #Warn leaves AutoHotkey's exit code at 0, so both AutoHotkey steps scan the output.
 if ([regex]::Matches($workflow, 'Select-String -LiteralPath \$stdout, \$stderr -SimpleMatch ''==> Warning:'' -Quiet').Count -ne 2) {
     $failures.Add('Syntax validation and the unit tests must each fail CI on an AutoHotkey warning.')
 }
+Assert-Matches $workflow '(?m)^\s*& scripts/GenerateVersion\.ps1\b' 'CI must generate Version.ahk through the tested version script.'
+Assert-Matches $workflow '(?m)^\s*licenses/AutoHotkey-v2\.0\.26\.txt\s*$' 'Release artifacts must include the AutoHotkey runtime license.'
+Assert-Matches $workflow 'https://github\.com/AutoHotkey/AutoHotkey/archive/refs/tags/v\$\(\$env:AUTOHOTKEY_VERSION\)\.zip' 'CI must download source from the exact AutoHotkey version tag.'
 Assert-Matches $workflow '(?m)^\s*AutoHotkey-v2\.0\.26-source\.zip\s*$' 'Build artifacts must include the AutoHotkey corresponding-source archive.'
 Assert-Matches $workflow "Join-Path \`$PWD 'release/AutoHotkey-v2\.0\.26-source\.zip'" 'Tagged releases must publish the AutoHotkey corresponding-source archive.'
 Assert-NotMatches $workflow '\$env:RELEASE_TAG\.Contains\(''-''\)' 'Release publication must not classify build-metadata hyphens as prerelease markers.'
