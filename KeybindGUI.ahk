@@ -574,7 +574,11 @@ class KeybindGUI {
     SelectProfile(name, selectorGui) {
         if !this.RequireCurrentProfileSelector(selectorGui)
             return false
-        if (name = "" || !ProfileManager.profiles.Has(name))
+        if (name = "") {
+            MsgBox("Please select a profile first.", "No Profile Selected", "Icon!")
+            return false
+        }
+        if !ProfileManager.profiles.Has(name)
             return false
         if !this.BeginProfileMutationTransaction("select a profile")
             return false

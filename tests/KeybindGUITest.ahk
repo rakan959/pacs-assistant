@@ -86,6 +86,7 @@ class KeybindGUITest {
         "TestProfileCreationCloseCannotInterruptStorageTransaction",
         "TestDestroyedNewProfileDialogCannotDispatchQueuedActions",
         "TestDestroyedProfileSelectorCannotDispatchQueuedActions",
+        "TestSelectWithoutAHighlightedProfileSaysSo",
         "TestProfileDeletionOwnsSelectorAcrossConfirmation"
     ]
 
@@ -629,6 +630,27 @@ class KeybindGUITest {
         Assert.Equal(0, editor.mainWindowCalls)
         Assert.Equal(0, editor.selectorCalls)
         Assert.Equal(0, editor.exitCalls)
+    }
+
+    ; Like Set as Default, Rename and Delete, Select explains a click with nothing
+    ; highlighted instead of doing nothing.
+    TestSelectWithoutAHighlightedProfileSaysSo() {
+        selector := FakeProfileDialog("")
+        editor := {
+            base: ProfileSelectorTransactionGUI.Prototype,
+            mainWindowCalls: 0,
+            selectorCalls: 0
+        }
+        ProfileManager.profiles := Map("A", ProfileManager.NewProfile())
+        ProfileManager.currentProfile := ""
+        editor.RegisterProfileSelector(selector)
+
+        Assert.False(editor.SelectProfile("", selector))
+
+        Assert.Equal(1, TestRunner.dialogs.Length)
+        Assert.Equal("No Profile Selected", TestRunner.dialogs[1].title)
+        Assert.Equal(0, editor.mainWindowCalls)
+        Assert.False(selector.destroyed)
     }
 
     TestDestroyedProfileSelectorCannotDispatchQueuedActions() {
