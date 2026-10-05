@@ -331,6 +331,10 @@ class PACSMonitor {
     }
 
     static RefreshAndCheck() {
+        ; Without an approved refresh or an alert consumer this interval has no
+        ; work, so it must not delay a clinical command or claim a worklist scan.
+        if (!this.approvedRefreshAutomationIds.Length && !this.NewCaseAlertsEnabled())
+            return false
         session := 0
         refreshed := false
         skipScan := false
@@ -490,19 +494,17 @@ class PACSMonitor {
                 if (studyType = "")
                     continue
 
-                for acc in accessions {
-                    ; Deduplicate within this pass without mutating durable scan state.
-                    ; A later stale UIA row can still throw; committing here would make
-                    ; earlier accessions look alerted before AlertNewCases has run.
-                    if (this.HasAccession(acc) || pendingAccessions.Has(acc))
-                        continue
+                acc := accessions[1]
+                ; Deduplicate within this pass; accessions are committed only after
+                ; the alert is delivered.
+                if (this.HasAccession(acc) || pendingAccessions.Has(acc))
+                    continue
 
-                    pendingAccessions[acc] := true
-                    newStudies.Push({
-                        studyType: studyType,
-                        accession: acc
-                    })
-                }
+                pendingAccessions[acc] := true
+                newStudies.Push({
+                    studyType: studyType,
+                    accession: acc
+                })
             }
         }
 

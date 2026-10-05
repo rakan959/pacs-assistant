@@ -13,6 +13,7 @@
 
 class PACSMonitorTest {
     static tests := [
+        "ClosedPortalIsNotAScanFailure",
         "TestHasAccession",
         "TestNoApprovedRefreshIdSkipsTheButtonSearch",
         "TestProcessRowsFindsNewStudies",
@@ -46,6 +47,7 @@ class PACSMonitorTest {
         "TestRefreshFailureNotificationUsesTextThenTitle",
         "TestScanFailuresNotifyOnceAndReset",
         "TestUnapprovedRefreshIsReportedOnceAsUnavailable",
+        "TestNoAlertsAndNoRefreshAvoidsClinicalAutomation",
         "TestNoAlertKindSkipsTheWorklistScan",
         "TestNewStudyNotificationUsesTextThenTitle",
         "TestFailedAlertDoesNotConsumeAccession",
@@ -56,6 +58,15 @@ class PACSMonitorTest {
     static helpers := [
         "PortalSession"
     ]
+
+    ClosedPortalIsNotAScanFailure() {
+        PACSMonitor.driver := CountingPortalResolutionDriver()
+        SetTestSetting("MessageBoxNewCase", true)
+        loop PACSMonitor.scanFailureThreshold + 1
+            Assert.False(PACSMonitor.RefreshAndCheck())
+        Assert.Equal(0, PACSMonitor.consecutiveScanFailures)
+        Assert.Equal(0, this.notifications.Length)
+    }
 
     Setup() {
         this.originalNotifier := PACSMonitor.notifier
@@ -604,6 +615,7 @@ class PACSMonitorTest {
     ; failure episode.
     TestUnapprovedRefreshIsReportedOnceAsUnavailable() {
         PACSMonitor.approvedRefreshAutomationIds := []
+        SetTestSetting("MessageBoxNewCase", true)
         session := this.PortalSession()
         capturedLog := LogCapture()
         try {
@@ -628,6 +640,20 @@ class PACSMonitorTest {
         Assert.Equal(1, titles.Length)
         Assert.Equal("PACS Auto-Refresh Unavailable", titles[1])
         Assert.True(InStr(this.notifications[1].text, "yourself"), this.notifications[1].text)
+    }
+
+    TestNoAlertsAndNoRefreshAvoidsClinicalAutomation() {
+        PACSMonitor.approvedRefreshAutomationIds := []
+        SetTestSetting("AudioAlertNewCase", false)
+        SetTestSetting("MessageBoxNewCase", false)
+        leases := []
+        PACSMonitor.automationAcquire := (name) => (leases.Push(name), {status: "acquired", busyCommand: ""})
+        driver := PinnedPortalMonitorDriver(this.PortalSession(), FakePACSActionButton(42, 100, "Refresh", "refreshPrimary"), FakePACSStudyList(42, 100))
+        PACSMonitor.driver := driver
+        Assert.False(PACSMonitor.RefreshAndCheck())
+        Assert.Equal(0, leases.Length)
+        Assert.Equal(0, driver.rootCalls)
+        Assert.Equal(0, this.notifications.Length)
     }
 
     ; The scan only feeds the alerts. With both kinds off, its result would be
