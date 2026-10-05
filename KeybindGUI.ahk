@@ -17,7 +17,6 @@ class KeybindGUI {
     gui := ""
     profileSelectorGui := 0
     static isListening := false
-    static listeningControl := ""
     static activeInputHook := 0
     static captureRuntimeProfile := 0
     static captureOwnerGui := 0
@@ -758,7 +757,6 @@ class KeybindGUI {
         KeybindGUI.captureRuntimeProfile := originalProfile
 
         KeybindGUI.isListening := true
-        KeybindGUI.listeningControl := control
         try {
             ; The key the user presses to define a bind must be captured as data only.
             ; Leaving live clinical hotkeys registered here could execute that same key
@@ -966,7 +964,6 @@ class KeybindGUI {
             KeybindGUI.activeInputHook := 0
         }
         KeybindGUI.isListening := false
-        KeybindGUI.listeningControl := ""
         return true
     }
 

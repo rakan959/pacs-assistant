@@ -125,7 +125,6 @@ class KeybindGUITest {
         this.originalRecoveryRequired := ProfileManager.recoveryRequired
         this.originalStorageLastError := ProfileManager.lastError
         this.originalIsListening := KeybindGUI.isListening
-        this.originalListeningControl := KeybindGUI.listeningControl
         this.originalActiveInputHook := KeybindGUI.activeInputHook
         this.originalHotkeyFunctions := HotkeyManager.hotkeyFunctions
         this.originalActiveHotkeys := HotkeyManager.activeHotkeys
@@ -158,7 +157,6 @@ class KeybindGUITest {
         ProfileManager.recoveryRequired := this.originalRecoveryRequired
         ProfileManager.lastError := this.originalStorageLastError
         KeybindGUI.isListening := this.originalIsListening
-        KeybindGUI.listeningControl := this.originalListeningControl
         KeybindGUI.activeInputHook := this.originalActiveInputHook
         HotkeyManager.hotkeyFunctions := this.originalHotkeyFunctions
         HotkeyManager.activeHotkeys := this.originalActiveHotkeys
@@ -288,7 +286,6 @@ class KeybindGUITest {
     TestProfileSwitchPreparationStopsActiveCapture() {
         hook := FakeCaptureHook("F13")
         KeybindGUI.isListening := true
-        KeybindGUI.listeningControl := {}
         KeybindGUI.activeInputHook := hook
 
         try {
@@ -307,9 +304,7 @@ class KeybindGUITest {
 
     TestProfileSwitchAbortsWhenCaptureCannotStop() {
         hook := FailingCaptureHook("F13")
-        control := {}
         KeybindGUI.isListening := true
-        KeybindGUI.listeningControl := control
         KeybindGUI.activeInputHook := hook
 
         threw := false
@@ -321,17 +316,14 @@ class KeybindGUITest {
         }
 
         capturedListening := KeybindGUI.isListening
-        capturedControl := KeybindGUI.listeningControl
         capturedHook := KeybindGUI.activeInputHook
 
         KeybindGUI.activeInputHook := 0
         KeybindGUI.isListening := false
-        KeybindGUI.listeningControl := ""
 
         Assert.True(threw)
         Assert.True(InStr(caughtMessage, "simulated InputHook stop failure") > 0, caughtMessage)
         Assert.True(capturedListening)
-        Assert.True(capturedControl == control)
         Assert.True(capturedHook == hook)
     }
 
@@ -356,7 +348,6 @@ class KeybindGUITest {
         HotkeyManager.activeHotkeys := Map()
         HotkeyManager.additionalActiveHotkeys := Map()
         KeybindGUI.isListening := false
-        KeybindGUI.listeningControl := ""
         KeybindGUI.activeInputHook := 0
 
         Assert.True(editor.CaptureFunctionDialogState(
@@ -859,7 +850,6 @@ class KeybindGUITest {
         HotkeyManager.activeHotkeys := Map()
         HotkeyManager.additionalActiveHotkeys := Map()
         KeybindGUI.isListening := false
-        KeybindGUI.listeningControl := ""
         KeybindGUI.activeInputHook := 0
 
         Assert.True(editor.CaptureFunctionDialogState(
@@ -894,7 +884,6 @@ class KeybindGUITest {
         ProfileManager.profiles := Map("Test", profile)
         ProfileManager.currentProfile := "Test"
         KeybindGUI.isListening := true
-        KeybindGUI.listeningControl := {}
         KeybindGUI.activeInputHook := hook
         KeybindGUI.captureRuntimeProfile := ProfileManager.CloneProfile(profile)
         ExclusiveOperations.captureActive := true
@@ -983,7 +972,6 @@ class KeybindGUITest {
         HotkeyManager.activeHotkeys := Map()
         HotkeyManager.additionalActiveHotkeys := Map()
         KeybindGUI.isListening := false
-        KeybindGUI.listeningControl := ""
         KeybindGUI.activeInputHook := 0
         Assert.True(editor.CaptureFunctionDialogState(
             prompt,
@@ -1024,18 +1012,18 @@ class KeybindGUITest {
         hook := FakeCaptureHook("F13")
         prompt := FakeProfileDialog()
         KeybindGUI.isListening := true
-        KeybindGUI.listeningControl := FailingListView()
+        listView := FailingListView()
         KeybindGUI.activeInputHook := hook
         Assert.True(this.gui.CaptureFunctionDialogState(
             prompt,
             "Sign Report",
-            KeybindGUI.listeningControl,
+            listView,
             1
         ))
 
         threw := false
         caughtMessage := ""
-        try this.gui.OnInputEnd("Sign Report", KeybindGUI.listeningControl, prompt, hook)
+        try this.gui.OnInputEnd("Sign Report", listView, prompt, hook)
         catch Any as err {
             threw := true
             caughtMessage := ErrorText.Message(err)
@@ -1075,7 +1063,6 @@ class KeybindGUITest {
             1
         ))
         KeybindGUI.isListening := true
-        KeybindGUI.listeningControl := listView
         KeybindGUI.activeInputHook := hook
         profile.binds.Delete("Sign Report")
         profile.scopes.Delete("Sign Report")
@@ -1119,7 +1106,6 @@ class KeybindGUITest {
             ))
             Assert.True(HotkeyManager.RegisterHotkey("Sign Report", "^F13"))
             KeybindGUI.isListening := true
-            KeybindGUI.listeningControl := listView
             KeybindGUI.activeInputHook := hook
 
             this.gui.OnInputEnd("Sign Report", listView, prompt, hook)
@@ -2071,7 +2057,6 @@ class KeybindGUITest {
         ProfileManager.currentProfile := "Test"
         Assert.True(editor.CaptureFunctionDialogState(prompt, "Sign Report", listView, 1))
         KeybindGUI.isListening := true
-        KeybindGUI.listeningControl := listView
         KeybindGUI.activeInputHook := hook
 
         result := editor.OnInputEnd("Sign Report", listView, prompt, hook)
