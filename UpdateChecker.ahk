@@ -36,6 +36,11 @@ class UpdateChecker {
     static maxReleaseNotesCharacters := 20000
     static installProbeSequence := 0
     static moveFile := (source, destination) => FileMove(source, destination, false)
+    ; The installed copy: the update is staged beside it and replaces it in place.
+    static installDirectory := A_ScriptDir
+    static installedExecutable := A_ScriptFullPath
+    static compiledProbe := (*) => A_IsCompiled
+    static launchUpdater := (command, workingDirectory) => Run(command, workingDirectory, "Hide")
 
     static updateTimer := 0
     static activeRequest := 0
@@ -951,7 +956,7 @@ class UpdateChecker {
                 suffix := DllCall("GetCurrentProcessId") "-"
                     . DllCall("GetTickCount64", "UInt64") "-"
                     . this.installProbeSequence
-                probePath := A_ScriptDir "\.pacs-assistant-update-probe-" suffix ".tmp"
+                probePath := this.installDirectory "\.pacs-assistant-update-probe-" suffix ".tmp"
                 movedPath := probePath ".moved"
             } until !FileExist(probePath) && !FileExist(movedPath)
 
@@ -1078,7 +1083,7 @@ class UpdateChecker {
 
     static CleanupUpdateArtifacts() {
         for name in this.OwnedUpdateArtifactNames() {
-            path := A_ScriptDir "\" name
+            path := this.installDirectory "\" name
             try {
                 if FileExist(path)
                     FileDelete(path)
@@ -1142,12 +1147,12 @@ class UpdateChecker {
             ; Every operation after acquiring the shutdown lease belongs inside this
             ; recovery boundary. Even allocating a GUID-backed temporary path can
             ; fail, and must release the lease rather than blocking the app forever.
-            currentExe := A_ScriptFullPath
-            backupExe := A_ScriptDir "\pacs-assistant.backup.exe"
-            newExe := A_ScriptDir "\pacs-assistant.new.exe"
+            currentExe := this.installedExecutable
+            backupExe := this.installDirectory "\pacs-assistant.backup.exe"
+            newExe := this.installDirectory "\pacs-assistant.new.exe"
             updaterPath := this.CreateUpdaterPath()
             this.CancelUpdateArtifactCleanup()
-            if !A_IsCompiled
+            if !this.compiledProbe.Call()
                 throw Error("Automatic update is only available in the compiled application")
             if !this.IsTrustedDownloadUrl(updateInfo.downloadUrl)
                 throw Error("The release download URL is not trusted")
@@ -1172,7 +1177,10 @@ class UpdateChecker {
             }
 
             FileAppend(this.BuildUpdaterScript(), updaterPath, "UTF-8-RAW")
-            Run(this.UpdaterCommand(updaterPath, currentExe, newExe, backupExe), A_ScriptDir, "Hide")
+            this.launchUpdater.Call(
+                this.UpdaterCommand(updaterPath, currentExe, newExe, backupExe),
+                this.installDirectory
+            )
             updateGui.Destroy()
             if shutdownStarted
                 return this.shutdownCoordinator.CompleteShutdown()

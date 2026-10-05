@@ -1,7 +1,8 @@
 ; = CONTENTS
 ;   + Preamble
 ;   + UpdateCheckerTest class (version parsing, auto/manual checks, update dialog,
-;       install-path and updater-script handling; trust checks are in UpdateVerificationTest)
+;       install sequence, install-path and updater-script handling; trust checks are
+;       in UpdateVerificationTest)
 ;   + Test doubles (transports, shutdown coordinator, json/info helpers)
 
 #Requires AutoHotkey v2.0
@@ -41,6 +42,9 @@ class UpdateCheckerTest {
         "TestReadOnlyInstallDirectoryBlocksUpdateBeforeShutdown",
         "TestFolderThatCannotRenameFailsTheWriteProbe",
         "TestUpdaterPathFailureReleasesShutdownTransaction",
+        "TestVerifiedUpdateLaunchesTheUpdaterOnce",
+        "TestUpdateIsNotDownloadedWhenItCannotBeTrusted",
+        "TestRejectedDownloadIsDiscardedWithoutLaunchingTheUpdater",
         "TestVersionComesFromAppVersion",
         "TestReleaseParserShortensOversizedNotes",
         "TestUpdaterScriptRequiresHealthyRelaunch",
@@ -51,6 +55,13 @@ class UpdateCheckerTest {
         "TestUpdateDialogPreferencesCommitTogether",
         "TestStaleUpdateDialogCannotOverwriteNewerSettings",
         "TestSkippedVersionPersistsAcrossReload"
+    ]
+
+    ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
+    static helpers := [
+        "NewUpdaterScripts",
+        "UpdaterScriptNames",
+        "UseTestInstall"
     ]
 
     Setup() {
@@ -71,6 +82,11 @@ class UpdateCheckerTest {
         this.originalPendingUpdateInfo := UpdateChecker.pendingUpdateInfo
         this.originalNotifiedVersion := UpdateChecker.notifiedVersion
         this.originalUpdateDialog := UpdateChecker.updateDialog
+        this.originalInstallDirectory := UpdateChecker.installDirectory
+        this.originalInstalledExecutable := UpdateChecker.installedExecutable
+        this.originalCompiledProbe := UpdateChecker.compiledProbe
+        this.originalLaunchUpdater := UpdateChecker.launchUpdater
+        this.installRoot := ""
         UpdateChecker.shutdownCoordinator := 0
         UpdateChecker.updateCheckEligibleProbe := (*) => true
         this.updateNotifications := []
@@ -620,7 +636,7 @@ class UpdateCheckerTest {
     }
 
     TestClinicalCommandBlocksUpdateExit() {
-        transport := CountingDownloadTransport()
+        transport := RecordingDownloadTransport()
         UpdateChecker.transport := transport
         coordinator := FakeShutdownCoordinator(false)
         UpdateChecker.shutdownCoordinator := coordinator
@@ -628,7 +644,7 @@ class UpdateCheckerTest {
         result := UpdateChecker.PerformUpdate(ValidUpdateInfo(), {})
 
         Assert.False(result)
-        Assert.Equal(0, transport.downloadCalls)
+        Assert.Equal(0, transport.downloads.Length)
         Assert.Equal(1, coordinator.beginCalls)
         Assert.Equal(0, coordinator.completeCalls)
     }
@@ -656,7 +672,7 @@ class UpdateCheckerTest {
     }
 
     TestReadOnlyInstallDirectoryBlocksUpdateBeforeShutdown() {
-        transport := CountingDownloadTransport()
+        transport := RecordingDownloadTransport()
         ReadOnlyInstallUpdateChecker.transport := transport
         coordinator := FakeShutdownCoordinator(true)
         ReadOnlyInstallUpdateChecker.shutdownCoordinator := coordinator
@@ -671,7 +687,7 @@ class UpdateCheckerTest {
         Assert.Equal(0, coordinator.beginCalls)
         Assert.Equal(0, coordinator.cancelCalls)
         Assert.Equal(0, coordinator.completeCalls)
-        Assert.Equal(0, transport.downloadCalls)
+        Assert.Equal(0, transport.downloads.Length)
     }
 
     TestUpdaterPathFailureReleasesShutdownTransaction() {
@@ -695,6 +711,102 @@ class UpdateCheckerTest {
         Assert.Equal(1, coordinator.cancelCalls)
     }
 
+    ; A verified download is staged beside the app, the updater script is written,
+    ; and the updater is launched once, with this install's paths, before shutdown.
+    TestVerifiedUpdateLaunchesTheUpdaterOnce() {
+        launches := this.UseTestInstall()
+        updateInfo := InterpreterUpdateInfo()
+        transport := RecordingDownloadTransport(A_AhkPath)
+        UpdateChecker.transport := transport
+        coordinator := FakeShutdownCoordinator(true)
+        UpdateChecker.shutdownCoordinator := coordinator
+        updateGui := FakeUpdateGui()
+
+        result := UpdateChecker.PerformUpdate(updateInfo, updateGui)
+
+        newExe := this.installRoot "\pacs-assistant.new.exe"
+        scripts := this.NewUpdaterScripts()
+        Assert.True(result)
+        Assert.Equal(1, transport.downloads.Length)
+        Assert.Equal(updateInfo.downloadUrl, transport.downloads[1].url)
+        Assert.Equal(newExe, transport.downloads[1].destination)
+        Assert.True(FileExist(newExe), "the verified download must stay staged for the updater")
+        Assert.Equal(1, scripts.Length)
+        Assert.Equal(UpdateChecker.BuildUpdaterScript(), FileRead(scripts[1], "UTF-8"))
+        Assert.Equal(1, launches.Length)
+        Assert.Equal(this.installRoot, launches[1].workingDirectory)
+        Assert.Equal(UpdateChecker.UpdaterCommand(
+            scripts[1],
+            this.installRoot "\pacs-assistant.exe",
+            newExe,
+            this.installRoot "\pacs-assistant.backup.exe"
+        ), launches[1].command)
+        Assert.Equal(1, updateGui.destroyCalls)
+        Assert.Equal(1, coordinator.completeCalls)
+        Assert.Equal(0, coordinator.cancelCalls)
+        Assert.Equal(0, TestRunner.dialogs.Length)
+    }
+
+    ; An uncompiled build has no executable to replace, and a release asset outside
+    ; this repository's releases is never fetched.
+    TestUpdateIsNotDownloadedWhenItCannotBeTrusted() {
+        launches := this.UseTestInstall()
+        trusted := InterpreterUpdateInfo()
+        foreign := InterpreterUpdateInfo()
+        foreign.downloadUrl := StrReplace(foreign.downloadUrl, "/rakan959/", "/someone-else/")
+        cases := [
+            {label: "uncompiled build", compiled: false, updateInfo: trusted,
+                reason: "only available in the compiled application"},
+            {label: "foreign download URL", compiled: true, updateInfo: foreign,
+                reason: "download URL is not trusted"}
+        ]
+        for testCase in cases {
+            UpdateChecker.compiledProbe := testCase.compiled ? (*) => true : (*) => false
+            transport := RecordingDownloadTransport(A_AhkPath)
+            UpdateChecker.transport := transport
+            coordinator := FakeShutdownCoordinator(true)
+            UpdateChecker.shutdownCoordinator := coordinator
+
+            result := UpdateChecker.PerformUpdate(testCase.updateInfo, FakeUpdateGui())
+
+            Assert.False(result, testCase.label)
+            Assert.Equal(0, transport.downloads.Length, testCase.label)
+            Assert.Equal(1, coordinator.cancelCalls, testCase.label)
+            Assert.Equal(0, coordinator.completeCalls, testCase.label)
+            Assert.Equal("Update Failed", TestRunner.dialogs[-1].title, testCase.label)
+            Assert.True(InStr(TestRunner.dialogs[-1].text, testCase.reason), testCase.label)
+        }
+        Assert.Equal(0, launches.Length)
+        Assert.Equal(0, this.NewUpdaterScripts().Length)
+    }
+
+    ; A download that fails verification is deleted, and no updater script is written
+    ; or launched to install it.
+    TestRejectedDownloadIsDiscardedWithoutLaunchingTheUpdater() {
+        launches := this.UseTestInstall()
+        updateInfo := InterpreterUpdateInfo()
+        digest := updateInfo.downloadSha256
+        updateInfo.downloadSha256 := (SubStr(digest, 1, 1) = "0" ? "1" : "0") SubStr(digest, 2)
+        transport := RecordingDownloadTransport(A_AhkPath)
+        UpdateChecker.transport := transport
+        coordinator := FakeShutdownCoordinator(true)
+        UpdateChecker.shutdownCoordinator := coordinator
+        updateGui := FakeUpdateGui()
+
+        result := UpdateChecker.PerformUpdate(updateInfo, updateGui)
+
+        Assert.False(result)
+        Assert.Equal(1, transport.downloads.Length)
+        Assert.False(FileExist(this.installRoot "\pacs-assistant.new.exe"))
+        Assert.Equal(0, this.NewUpdaterScripts().Length)
+        Assert.Equal(0, launches.Length)
+        Assert.Equal(0, updateGui.destroyCalls)
+        Assert.Equal(1, coordinator.cancelCalls)
+        Assert.Equal(0, coordinator.completeCalls)
+        Assert.Equal(1, TestRunner.dialogs.Length)
+        Assert.True(InStr(TestRunner.dialogs[1].text, "SHA-256"))
+    }
+
     Teardown() {
         try UpdateChecker.CancelActiveCheck()
         UpdateChecker.StopAutoCheck()
@@ -711,10 +823,54 @@ class UpdateCheckerTest {
         UpdateChecker.pendingUpdateInfo := this.originalPendingUpdateInfo
         UpdateChecker.notifiedVersion := this.originalNotifiedVersion
         UpdateChecker.updateDialog := this.originalUpdateDialog
+        UpdateChecker.CancelUpdateArtifactCleanup()
+        UpdateChecker.installDirectory := this.originalInstallDirectory
+        UpdateChecker.installedExecutable := this.originalInstalledExecutable
+        UpdateChecker.compiledProbe := this.originalCompiledProbe
+        UpdateChecker.launchUpdater := this.originalLaunchUpdater
+        if (this.installRoot != "") {
+            for path in this.NewUpdaterScripts()
+                try FileDelete(path)
+            try DirDelete(this.installRoot, true)
+        }
         UpdateChecker.skippedVersion := ""
         UpdateChecker.lastRemindTime := 0
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalSettingsFile
+    }
+
+    ; Points the installer at a private folder standing in for the app folder, and
+    ; records the updater launch instead of running it.
+    ; @returns the launches, each {command, workingDirectory}
+    UseTestInstall() {
+        this.installRoot := TestTempPath("update-install")
+        DirCreate(this.installRoot)
+        this.updaterScriptsBefore := this.UpdaterScriptNames()
+        UpdateChecker.installDirectory := this.installRoot
+        UpdateChecker.installedExecutable := this.installRoot "\pacs-assistant.exe"
+        UpdateChecker.compiledProbe := (*) => true
+        launches := []
+        UpdateChecker.launchUpdater := (command, workingDirectory) => launches.Push(
+            {command: command, workingDirectory: workingDirectory}
+        )
+        return launches
+    }
+
+    ; Updater scripts written to the temp folder since UseTestInstall.
+    NewUpdaterScripts() {
+        paths := []
+        for name in this.UpdaterScriptNames() {
+            if !this.updaterScriptsBefore.Has(name)
+                paths.Push(A_Temp "\" name)
+        }
+        return paths
+    }
+
+    UpdaterScriptNames() {
+        names := Map()
+        loop files A_Temp "\pacs-assistant-updater-*.ps1"
+            names[A_LoopFileName] := true
+        return names
     }
 }
 
@@ -800,13 +956,27 @@ class ReadOnlyInstallUpdateChecker extends UpdateChecker {
     static InstallDirectoryIsWritable() => false
 }
 
-class CountingDownloadTransport {
-    __New() {
-        this.downloadCalls := 0
+; Records each download; given a source file, it "downloads" a copy of it.
+class RecordingDownloadTransport {
+    __New(sourcePath := "") {
+        this.sourcePath := sourcePath
+        this.downloads := []
     }
 
-    Download(*) {
-        this.downloadCalls++
+    Download(url, destination, expectedSize, maximumSize) {
+        this.downloads.Push({url: url, destination: destination, expectedSize: expectedSize})
+        if (this.sourcePath != "")
+            FileCopy(this.sourcePath, destination)
+    }
+}
+
+class FakeUpdateGui {
+    __New() {
+        this.destroyCalls := 0
+    }
+
+    Destroy() {
+        this.destroyCalls++
     }
 }
 
@@ -830,6 +1000,22 @@ ClickDialogButton(dialogGui, text) {
         }
     }
     throw Error("The dialog has no '" text "' button")
+}
+
+; An update whose release asset is the running interpreter: a real executable
+; with a known size, digest and version, so the downloaded copy passes validation.
+InterpreterUpdateInfo() {
+    version := "v" FileGetVersion(A_AhkPath)
+    return {
+        hasUpdate: true,
+        currentVersion: UpdateChecker.currentVersion,
+        latestVersion: version,
+        isPrerelease: false,
+        downloadUrl: "https://github.com/rakan959/pacs-assistant/releases/download/" version "/pacs-assistant.exe",
+        downloadSize: FileGetSize(A_AhkPath),
+        downloadSha256: UpdateChecker.HashFileSha256(A_AhkPath),
+        releaseNotes: "Release notes"
+    }
 }
 
 ValidUpdateInfo() {
