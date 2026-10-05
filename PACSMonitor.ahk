@@ -132,6 +132,10 @@ class PACSMonitor {
      * secondary lookup cannot make an incomplete result appear unique.
      */
     static ResolveRefreshButton(root) {
+        ; With nothing approved no button can match. Skipping the enumeration keeps a
+        ; full-tree UIA search from holding the clinical lease every refresh cycle.
+        if (this.approvedRefreshAutomationIds.Length = 0)
+            return {status: "absent", button: 0, error: ""}
         matches := []
         try {
             elements := root.FindElements({Type: "Button"})

@@ -13,6 +13,7 @@
 class PACSMonitorTest {
     static tests := [
         "TestHasAccession",
+        "TestNoApprovedRefreshIdSkipsTheButtonSearch",
         "TestProcessRowsFindsNewStudies",
         "TestProcessRowsPreservesLongModalityPrefix",
         "TestStudyNotificationDropsPatientNamePrefix",
@@ -226,6 +227,18 @@ class PACSMonitorTest {
         result := PACSMonitor.ResolveRefreshButton(root)
         Assert.Equal("ambiguous", result.status)
         Assert.Equal(0, result.button)
+    }
+
+    TestNoApprovedRefreshIdSkipsTheButtonSearch() {
+        PACSMonitor.approvedRefreshAutomationIds := []
+        candidate := FakePACSTargetElement(UIA.Type.Button, 42, "Refresh studies", "refreshPrimary", true)
+
+        ; A throwing root proves the search never ran.
+        result := PACSMonitor.ResolveRefreshButton(ThrowingPACSRefreshRoot(42, 100))
+
+        Assert.Equal("absent", result.status)
+        Assert.Equal(0, result.button)
+        Assert.False(PACSMonitor.InspectRefreshButton(FakePACSRefreshRoot(42, 100, [candidate]), candidate))
     }
 
     TestRefreshButtonEnumerationErrorFailsClosed() {
