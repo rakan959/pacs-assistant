@@ -224,7 +224,7 @@ if (-not (Test-Path -LiteralPath $releaseFinderPath -PathType Leaf)) {
 }
 
 if (-not (Test-Path -LiteralPath $ownedDraftValidatorPath -PathType Leaf)) {
-    $failures.Add('Interrupted drafts must be ownership-checked by scripts/ValidateOwnedDraftRelease.ps1.')
+    $failures.Add('Workflow drafts must be ownership-checked by scripts/ValidateOwnedDraftRelease.ps1.')
 } else {
     $ownedDraft = [pscustomobject]@{
         id = 22

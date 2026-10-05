@@ -20,30 +20,30 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'RequireProperty.ps1')
 
 foreach ($property in @('id', 'draft', 'prerelease', 'tag_name', 'name', 'author')) {
-    Require-Property -Object $Release -Name $property -Context 'Interrupted release'
+    Require-Property -Object $Release -Name $property -Context 'Draft release'
 }
 # ConvertFrom-Json yields Int64 for JSON integers; accept only integral IDs.
 if (-not ($Release.id -is [long] -or $Release.id -is [int]) -or $Release.id -le 0) {
-    throw "Interrupted release '$ReleaseTag' has an invalid database ID."
+    throw "Draft release '$ReleaseTag' has an invalid database ID."
 }
 if ($Release.draft -isnot [bool] -or -not $Release.draft) {
     throw "Release '$ReleaseTag' is not an unpublished draft."
 }
 if ($Release.prerelease -isnot [bool] -or $Release.prerelease -ne $ExpectedPrerelease) {
-    throw "Interrupted draft '$ReleaseTag' has the wrong prerelease classification."
+    throw "Draft release '$ReleaseTag' has the wrong prerelease classification."
 }
 if ([string] $Release.tag_name -cne $ReleaseTag) {
-    throw "Interrupted draft tag does not exactly match '$ReleaseTag'."
+    throw "Draft release tag does not exactly match '$ReleaseTag'."
 }
 if ([string] $Release.name -cne $ReleaseTag) {
-    throw "Interrupted draft '$ReleaseTag' does not use the tag as its exact title."
+    throw "Draft release '$ReleaseTag' does not use the tag as its exact title."
 }
 if ($null -eq $Release.author) {
-    throw "Interrupted draft '$ReleaseTag' has no author identity."
+    throw "Draft release '$ReleaseTag' has no author identity."
 }
-Require-Property -Object $Release.author -Name 'login' -Context 'Interrupted release author'
+Require-Property -Object $Release.author -Name 'login' -Context 'Draft release author'
 if ([string] $Release.author.login -cne $ExpectedAuthorLogin) {
-    throw "Interrupted draft '$ReleaseTag' has unexpected author '$($Release.author.login)'."
+    throw "Draft release '$ReleaseTag' has unexpected author '$($Release.author.login)'."
 }
 
-Write-Host "Interrupted draft '$ReleaseTag' is owned by the release workflow and may be reconciled."
+Write-Host "Draft release '$ReleaseTag' is owned by the release workflow."
