@@ -575,6 +575,10 @@ class UpdateCheckerTest {
         Assert.Equal(0, UpdateChecker.updateDialog)
         Assert.True(IsObject(UpdateChecker.pendingUpdateInfo))
         Assert.True(this.updateNotifications.Length >= 2)
+        Assert.Equal(
+            "Version v9.0.0 is available. Use Check for Updates once the active clinical command finishes.",
+            this.updateNotifications[-1].text
+        )
     }
 
     TestUpdateDialogRequiresPresentationLease() {

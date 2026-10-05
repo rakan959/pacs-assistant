@@ -597,9 +597,10 @@ class UpdateChecker {
                 return
             }
             this.pendingUpdateInfo := updateInfo
+            ; Nothing reopens the dialog later, so the notice says how to.
             if this.clinicalActivityProbe.Call() {
                 this.updateAvailableNotifier.Call(
-                    "The update is ready to review after the active clinical command finishes.",
+                    "Version " updateInfo.latestVersion " is available. Use Check for Updates once the active clinical command finishes.",
                     "PACS Assistant Update Available",
                     "Iconi"
                 )
