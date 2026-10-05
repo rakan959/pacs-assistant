@@ -487,7 +487,6 @@ class MicrophoneManagerTest {
 
         Assert.False(succeeded)
         Assert.Equal(0, item.selectCalls)
-        Assert.Equal(0, item.staleSelectCalls)
     }
 
     SelectionUsesOneExactItemWithoutDirectTextWrite() {
@@ -915,11 +914,10 @@ class InvalidatableMicrophoneItem {
         this.IsEnabled := true
         this.IsSelectionItemPatternAvailable := true
         this.selectCalls := 0
-        this.staleSelectCalls := 0
         this.updatesComboOnSelect := true
         this.combo := combo
         this.valid := true
-        this.SelectionItemPattern := InvalidatableMicrophoneSelectionPattern(this)
+        this.SelectionItemPattern := FakeMicrophoneSelectionPattern(this)
     }
 
     Type {
@@ -957,13 +955,5 @@ class FakeMicrophoneSelectionPattern {
         this.item.selectCalls++
         if this.item.updatesComboOnSelect
             this.item.combo._value := this.item.Name
-    }
-}
-
-class InvalidatableMicrophoneSelectionPattern extends FakeMicrophoneSelectionPattern {
-    Select() {
-        if !this.item.valid
-            this.item.staleSelectCalls++
-        super.Select()
     }
 }

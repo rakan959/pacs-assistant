@@ -43,9 +43,8 @@ class HotkeyManagerTest {
         HotkeyManager.hotkeyDriver := FakeHotkeyDriver()
 
         this.func1Calls := 0
-        this.func2Calls := 0
         this.func1 := (*) => (this.func1Calls++, 0)
-        this.func2 := (*) => (this.func2Calls++, 0)
+        this.func2 := (*) => 0
 
         HotkeyManager.hotkeyFunctions := Map(
             "ActionOne", this.func1,

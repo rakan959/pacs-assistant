@@ -478,7 +478,7 @@ class KeybindGUITest {
         profile.scopes["Sign Report"] := "Any"
         listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
         prompt := ThrowingShowProfileDialog("Test")
-        owner := FakeCaptureOwnerGui()
+        owner := FakeDisableableGui()
         editor := {
             base: ShowFailureRecoveryGUI.Prototype,
             gui: owner,
@@ -1085,7 +1085,7 @@ class KeybindGUITest {
         listView := RemovableListView("Sign Report", "Ctrl + F13", "Any window")
         prompt := FakeProfileDialog("Test")
         editor := {base: StaleBeforeSuspensionGUI.Prototype}
-        editor.gui := FakeCaptureOwnerGui()
+        editor.gui := FakeDisableableGui()
         editor.notifications := []
         editor.restoreCalls := 0
         editor.onAcquired := (*) => (profile.binds["Sign Report"] := "^F14")
@@ -2827,7 +2827,9 @@ class StaleBeforeSuspensionGUI extends KeybindGUI {
     }
 }
 
-class FakeCaptureOwnerGui {
+; A window that records whether it was disabled, as an owner or dialog is during
+; a change.
+class FakeDisableableGui {
     __New() {
         this.disabled := false
     }
@@ -3351,25 +3353,18 @@ SelectListBoxItem(listBox, index) {
     Sleep(20)
 }
 
-class FakeProfileDialog {
+class FakeProfileDialog extends FakeDisableableGui {
     __New(profileName := "Test", profileRevision?) {
+        super.__New()
         this.destroyed := false
         this.profileName := profileName
         this.profileRevision := IsSet(profileRevision)
             ? profileRevision
             : ProfileManager.GetProfileRevision(profileName)
-        this.disabled := false
     }
 
     Destroy() {
         this.destroyed := true
-    }
-
-    Opt(option) {
-        if (option = "+Disabled")
-            this.disabled := true
-        else if (option = "-Disabled")
-            this.disabled := false
     }
 }
 
