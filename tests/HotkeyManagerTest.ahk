@@ -36,6 +36,10 @@ class HotkeyManagerTest {
         HotkeyManager.activeHotkeys.Clear()
         this.originalHotkeyDriver := HotkeyManager.hotkeyDriver
         this.originalWindowDriver := AppControl.windowDriver
+        this.originalHotkeyFunctions := HotkeyManager.hotkeyFunctions
+        ; Unit tests model registration through a recording driver so the suite never
+        ; grabs real system-wide hotkeys; run-hotkey-tests.ahk covers native behavior.
+        HotkeyManager.hotkeyDriver := FakeHotkeyDriver()
 
         this.func1Calls := 0
         this.func2Calls := 0
@@ -395,6 +399,9 @@ class HotkeyManagerTest {
     }
 
     TestInvalidHotkeyReassignmentPreservesExistingRegistration() {
+        ; AutoHotkey itself is the key-name authority, so this test registers through
+        ; the native driver. Ctrl+F13 has no physical key on a standard keyboard.
+        HotkeyManager.hotkeyDriver := this.originalHotkeyDriver
         Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^F13"))
 
         Assert.False(HotkeyManager.RegisterHotkey("ActionOne", "DefinitelyNotARealKeyName"))
@@ -412,7 +419,7 @@ class HotkeyManagerTest {
         AppControl.windowDriver := this.originalWindowDriver
         HotkeyManager.DisableAllHotkeys()
         HotkeyManager.activeHotkeys.Clear()
-        HotkeyManager.hotkeyFunctions.Clear()
+        HotkeyManager.hotkeyFunctions := this.originalHotkeyFunctions
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalSettings
     }
