@@ -54,6 +54,7 @@ class ProfileManagerTest {
         "TestLoadRejectsReservedModalityMetadataKey",
         "TestFailedRenamePreservesOriginalProfile",
         "TestRenameRollbackFailurePublishesTheRetainedCopy",
+        "TestRenameCleanupFailurePublishesTheRetainedCopy",
         "TestMalformedProfileDoesNotBlockValidProfiles",
         "TestDefaultProfileMustExist",
         "TestDuplicateBindingsAreRejected",
@@ -768,6 +769,28 @@ class ProfileManagerTest {
                 throw Error("simulated attending write failure")
             originalWrite.Call(this, value, path, section, key)
         }
+    }
+
+    ; Neither the original nor the replacement file can be deleted, so both stay on
+    ; disk; the replacement is loaded too, rather than found only at a restart.
+    TestRenameCleanupFailurePublishesTheRetainedCopy() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        profile.scopes["Sign Report"] := "Any"
+        ProfileManager.profiles["Old"] := profile
+        ProfileManager.SaveProfile("Old", profile)
+        driver := FaultInjectingProfileStorageDriver()
+        driver.failDeleteFiles[ProfileManager.ProfilePath("Old")] := true
+        driver.failDeleteFiles[ProfileManager.ProfilePath("New")] := true
+        ProfileManager.storageDriver := driver
+
+        Assert.False(ProfileManager.RenameProfile("Old", "New"))
+
+        Assert.True(ProfileManager.profiles.Has("Old"))
+        Assert.True(ProfileManager.profiles.Has("New"))
+        Assert.True(FileExist(ProfileManager.ProfilePath("New")) != "")
+        Assert.True(ProfileManager.recoveryRequired)
+        Assert.True(InStr(ProfileManager.lastError, "removing the retained replacement also failed"), ProfileManager.lastError)
     }
 
     TestFailedRenamePreservesOriginalProfile() {
