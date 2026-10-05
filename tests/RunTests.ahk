@@ -24,6 +24,7 @@ UseIsolatedDataRoot("pacs-assistant-unit-tests")
 #Include SettingsTest.ahk
 #Include PACSMonitorTest.ahk
 #Include MicrophoneManagerTest.ahk
+#Include HotkeyContractTest.ahk
 #Include HotkeyManagerTest.ahk
 #Include ProfileManagerTest.ahk
 #Include PACSCommandsTest.ahk
@@ -43,6 +44,7 @@ TestRunner.AddTest(UpdateVerificationTest)
 TestRunner.AddTest(SettingsTest)
 TestRunner.AddTest(PACSMonitorTest)
 TestRunner.AddTest(MicrophoneManagerTest)
+TestRunner.AddTest(HotkeyContractTest)
 TestRunner.AddTest(HotkeyManagerTest)
 TestRunner.AddTest(ProfileManagerTest)
 TestRunner.AddTest(PACSCommandsTest)

@@ -185,18 +185,6 @@ class Settings {
         IniWrite(this.IsBooleanSetting(settingName) ? (value ? "1" : "0") : value, path, "Settings", settingName)
     }
 
-    static NewTemporarySettingsPath() {
-        stem := this.settingsFile ".tmp-" DllCall("GetCurrentProcessId") "-"
-            . DllCall("GetTickCount64", "UInt64")
-        path := stem
-        suffix := 0
-        while FileExist(path) {
-            suffix++
-            path := stem "-" suffix
-        }
-        return path
-    }
-
     /**
      * Applies a settings batch to a same-directory copy and replaces the live file
      * only after every write succeeds. Existing unknown keys and settings managed by
@@ -221,7 +209,7 @@ class Settings {
     }
 
     static CommitValues(values, replacer?) {
-        temporaryPath := this.NewTemporarySettingsPath()
+        temporaryPath := AppStorage.UniqueSiblingPath(this.settingsFile, "tmp")
         try {
             if FileExist(this.settingsFile)
                 FileCopy(this.settingsFile, temporaryPath, true)

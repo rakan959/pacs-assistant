@@ -230,10 +230,6 @@ class ReportModality {
     }
 }
 
-SendPs(x) {
-    return PowerScribe.SendKeys(x)
-}
-
 /**
  * Pure attending-routing policy. Profile lookup and PowerScribe mutation are passed
  * in by the workflow layer so classification and failure behavior remain testable

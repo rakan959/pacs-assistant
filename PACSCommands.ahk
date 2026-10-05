@@ -11,22 +11,40 @@ class PACSCommands {
     static unavailableNotifier := (text, title, options) => TrayTip(text, title, options)
     static commandAvailabilityProbe := (*) => true
 
-    static commands := Map(
-        "Toggle Dictation", (*) => PACSCommands.RunClinicalCommand("Toggle Dictation", (*) => SendPs("{F4}")),
-        "Select Next Field", (*) => PACSCommands.RunClinicalCommand("Select Next Field", (*) => PowerScribe.SendKeys("{Tab}")),
-        "Select Previous Field", (*) => PACSCommands.RunClinicalCommand("Select Previous Field", (*) => PowerScribe.SendKeys("+{Tab}")),
-        "Delete Previous Word", (*) => PACSCommands.RunClinicalCommand("Delete Previous Word", (*) => PowerScribe.SendKeys("^{Backspace}")),
-        "Delete Next Word", (*) => PACSCommands.RunClinicalCommand("Delete Next Word", (*) => PowerScribe.SendKeys("^{Delete}")),
-        "Draft Report", (*) => PACSCommands.RunClinicalCommand("Draft Report", (*) => SendPs("{F9}")),
-        "Sign Report", (*) => PACSCommands.RunClinicalCommand("Sign Report", (*) => SendPs("{F12}")),
-        "Open/Force Restart PACS", (*) => PACSCommands.RunClinicalCommand("Open/Force Restart PACS", (*) => RestartPACS()),
-        "Paste Wet Read", (*) => PACSCommands.RunClinicalCommand("Paste Wet Read", (*) => WetRead()),
-        "Toggle PowerScribe Window", (*) => PACSCommands.RunClinicalCommand("Toggle PowerScribe Window", (*) => AppControl.ToggleExactWindow(PACSCommands.PowerScribeToggleTarget())),
-        "Toggle EPIC Window", (*) => PACSCommands.RunClinicalCommand("Toggle EPIC Window", (*) => PACSCommands.ToggleEpicWindow()),
-        "Next Series", (*) => PACSCommands.RunClinicalCommand("Next Series", (*) => AppControl.SendKeysToExactWindow(AppControl.VuePacsClientWindowSpec(), "{Right}")),
-        "Previous Series", (*) => PACSCommands.RunClinicalCommand("Previous Series", (*) => AppControl.SendKeysToExactWindow(AppControl.VuePacsClientWindowSpec(), "{Left}")),
-        "Set PowerScribe Microphone", (*) => PACSCommands.RunClinicalCommand("Set PowerScribe Microphone", (*) => MicrophoneManager.ApplyNow())
-    )
+    ; Built-in commands by persisted name. Profiles store these names, so renaming
+    ; one orphans existing binds.
+    static commands := PACSCommands.ClinicalCommands([
+        ["Toggle Dictation", (*) => PowerScribe.SendKeys("{F4}")],
+        ["Select Next Field", (*) => PowerScribe.SendKeys("{Tab}")],
+        ["Select Previous Field", (*) => PowerScribe.SendKeys("+{Tab}")],
+        ["Delete Previous Word", (*) => PowerScribe.SendKeys("^{Backspace}")],
+        ["Delete Next Word", (*) => PowerScribe.SendKeys("^{Delete}")],
+        ["Draft Report", (*) => PowerScribe.SendKeys("{F9}")],
+        ["Sign Report", (*) => PowerScribe.SendKeys("{F12}")],
+        ["Open/Force Restart PACS", (*) => RestartPACS()],
+        ["Paste Wet Read", (*) => WetRead()],
+        ["Toggle PowerScribe Window", (*) => AppControl.ToggleExactWindow(PACSCommands.PowerScribeToggleTarget())],
+        ["Toggle EPIC Window", (*) => PACSCommands.ToggleEpicWindow()],
+        ["Next Series", (*) => AppControl.SendKeysToExactWindow(AppControl.VuePacsClientWindowSpec(), "{Right}")],
+        ["Previous Series", (*) => AppControl.SendKeysToExactWindow(AppControl.VuePacsClientWindowSpec(), "{Left}")],
+        ["Set PowerScribe Microphone", (*) => MicrophoneManager.ApplyNow()]
+    ])
+
+    ; Wraps each [name, action] pair so the action runs under the clinical lease in
+    ; that command's name.
+    static ClinicalCommands(definitions) {
+        commands := Map()
+        for definition in definitions
+            commands[definition[1]] := this.ClinicalCommand(definition[1], definition[2])
+        return commands
+    }
+
+    ; A separate function, not a closure built in the loop above: a closure captures
+    ; the variable itself, and a for loop restores its variables when it ends, so a
+    ; closure made in the loop would find them unset when the hotkey fires.
+    static ClinicalCommand(name, action) {
+        return (*) => PACSCommands.RunClinicalCommand(name, action)
+    }
 
     static PowerScribeToggleTarget() {
         return AppControl.PowerScribeWindowSpec()
@@ -113,7 +131,7 @@ class PACSCommands {
             (*) => Send(keys)
         commandCallback := (*) => PACSCommands.RunClinicalCommand("Custom keybind", action)
 
-        ; Store the configuration
+        ; Exposed so the configuration can be checked without sending keys.
         commandCallback.keys := keys
         commandCallback.window := targetWindow
         return commandCallback

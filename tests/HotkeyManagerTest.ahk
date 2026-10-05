@@ -20,10 +20,6 @@ class HotkeyManagerTest {
         "TestDisableAllHotkeys",
         "TestRegistersWithScope",
         "TestUnknownScopeIsRejectedWithoutReplacingRegistration",
-        "TestNonCanonicalScopeCasingIsRejected",
-        "TestScopeFlagsRoundTrip",
-        "TestScopeFromFlagsMatrix",
-        "TestHotkeyIdentityMatchesAutoHotkeySemantics",
         "TestScopePredicatesAreStable",
         "TestPowerScribeScopeRequiresExactReportingWindow",
         "TestPowerScribeScopeRejectsWrongTitleAndDuplicateWindows",
@@ -34,7 +30,7 @@ class HotkeyManagerTest {
         "TestEquivalentCustomCombinationPrefixesAreRejected",
         "TestMissingCallbackReassignmentPreservesExistingRegistration",
         "TestInvalidHotkeyReassignmentPreservesExistingRegistration",
-        "TestHotkeyIdentityEdgeCases"
+        "TestNonCanonicalScopeIsNotRegistered"
     ]
 
     Setup() {
@@ -116,76 +112,17 @@ class HotkeyManagerTest {
         Assert.Equal("PACS", HotkeyManager.activeHotkeys["ActionOne"].scope)
     }
 
-    TestScopeFlagsRoundTrip() {
-        for scope in HotkeyManager.scopes {
-            flags := HotkeyManager.FlagsFromScope(scope)
-            Assert.Equal(scope, HotkeyManager.ScopeFromFlags(flags.requirePACS, flags.requirePowerScribe))
-        }
-    }
-
-    TestScopeFromFlagsMatrix() {
-        Assert.Equal("Any", HotkeyManager.ScopeFromFlags(false, false))
-        Assert.Equal("PACS", HotkeyManager.ScopeFromFlags(true, false))
-        Assert.Equal("PowerScribe", HotkeyManager.ScopeFromFlags(false, true))
-        Assert.Equal("PACS or PowerScribe", HotkeyManager.ScopeFromFlags(true, true))
-
-        Assert.Throws(() => HotkeyManager.NormalizeScope(""), "Unknown hotkey scope")
-        Assert.Equal("PACS", HotkeyManager.NormalizeScope("PACS"))
-    }
-
-    TestNonCanonicalScopeCasingIsRejected() {
-        Assert.False(HotkeyContract.IsValidScope("pacs"))
-        Assert.False(HotkeyContract.IsValidScope("Powerscribe"))
-        Assert.Throws(() => HotkeyManager.NormalizeScope("pacs"), "Unknown hotkey scope")
+    ; HotkeyContractTest covers the scope names themselves.
+    TestNonCanonicalScopeIsNotRegistered() {
         Assert.False(HotkeyManager.RegisterHotkey("ActionOne", "^F22", "pacs"))
         Assert.False(HotkeyManager.activeHotkeys.Has("ActionOne"))
-    }
-
-    TestHotkeyIdentityMatchesAutoHotkeySemantics() {
-        Assert.Equal("^!a", HotkeyManager.HotkeyIdentity("!^A"))
-        Assert.Equal("^escape", HotkeyManager.HotkeyIdentity("^Esc"))
-        Assert.Equal("^a", HotkeyManager.HotkeyIdentity("~$^A"))
-        Assert.NotEqual(
-            HotkeyManager.HotkeyIdentity("^a"),
-            HotkeyManager.HotkeyIdentity("*^a")
-        )
-        Assert.NotEqual(
-            HotkeyManager.HotkeyIdentity("^a"),
-            HotkeyManager.HotkeyIdentity("^a Up")
-        )
-        Assert.Equal(
-            HotkeyManager.HotkeyIdentity("a & b"),
-            HotkeyManager.HotkeyIdentity("~a & b")
-        )
-        Assert.Equal(
-            HotkeyManager.HotkeyIdentity("a & b"),
-            HotkeyManager.HotkeyIdentity("$a & b")
-        )
-        Assert.Equal(
-            HotkeyManager.HotkeyIdentity("Esc & F24"),
-            HotkeyManager.HotkeyIdentity("Escape & f24")
-        )
     }
 
     ; AutoHotkey identifies a hotkey variant by the exact function object handed to
     ; HotIf, so a fresh closure per registration would leak an unreachable variant
     ; every time a bind is re-applied
-    TestHotkeyIdentityEdgeCases() {
-        ; Left/right modifiers are distinct hotkeys in AutoHotkey; the generic form
-        ; is a third variant. Modifier order still does not matter.
-        Assert.NotEqual(HotkeyManager.HotkeyIdentity("<^a"), HotkeyManager.HotkeyIdentity("^a"))
-        Assert.NotEqual(HotkeyManager.HotkeyIdentity("<^a"), HotkeyManager.HotkeyIdentity(">^a"))
-        Assert.Equal(HotkeyManager.HotkeyIdentity(">!<^x"), HotkeyManager.HotkeyIdentity("<^>!X"))
-        Assert.Equal("", HotkeyManager.HotkeyIdentity("   "))
-        ; Three-key combinations are not valid AutoHotkey syntax; they keep a
-        ; normalized literal identity so two spellings still collide.
-        Assert.Equal(HotkeyManager.HotkeyIdentity("a & b & c"), HotkeyManager.HotkeyIdentity("A  &  B  &  C"))
-        Assert.Equal("*a & b", HotkeyManager.HotkeyIdentity("*a & b"))
-        Assert.Throws(ObjBindMethod(HotkeyContract, "BindingIdentity", 42), "Hotkey must be a string")
-    }
-
     TestScopePredicatesAreStable() {
-        for scope in HotkeyManager.scopes {
+        for scope in HotkeyContract.scopes {
             if (scope == "Any") {
                 Assert.False(HotkeyManager.scopePredicates.Has(scope), "'Any' must register globally, with no predicate")
                 continue

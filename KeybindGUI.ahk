@@ -804,10 +804,10 @@ class KeybindGUI {
     ; profile validation. InputHook reports letters with canonical casing, while an
     ; older profile may contain the same bind in lower case.
     FindProfileBindingOwner(profile, hotkeyStr, exceptFuncName := "") {
-        identity := HotkeyManager.HotkeyIdentity(hotkeyStr)
+        identity := HotkeyContract.BindingIdentity(hotkeyStr)
         for funcName, bind in profile.binds {
             if (funcName != exceptFuncName
-                && HotkeyManager.HotkeyIdentity(bind) = identity)
+                && HotkeyContract.BindingIdentity(bind) = identity)
                 return funcName
         }
         return ""
@@ -1262,14 +1262,7 @@ class KeybindGUI {
 
     ApplyProfileBinds(currentProfile, showErrors := true) {
         HotkeyManager.DisableAllHotkeys()
-        if (!currentProfile.HasProp("scopes"))
-            currentProfile.scopes := Map()
         failed := []
-
-        ; Ensure built-in hotkey functions are loaded
-        if (HotkeyManager.hotkeyFunctions.Count = 0) {
-            HotkeyManager.hotkeyFunctions := PACSCommands.commands
-        }
 
         for funcName, bind in currentProfile.binds {
             scope := currentProfile.scopes.Has(funcName) ? currentProfile.scopes[funcName] : "Any"
@@ -2331,7 +2324,7 @@ class KeybindGUI {
 
         rowIndex := listView.GetNext(0)
         funcName := listView.GetText(rowIndex, 1)
-        flags := HotkeyManager.FlagsFromScope(ProfileManager.GetScope(funcName))
+        flags := HotkeyContract.FlagsFromScope(ProfileManager.GetScope(funcName))
 
         scopeGui := this.NewProfileDialog("PACS Assistant - Keybind Scope")
         scopeGui.Add("Text",, "Only activate '" funcName "' when one of these is the active window:")
@@ -2372,7 +2365,7 @@ class KeybindGUI {
             if !this.FunctionDialogIsCurrent(scopeGui, funcName, listView)
                 return false
             oldScope := ProfileManager.GetScope(funcName)
-            newScope := HotkeyManager.ScopeFromFlags(requirePACS, requirePowerScribe)
+            newScope := HotkeyContract.ScopeFromFlags(requirePACS, requirePowerScribe)
             currentProfile := ProfileManager.profiles[scopeGui.profileName]
             changed := false
 

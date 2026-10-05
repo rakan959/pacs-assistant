@@ -25,7 +25,6 @@ class ProfileManager {
     static configPath := AppStorage.DataRoot() "\config.ini"
     static profilesPath := AppStorage.DataRoot() "\profiles"
     static loadErrors := []
-    static saveSequence := 0
     static profileRevisions := Map()
     static storageDriver := NativeProfileStorageDriver()
     static lastError := ""
@@ -243,8 +242,7 @@ class ProfileManager {
             DirCreate(this.profilesPath)
 
         path := this.ProfilePath(name)
-        this.saveSequence++
-        temporaryPath := path ".tmp-" DllCall("GetCurrentProcessId") "-" this.saveSequence
+        temporaryPath := AppStorage.UniqueSiblingPath(path, "tmp")
 
         try {
             this.WriteProfile(temporaryPath, profile)
@@ -741,10 +739,8 @@ class ProfileManager {
     }
 
     static MoveProfileThroughTemporaryPath(sourcePath, destinationPath) {
-        loop {
-            this.saveSequence++
-            temporaryPath := sourcePath ".case-rename-" DllCall("GetCurrentProcessId") "-" this.saveSequence
-        } until !FileExist(temporaryPath)
+        ; RecoverInterruptedCaseRenames finds this name after an interruption.
+        temporaryPath := AppStorage.UniqueSiblingPath(sourcePath, "case-rename")
 
         this.storageDriver.MoveFile(sourcePath, temporaryPath, false)
         try {

@@ -8,7 +8,8 @@ class AppStorageTest {
         "TestCompletedMigrationDoesNotResurrectDeletedProfile",
         "TestPartialMigrationRetriesBeforeWritingMarker",
         "TestFailedCopyCannotPublishAPartialDestination",
-        "TestPortableRootSkipsMigration"
+        "TestPortableRootSkipsMigration",
+        "TestUniqueSiblingPathSkipsExistingFiles"
     ]
 
     Setup() {
@@ -106,6 +107,20 @@ class AppStorageTest {
         AppStorage.legacyRootOverride := this.originalLegacyRoot
         AppStorage.copyFile := this.originalCopyFile
         try DirDelete(this.tempRoot, true)
+    }
+
+    ; The staging-name format is a recovery contract: ProfileManager finds an
+    ; interrupted case-only rename by "<name>.ini.case-rename-<pid>-<n>".
+    TestUniqueSiblingPathSkipsExistingFiles() {
+        DirCreate(this.tempRoot)
+        target := this.tempRoot "\Night.ini"
+        first := AppStorage.UniqueSiblingPath(target, "case-rename")
+        Assert.True(first ~= "^\Q" target "\E\.case-rename-" DllCall("GetCurrentProcessId") "-\d+$", first)
+
+        FileAppend("taken", first)
+        second := AppStorage.UniqueSiblingPath(target, "case-rename")
+        Assert.NotEqual(first, second)
+        Assert.False(FileExist(second))
     }
 }
 

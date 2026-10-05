@@ -65,67 +65,24 @@ class HotkeyContract {
         ; not create a separate custom-combination identity, and $ has no effect
         ; on a custom combination at all. Normalize those behavior prefixes before
         ; the early custom-combination return while preserving wildcard identity.
-        wildcardPrefix := false
-        prefixPosition := 1
-        while (prefixPosition <= StrLen(hotkeyStr)) {
-            prefixChar := SubStr(hotkeyStr, prefixPosition, 1)
-            if (prefixChar = "~" || prefixChar = "$") {
-                prefixPosition++
-                continue
-            }
-            if (prefixChar = "*") {
-                wildcardPrefix := true
-                prefixPosition++
-                continue
-            }
-            break
-        }
-        hotkeyBody := Trim(SubStr(hotkeyStr, prefixPosition))
+        behavior := this.ParsePrefix(hotkeyStr, false)
+        hotkeyBody := Trim(behavior.rest)
         if InStr(hotkeyBody, "&") {
             parts := StrSplit(hotkeyBody, "&")
             if (parts.Length != 2)
-                return (wildcardPrefix ? "*" : "")
+                return (behavior.wildcard ? "*" : "")
                     . StrLower(RegExReplace(hotkeyBody, "\s+", " "))
-            return (wildcardPrefix ? "*" : "")
+            return (behavior.wildcard ? "*" : "")
                 . this.NormalizeCombinationKey(parts[1])
                 . " & "
                 . this.NormalizeCombinationKey(parts[2])
         }
-        hotkeyStr := (wildcardPrefix ? "*" : "") hotkeyBody
 
-        modifiers := Map()
-        wildcard := false
-        position := 1
-        while (position <= StrLen(hotkeyStr)) {
-            char := SubStr(hotkeyStr, position, 1)
-            if (char = "~" || char = "$") {
-                position++
-                continue
-            }
-            if (char = "*") {
-                wildcard := true
-                position++
-                continue
-            }
-            if (char = "<" || char = ">") {
-                next := SubStr(hotkeyStr, position + 1, 1)
-                if (next != "" && InStr("^!+#", next)) {
-                    modifiers[char next] := true
-                    position += 2
-                    continue
-                }
-            }
-            if InStr("^!+#", char) {
-                modifiers[char] := true
-                position++
-                continue
-            }
-            break
-        }
-
-        key := Trim(SubStr(hotkeyStr, position))
+        prefix := this.ParsePrefix(hotkeyBody, true)
+        wildcard := behavior.wildcard || prefix.wildcard
+        key := Trim(prefix.rest)
         if (key = "")
-            return StrLower(hotkeyStr)
+            return StrLower((behavior.wildcard ? "*" : "") hotkeyBody)
 
         keyUp := false
         if RegExMatch(key, "i)^(.+?)\s+up$", &upMatch) {
@@ -141,7 +98,7 @@ class HotkeyContract {
 
         identity := wildcard ? "*" : ""
         for token in ["<^", ">^", "^", "<!", ">!", "!", "<+", ">+", "+", "<#", ">#", "#"] {
-            if modifiers.Has(token)
+            if prefix.modifiers.Has(token)
                 identity .= token
         }
         identity .= StrLower(key)
@@ -151,28 +108,34 @@ class HotkeyContract {
     }
 
     static NormalizeCombinationKey(key) {
-        key := Trim(key)
-        wildcard := false
-        position := 1
-        while (position <= StrLen(key)) {
-            char := SubStr(key, position, 1)
-            if (char = "~" || char = "$") {
-                position++
-                continue
-            }
-            if (char = "*") {
-                wildcard := true
-                position++
-                continue
-            }
-            break
-        }
-        key := Trim(SubStr(key, position))
+        prefix := this.ParsePrefix(Trim(key), false)
+        key := Trim(prefix.rest)
         try {
             normalizedKey := GetKeyName(key)
             if (normalizedKey != "")
                 key := normalizedKey
         }
-        return (wildcard ? "*" : "") StrLower(key)
+        return (prefix.wildcard ? "*" : "") StrLower(key)
+    }
+
+    /**
+     * Consumes the prefix symbols at the start of a hotkey: ~ and $ (behavior only),
+     * * (wildcard) and, when modifiers are allowed, ^ ! + # with an optional < or >
+     * side. AutoHotkey accepts these in any order.
+     * @returns {wildcard: true if * appeared, modifiers: Map of modifier tokens,
+     *   rest: the text after the last prefix symbol}
+     */
+    static ParsePrefix(text, allowModifiers) {
+        pattern := allowModifiers ? "^(?:[~$*]|[<>]?[\^!+#])" : "^[~$*]"
+        wildcard := false
+        modifiers := Map()
+        while RegExMatch(text, pattern, &token) {
+            if (token[0] = "*")
+                wildcard := true
+            else if (token[0] != "~" && token[0] != "$")
+                modifiers[token[0]] := true
+            text := SubStr(text, token.Len + 1)
+        }
+        return {wildcard: wildcard, modifiers: modifiers, rest: text}
     }
 }

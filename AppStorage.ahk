@@ -10,7 +10,7 @@ class AppStorage {
     static legacyRootOverride := ""
     static migrationMarkerName := ".migration-v1-complete"
     static copyFile := (source, destination) => FileCopy(source, destination, false)
-    static copySequence := 0
+    static siblingSequence := 0
 
     static DataRoot() {
         if (this.dataRootOverride != "")
@@ -53,13 +53,7 @@ class AppStorage {
     static CopyIfMissing(source, destination) {
         if !FileExist(source) || FileExist(destination)
             return false
-        this.copySequence++
-        temporary := destination ".migration-copy-"
-            . DllCall("GetCurrentProcessId") "-"
-            . DllCall("GetTickCount64", "UInt64") "-"
-            . this.copySequence
-        if FileExist(temporary)
-            throw Error("Migration temporary path already exists")
+        temporary := this.UniqueSiblingPath(destination, "migration-copy")
 
         try {
             this.copyFile.Call(source, temporary)
@@ -77,8 +71,7 @@ class AppStorage {
     }
 
     static WriteMigrationMarker(marker) {
-        temporary := marker ".tmp-" DllCall("GetCurrentProcessId") "-"
-            . DllCall("GetTickCount64", "UInt64")
+        temporary := this.UniqueSiblingPath(marker, "tmp")
         try {
             FileAppend("migration-v1`n", temporary, "UTF-8")
             FileMove(temporary, marker, true)
@@ -86,5 +79,19 @@ class AppStorage {
             if FileExist(temporary)
                 try FileDelete(temporary)
         }
+    }
+
+    /**
+     * A path beside `path` that does not exist yet, "<path>.<tag>-<pid>-<n>" with
+     * the first unused n. Writers stage a file there and move it over `path`; the
+     * same directory keeps that move a rename on one volume.
+     */
+    static UniqueSiblingPath(path, tag) {
+        processId := DllCall("GetCurrentProcessId")
+        loop {
+            this.siblingSequence++
+            candidate := path "." tag "-" processId "-" this.siblingSequence
+        } until !FileExist(candidate)
+        return candidate
     }
 }

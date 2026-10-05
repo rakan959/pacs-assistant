@@ -25,10 +25,6 @@ class HotkeyManager {
     ; message instead of a dialog per bind.
     static lastError := ""
 
-    ; Scope names in the order they are presented, and the only values persisted to a
-    ; profile. "Any" means the bind fires regardless of which window has focus.
-    static scopes := HotkeyContract.scopes
-
     ; One persistent predicate per scope. AutoHotkey identifies a hotkey *variant* by
     ; the exact function object handed to HotIf, so these are created once and reused:
     ; building a fresh closure per registration would create a new variant every time
@@ -42,17 +38,6 @@ class HotkeyManager {
     static __New() {
         ; Initialize hotkey functions from PACSCommands
         this.hotkeyFunctions := PACSCommands.commands
-    }
-
-    ; Validate a scope at the runtime boundary. Registration must never broaden an
-    ; unknown value to the global context.
-    static NormalizeScope(scope) {
-        return HotkeyContract.RequireScope(scope)
-    }
-
-    ; Build a scope name from the two "only when ... is active" checkboxes
-    static ScopeFromFlags(requirePACS, requirePowerScribe) {
-        return HotkeyContract.ScopeFromFlags(requirePACS, requirePowerScribe)
     }
 
     static PACSIsActive(exactWindowProbe := 0) {
@@ -72,14 +57,9 @@ class HotkeyManager {
             : AppControl.IsUniqueExactWindowActive(specs)
     }
 
-    ; Inverse of ScopeFromFlags
-    static FlagsFromScope(scope) {
-        return HotkeyContract.FlagsFromScope(scope)
-    }
-
     ; Enter the HotIf context a scope registers under. Always paired with ExitScope().
     static EnterScope(scope) {
-        scope := this.NormalizeScope(scope)
+        scope := HotkeyContract.RequireScope(scope)
         if this.scopePredicates.Has(scope)
             HotIf(this.scopePredicates[scope])
         else if (scope == "Any")
@@ -93,7 +73,7 @@ class HotkeyManager {
     }
 
     static CallbackForScope(callback, scope) {
-        scope := this.NormalizeScope(scope)
+        scope := HotkeyContract.RequireScope(scope)
         if (scope == "Any")
             return callback
         return (args*) => HotkeyManager.InvokeCallbackForScope(
@@ -160,7 +140,7 @@ class HotkeyManager {
             ? this.activeHotkeys[funcName]
             : 0
         sameVariant := previous
-            && this.HotkeyIdentity(previous.hotkey) = this.HotkeyIdentity(hotkeyStr)
+            && HotkeyContract.BindingIdentity(previous.hotkey) = HotkeyContract.BindingIdentity(hotkeyStr)
             && previous.scope = scope
 
         ; AutoHotkey itself is the final authority on key-name validity. Activate a
@@ -210,19 +190,15 @@ class HotkeyManager {
         return true
     }
 
-    static HotkeyIdentity(hotkeyStr) {
-        return HotkeyContract.BindingIdentity(hotkeyStr)
-    }
-
     static FindBindingOwner(hotkeyStr, exceptFuncName := "") {
-        identity := this.HotkeyIdentity(hotkeyStr)
+        identity := HotkeyContract.BindingIdentity(hotkeyStr)
         for funcName, entry in this.activeHotkeys {
-            if (funcName != exceptFuncName && this.HotkeyIdentity(entry.hotkey) = identity)
+            if (funcName != exceptFuncName && HotkeyContract.BindingIdentity(entry.hotkey) = identity)
                 return funcName
         }
         for _, entry in this.additionalActiveHotkeys {
             if (!(entry.funcName == exceptFuncName)
-                && this.HotkeyIdentity(entry.hotkey) = identity)
+                && HotkeyContract.BindingIdentity(entry.hotkey) = identity)
                 return entry.funcName
         }
         return ""
@@ -230,7 +206,7 @@ class HotkeyManager {
 
     static TrackAdditionalActiveHotkey(funcName, hotkeyStr, scope) {
         entry := {funcName: funcName, hotkey: hotkeyStr, scope: scope}
-        key := funcName Chr(31) scope Chr(31) this.HotkeyIdentity(hotkeyStr)
+        key := funcName Chr(31) scope Chr(31) HotkeyContract.BindingIdentity(hotkeyStr)
         this.additionalActiveHotkeys[key] := entry
     }
 

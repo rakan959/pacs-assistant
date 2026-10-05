@@ -6,6 +6,7 @@
 class PACSCommandsTest {
     static tests := [
         "TestBuiltInCommandsExist",
+        "TestEachBuiltInCommandRunsUnderItsOwnName",
         "TestCreateCustomKeybindStoresConfig",
         "TestModalityClassification",
         "TestModalityNamesCoverEveryRule",
@@ -38,6 +39,29 @@ class PACSCommandsTest {
         }
         ; Profiles persist these names, so an unlisted addition must be deliberate.
         Assert.Equal(required.Length, PACSCommands.commands.Count)
+    }
+
+    ; Driven while another command holds the lease: the refusal names the command
+    ; that was not started, without running any action.
+    TestEachBuiltInCommandRunsUnderItsOwnName() {
+        originalActive := PACSCommands.clinicalCommandActive
+        originalActiveName := PACSCommands.activeClinicalCommand
+        originalNotifier := PACSCommands.busyNotifier
+        notices := []
+        PACSCommands.busyNotifier := (text, *) => notices.Push(text)
+        PACSCommands.clinicalCommandActive := true
+        PACSCommands.activeClinicalCommand := "Other Command"
+        try {
+            for name, command in PACSCommands.commands {
+                Assert.False(command.Call())
+                Assert.Equal("'Other Command' is still running. '" name "' was not started.", notices[notices.Length])
+            }
+        } finally {
+            PACSCommands.clinicalCommandActive := originalActive
+            PACSCommands.activeClinicalCommand := originalActiveName
+            PACSCommands.busyNotifier := originalNotifier
+        }
+        Assert.Equal(PACSCommands.commands.Count, notices.Length)
     }
 
     TestCreateCustomKeybindStoresConfig() {
