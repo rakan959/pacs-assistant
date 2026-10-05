@@ -456,7 +456,6 @@ class ClinicalAutomationTest {
         Assert.True(result.found)
         Assert.False(result.stopped)
         Assert.True(InStr(result.error, "close failed") > 0)
-        Assert.Equal(0, driver.killCalls)
     }
 
     WindowCloseCarriesAndRevalidatesCapturedSession() {
@@ -506,8 +505,6 @@ class ClinicalAutomationTest {
         Assert.True(InStr(result.error, "multiple") > 0)
         Assert.Equal(0, driver.processLookupCalls)
         Assert.Equal(0, driver.closeCalls)
-        Assert.Equal(0, driver.killCalls)
-        Assert.Equal(0, driver.stopProcessCalls)
         Assert.Equal(3, driver.windows.Length)
     }
 
@@ -572,16 +569,15 @@ class ClinicalAutomationTest {
     }
 
     RestartRejectsBareProcessTermination() {
-        driver := SameTitleWindowLifecycleDriver()
+        driver := UntouchedLifecycleDriver()
         AppControl.lifecycleDriver := driver
+        AppControl.windowDriver := driver
 
         result := AppControl.StopTarget("mp.exe", "process")
 
         Assert.False(result.found)
         Assert.False(result.stopped)
-        Assert.Equal(0, driver.windowLookupCalls)
-        Assert.Equal(0, driver.killCalls)
-        Assert.Equal(0, driver.stopProcessCalls)
+        Assert.Equal(0, driver.calls.Length)
         Assert.True(InStr(result.error, "not supported") > 0)
     }
 
@@ -1448,17 +1444,11 @@ class FakeAppLifecycleDriver {
     __New(mode) {
         this.mode := mode
         this.launches := []
-        this.killCalls := 0
-        this.processAvailable := true
         this.shortcutTarget := ""
     }
 
     FindProcess(target) {
-        if (this.mode = "lookup-error")
-            throw Error("lookup failed")
-        if (this.mode = "close-error")
-            return 0
-        return this.processAvailable ? 4242 : 0
+        return this.mode = "close-error" ? 0 : 4242
     }
 
     ListWindowsByExecutable(*) {
@@ -1477,10 +1467,6 @@ class FakeAppLifecycleDriver {
         return 4242
     }
 
-    GetWindowProcessId(hwnd) {
-        return 0
-    }
-
     CloseWindow(*) {
         if (this.mode = "close-error")
             throw Error("close failed")
@@ -1488,27 +1474,7 @@ class FakeAppLifecycleDriver {
     }
 
     ProcessExists(pid) {
-        return this.mode = "stubborn" && this.processAvailable
-    }
-
-    WindowExists(hwnd) {
         return false
-    }
-
-    StopProcess(pid) {
-        if (this.mode = "already-exited") {
-            this.processAvailable := false
-            throw Error("process disappeared before termination")
-        }
-        if (this.mode = "stubborn")
-            return false
-        this.processAvailable := false
-        return true
-    }
-
-    KillWindow(hwnd) {
-        this.killCalls++
-        return true
     }
 
     Launch(path) {
@@ -1529,8 +1495,6 @@ class SharedHostWindowLifecycleDriver {
         this.windows := [31337, 41414, 51515]
         this.processLookupCalls := 0
         this.closeCalls := 0
-        this.killCalls := 0
-        this.stopProcessCalls := 0
     }
 
     FindProcess(*) {
@@ -1554,10 +1518,6 @@ class SharedHostWindowLifecycleDriver {
         return 4242
     }
 
-    GetWindowProcessId(*) {
-        return 4242
-    }
-
     ProcessExists(*) {
         return true
     }
@@ -1572,16 +1532,6 @@ class SharedHostWindowLifecycleDriver {
                 break
             }
         }
-        return true
-    }
-
-    KillWindow(*) {
-        this.killCalls++
-        return false
-    }
-
-    StopProcess(*) {
-        this.stopProcessCalls++
         return true
     }
 }
@@ -1625,38 +1575,16 @@ class RetitledWindowDriver {
     }
 }
 
-class SameTitleWindowLifecycleDriver {
+; Records any call at all; a test that expects no lifecycle or window action
+; asserts that calls stays empty.
+class UntouchedLifecycleDriver {
     __New() {
-        this.windowLookupCalls := 0
-        this.killCalls := 0
-        this.stopProcessCalls := 0
+        this.calls := []
     }
 
-    FindProcess(*) {
+    __Call(name, params) {
+        this.calls.Push(name)
         return 0
-    }
-
-    FindWindow(*) {
-        this.windowLookupCalls++
-        return 31337
-    }
-
-    GetWindowProcessId(*) {
-        return 4242
-    }
-
-    KillWindow(*) {
-        this.killCalls++
-        return true
-    }
-
-    ProcessExists(*) {
-        return false
-    }
-
-    StopProcess(*) {
-        this.stopProcessCalls++
-        return true
     }
 }
 
