@@ -16,9 +16,14 @@ FileEncoding "UTF-8"
 ; Run with:
 ;   "C:\Program Files\AutoHotkey\v2\AutoHotkey.exe" tests\run-hotkey-tests.ahk
 
-#Include ../HotkeyManager.ahk
 #Include HarnessErrors.ahk
 OnError(OnError_StdErr)
+
+; Before execution reaches the class definitions included below (IsolatedStorage.ahk).
+#Include IsolatedStorage.ahk
+UseIsolatedDataRoot("pacs-assistant-hotkey-tests")
+
+#Include ../HotkeyManager.ahk
 
 global fired := 0
 global aliasFirstFired := 0

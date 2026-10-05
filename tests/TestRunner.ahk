@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include ../ErrorText.ahk
+#Include ../Settings.ahk
 
 TestTempPath(prefix, extension := "") {
     static sequence := 0

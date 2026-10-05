@@ -58,7 +58,11 @@ class ProfileManagerTest {
         DirCreate(this.profilesDir)
 
         this.originalConfig := ProfileManager.configPath
-        this.originalProfiles := ProfileManager.profilesPath
+        this.originalProfilesPath := ProfileManager.profilesPath
+        this.originalProfiles := ProfileManager.profiles
+        this.originalCurrentProfile := ProfileManager.currentProfile
+        this.originalDefaultProfile := ProfileManager.defaultProfile
+        this.originalLoadErrors := ProfileManager.loadErrors
         this.originalRevisions := ProfileManager.profileRevisions
         this.originalStorageDriver := ProfileManager.storageDriver
         this.originalLastError := ProfileManager.lastError
@@ -524,8 +528,8 @@ class ProfileManagerTest {
     }
 
     TestDefaultPathsAreAnchored() {
-        Assert.Equal(A_ScriptDir "\config.ini", this.originalConfig)
-        Assert.Equal(A_ScriptDir "\profiles", this.originalProfiles)
+        Assert.Equal(AppStorage.DataRoot() "\config.ini", this.originalConfig)
+        Assert.Equal(AppStorage.DataRoot() "\profiles", this.originalProfilesPath)
     }
 
     TestProfileNameValidation() {
@@ -706,19 +710,17 @@ class ProfileManagerTest {
     }
 
     Teardown() {
-        try {
-            DirDelete(this.tempRoot, true)
-        }
+        try DirDelete(this.tempRoot, true)
         ProfileManager.configPath := this.originalConfig
-        ProfileManager.profilesPath := this.originalProfiles
-        ProfileManager.profiles := Map()
+        ProfileManager.profilesPath := this.originalProfilesPath
+        ProfileManager.profiles := this.originalProfiles
+        ProfileManager.currentProfile := this.originalCurrentProfile
+        ProfileManager.defaultProfile := this.originalDefaultProfile
+        ProfileManager.loadErrors := this.originalLoadErrors
         ProfileManager.profileRevisions := this.originalRevisions
         ProfileManager.storageDriver := this.originalStorageDriver
         ProfileManager.lastError := this.originalLastError
         ProfileManager.recoveryRequired := this.originalRecoveryRequired
-        ProfileManager.currentProfile := ""
-        ProfileManager.defaultProfile := ""
-        ProfileManager.loadErrors := []
     }
 }
 

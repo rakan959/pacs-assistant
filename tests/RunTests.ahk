@@ -9,6 +9,10 @@ FileEncoding "UTF-8"
 #Include HarnessErrors.ahk
 OnError(OnError_StdErr)
 
+; Before execution reaches the class definitions included below (IsolatedStorage.ahk).
+#Include IsolatedStorage.ahk
+UseIsolatedDataRoot("pacs-assistant-unit-tests")
+
 #Include TestRunner.ahk
 #Include TestRunnerTest.ahk
 #Include AppStorageTest.ahk

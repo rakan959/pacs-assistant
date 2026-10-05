@@ -6,6 +6,7 @@ class TestRunnerTest {
         "EqualRejectsCaseOnlyAndTypeOnlyDifferences",
         "NotEqualAcceptsCaseOnlyAndTypeOnlyDifferences",
         "TemporaryPathsAreUniqueAndProcessScoped",
+        "StorageIsIsolatedFromTheScriptFolder",
         "SetupFailureIsCountedAndDoesNotStopTheClass",
         "TeardownRunsAfterSetupFailure",
         "TeardownFailureCountsAsTheTestFailure",
@@ -70,6 +71,18 @@ class TestRunnerTest {
             SubStr(first, StrLen(first) - 3) == ".ini",
             "Temporary paths must preserve the requested extension"
         )
+    }
+
+    ; RunTests.ahk must isolate storage before Settings and ProfileManager initialize;
+    ; isolating any later leaves both pointing at the files beside the scripts.
+    StorageIsIsolatedFromTheScriptFolder() {
+        root := AppStorage.DataRoot()
+
+        Assert.NotEqual(A_ScriptDir, root)
+        Assert.True(InStr(root, A_Temp "\pacs-assistant-unit-tests-") = 1, root)
+        Assert.Equal(root "\settings.ini", Settings.settingsFile)
+        Assert.Equal(root "\config.ini", ProfileManager.configPath)
+        Assert.Equal(root "\profiles", ProfileManager.profilesPath)
     }
 
     SetupFailureIsCountedAndDoesNotStopTheClass() {

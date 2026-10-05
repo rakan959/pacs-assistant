@@ -11,19 +11,20 @@ FileEncoding "UTF-8"
 ; Run with:
 ;   "C:\Program Files\AutoHotkey\v2\AutoHotkey.exe" tests\run-gui-smoke.ahk
 
-#Include ../KeybindGUI.ahk
 #Include HarnessErrors.ahk
 OnError(OnError_StdErr)
 
+; Before execution reaches the class definitions included below (IsolatedStorage.ahk).
+; Settings, config and profiles all live in tempDir for this run.
+#Include IsolatedStorage.ahk
+global tempDir := UseIsolatedDataRoot("pacs-assistant-gui-smoke")
+
+#Include ../KeybindGUI.ahk
+
 global testsRun := 0
 global testsFailed := 0
-global runPid := DllCall("GetCurrentProcessId")
-global tempDir := A_Temp "\pacs-assistant-gui-smoke-" runPid "-" DllCall("GetTickCount64", "UInt64") "-" Random(100000, 999999)
 global openedWindows := []
 global smokeKB := 0
-global originalConfigPath := ""
-global originalProfilesPath := ""
-global originalSettingsPath := ""
 
 Out(text) {
     FileAppend(text "`n", "*")
@@ -84,33 +85,17 @@ CloseWindow(hwnd) {
     }
 }
 
+; Registered to run before UseIsolatedDataRoot removes tempDir: the windows close
+; first, and Windows cannot delete the working directory.
 Cleanup(*) {
-    global tempDir, openedWindows, smokeKB, runPid
-    global originalConfigPath, originalProfilesPath, originalSettingsPath
+    global openedWindows, smokeKB
     try HotkeyManager.DisableAllHotkeys()
     try UpdateChecker.StopAutoCheck()
     for hwnd in openedWindows
         try CloseWindow(hwnd)
     if smokeKB
         try smokeKB.gui.Destroy()
-    if (originalConfigPath != "")
-        ProfileManager.configPath := originalConfigPath
-    if (originalProfilesPath != "")
-        ProfileManager.profilesPath := originalProfilesPath
-    if (originalSettingsPath != "")
-        Settings.settingsFile := originalSettingsPath
     try SetWorkingDir(A_ScriptDir)
-
-    ; The recursive cleanup target is private to this PID/run and must remain a
-    ; direct child of the system temp directory.
-    try {
-        tempParent := RTrim(AppControl.NormalizePath(A_Temp), "\") "\"
-        resolved := AppControl.NormalizePath(tempDir)
-        expectedName := "pacs-assistant-gui-smoke-" runPid "-"
-        if (InStr(resolved, tempParent, true) = 1
-            && InStr(SubStr(resolved, StrLen(tempParent) + 1), expectedName, true) = 1)
-            DirDelete(resolved, true)
-    }
 }
 
 FindListView(guiObj) {
@@ -123,18 +108,8 @@ FindListView(guiObj) {
 
 Main() {
     global testsRun, testsFailed, tempDir, smokeKB
-    global originalConfigPath, originalProfilesPath, originalSettingsPath
 
-    DirCreate(tempDir)
-    DirCreate(tempDir "\profiles")
     SetWorkingDir(tempDir)
-    originalConfigPath := ProfileManager.configPath
-    originalProfilesPath := ProfileManager.profilesPath
-    originalSettingsPath := Settings.settingsFile
-    ProfileManager.configPath := tempDir "\config.ini"
-    ProfileManager.profilesPath := tempDir "\profiles"
-    Settings.settingsFile := tempDir "\settings.ini"
-    Settings.SaveAllSettings()
 
     ; A profile with a built-in bind, a scoped bind and a custom function.
     ; F13/F14 do not exist on a normal keyboard, so applying these binds cannot
@@ -292,7 +267,7 @@ AssertScope(listView, funcName, expected) {
     Assert(false, "'" funcName "' is in the list")
 }
 
-OnExit(Cleanup)
+OnExit(Cleanup, -1)
 ExitApp(RunSmoke())
 
 ; Converts a fatal harness error into a nonzero exit. Keeping the catch inside a

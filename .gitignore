@@ -1,5 +1,6 @@
 # User data written beside the script by source runs. Compiled builds keep it in
-# %APPDATA%\PACS Assistant instead (AppStorage.ahk). Test runs write into tests/.
+# %APPDATA%\PACS Assistant instead (AppStorage.ahk). Test harnesses use a private
+# temp folder (tests/IsolatedStorage.ahk); earlier versions wrote into tests/.
 /profiles/
 /tests/profiles/
 config.ini
