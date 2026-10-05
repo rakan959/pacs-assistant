@@ -19,6 +19,8 @@ class KeybindGUITest {
         "TestCustomFunctionNamesUsePersistedCaseInsensitiveIdentity",
         "TestCustomKeybindRejectsABlankLookingWindow",
         "TestAddedCustomKeybindSucceedsWhenCaptureDoesNotStart",
+        "TestCustomKeybindRefusesAnExistingName",
+        "TestCustomKeybindRechecksTheNameInsideTheTransaction",
         "TestLoadErrorSummaryNamesEachFileAndCause",
         "TestStaleAddFunctionCannotClearANewerBinding",
         "TestProfileBindingOwnerUsesRuntimeIdentity",
@@ -40,6 +42,7 @@ class KeybindGUITest {
         "TestStaleCaptureThatCannotRestoreStillAllowsExit",
         "TestProfileBoundDialogRejectsSameNameReplacement",
         "TestCapturedBindPublishesDirtyStateBeforeReleasingOwner",
+        "TestStoppedCaptureHookDoesNotUnassignTheCommand",
         "TestCancelCaptureWarnsWhenPriorRuntimeCannotBeRestored",
         "TestCancelCaptureRetainsTransactionWhenHookCannotStop",
         "TestOnInputEndRetainsCaptureWhenHookTeardownFails",
@@ -284,6 +287,47 @@ class KeybindGUITest {
         Assert.Equal("Custom: Yell", listView.GetText(2, 1))
         Assert.True(editor.IsProfileDirty("Test"))
         Assert.True(dialog.destroyed)
+    }
+
+    ; Names match case-insensitively, as the INI file stores them.
+    TestCustomKeybindRefusesAnExistingName() {
+        profile := ProfileManager.NewProfile()
+        profile.customFuncs["Custom: Yell"] := {keys: "HELLO", window: ""}
+        profile.binds["Custom: Yell"] := "^F13"
+        profile.scopes["Custom: Yell"] := "Any"
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        dialog := FakeProfileDialog("Test")
+        listView := FunctionalListView("Custom: Yell", "Ctrl + F13", "Any window")
+        editor := {base: CaptureRefusingKeybindGUI.Prototype, gui: "", promptCalls: 0}
+
+        Assert.False(editor.AddCustomKeybind("yell", "BYE", "", listView, dialog))
+
+        Assert.Equal("HELLO", profile.customFuncs["Custom: Yell"].keys)
+        Assert.Equal("^F13", profile.binds["Custom: Yell"])
+        Assert.Equal(1, profile.customFuncs.Count)
+        Assert.Equal(1, listView.GetCount())
+        Assert.Equal(0, editor.promptCalls)
+        Assert.Equal(1, TestRunner.dialogs.Length)
+        Assert.Equal("Invalid Custom Keybind", TestRunner.dialogs[1].title)
+        Assert.False(dialog.destroyed)
+    }
+
+    TestCustomKeybindRechecksTheNameInsideTheTransaction() {
+        profile := ProfileManager.NewProfile()
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        dialog := FakeProfileDialog("Test")
+        listView := FunctionalListView("Sign Report", "Unassigned", "Any window")
+        editor := {base: NameRacingCustomKeybindGUI.Prototype, gui: "", promptCalls: 0}
+
+        Assert.False(editor.AddCustomKeybind("Yell", "HELLO", "", listView, dialog))
+
+        Assert.Equal("OTHER", profile.customFuncs["Custom: Yell"].keys)
+        Assert.False(profile.binds.Has("Custom: Yell"))
+        Assert.Equal(1, listView.GetCount())
+        Assert.Equal(0, editor.promptCalls)
+        Assert.False(ExclusiveOperations.profileMutationActive)
     }
 
     TestLoadErrorSummaryNamesEachFileAndCause() {
@@ -1105,6 +1149,42 @@ class KeybindGUITest {
         Assert.Equal(2, editor.events.Length)
         Assert.Equal("dirty", editor.events[1])
         Assert.Equal("release", editor.events[2])
+    }
+
+    ; Stop(), a timeout and a replacing InputHook raise OnEnd with a blank EndKey.
+    TestStoppedCaptureHookDoesNotUnassignTheCommand() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
+        prompt := FakeProfileDialog("Test")
+        editor := {base: CaptureMutationGuardGUI.Prototype, notifications: []}
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            HotkeyManager.activeHotkeys := Map()
+            Assert.True(editor.CaptureFunctionDialogState(
+                prompt,
+                "Sign Report",
+                listView,
+                1
+            ))
+            Assert.True(editor.BeginListening("Sign Report", listView, prompt))
+            hook := KeybindGUI.activeInputHook
+            hook.EndKey := ""
+            hook.EndReason := "Stopped"
+            result := editor.OnInputEnd("Sign Report", listView, prompt, hook)
+            dirty := editor.IsProfileDirty("Test")
+        } finally {
+            try editor.StopListening()
+        }
+
+        Assert.False(result)
+        Assert.Equal("^F13", profile.binds["Sign Report"])
+        Assert.Equal("Ctrl + F13", listView.GetText(1, 2))
+        Assert.False(dirty)
+        Assert.False(prompt.destroyed)
     }
 
     TestCancelCaptureWarnsWhenPriorRuntimeCannotBeRestored() {
@@ -2652,6 +2732,17 @@ class CaptureRefusingKeybindGUI extends KeybindGUI {
     PromptKeybind(*) {
         this.promptCalls++
         return false
+    }
+}
+
+class NameRacingCustomKeybindGUI extends CaptureRefusingKeybindGUI {
+    ; As when the same name is committed between validation and the transaction.
+    BeginProfileMutationTransaction(action, allowDuringShutdown := false) {
+        ProfileManager.profiles[ProfileManager.currentProfile].customFuncs["Custom: Yell"] := {
+            keys: "OTHER",
+            window: ""
+        }
+        return super.BeginProfileMutationTransaction(action, allowDuringShutdown)
     }
 }
 

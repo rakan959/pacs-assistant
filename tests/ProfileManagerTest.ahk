@@ -24,6 +24,7 @@ class ProfileManagerTest {
         "TestInterruptedCaseOnlyRenameIsRecoveredOnStartup",
         "TestInterruptedCaseOnlyRenameNeverOverwritesConflictingProfile",
         "TestRefusedChangeNamesTheEarlierStorageFailure",
+        "TestSaveIsRefusedWhileStorageNeedsRecovery",
         "TestProfileDeletionRules",
         "TestFailedDefaultDeletionPreservesProfile",
         "TestDefaultDeleteRollbackFailureIsSurfacedAndReconciled",
@@ -39,6 +40,8 @@ class ProfileManagerTest {
         "TestModalityAttendingPersistence",
         "TestProfileNameValidation",
         "TestCreateProfileRejectsUnsafeAndDuplicateNames",
+        "TestCreateProfileKeepsAnUnloadedFileOfThatName",
+        "TestIniKeyRules",
         "TestSaveRejectsUnsafeIniKeys",
         "TestSaveRejectsMalformedCustomCommand",
         "TestSaveRejectsCaseCollidingCustomCommands",
@@ -312,6 +315,17 @@ class ProfileManagerTest {
         Assert.Equal(expected, ProfileManager.lastError)
         Assert.False(ProfileManager.SetDefaultProfile("Fresh"))
         Assert.Equal(expected, ProfileManager.lastError)
+    }
+
+    ; A save then would write a profile file the failed operation may still need.
+    TestSaveIsRefusedWhileStorageNeedsRecovery() {
+        Assert.False(ProfileManager.FailStorageMutation("simulated rollback failure", true))
+
+        Assert.Throws(
+            () => ProfileManager.SaveProfile("Fresh", ProfileManager.NewProfile()),
+            "recovery-required"
+        )
+        Assert.False(FileExist(ProfileManager.profilesPath "\Fresh.ini"))
     }
 
     TestProfileDeletionRules() {
@@ -645,7 +659,8 @@ class ProfileManagerTest {
 
     TestProfileNameValidation() {
         Assert.True(ProfileManager.IsValidProfileName("Night Shift"))
-        for name in ["", "..", "../escape", "folder\escape", "bad:name", "CON", "name.", "name "] {
+        for name in ["", "..", "../escape", "folder\escape", "bad:name", "CON", "name.", "name ",
+            " name", "CON.txt", "lpt1", "tab`there", 5] {
             Assert.False(ProfileManager.IsValidProfileName(name), "Expected unsafe name to be rejected: " name)
         }
     }
@@ -659,6 +674,27 @@ class ProfileManagerTest {
         Assert.False(ProfileManager.CreateProfile("Reading Room"))
         Assert.True(ProfileManager.profiles["Reading Room"] = original)
         Assert.True(FileExist(ProfileManager.profilesPath "\Reading Room.ini") != "")
+    }
+
+    ; A profile file that failed to load is not in the loaded set, but it is still
+    ; the user's data: creating a profile of that name must not overwrite it.
+    TestCreateProfileKeepsAnUnloadedFileOfThatName() {
+        path := ProfileManager.profilesPath "\Broken.ini"
+        FileAppend("[Functions]`nnot a valid profile`n", path, "UTF-16")
+
+        Assert.False(ProfileManager.CreateProfile("Broken"))
+
+        Assert.False(ProfileManager.profiles.Has("Broken"))
+        Assert.Equal("[Functions]`nnot a valid profile`n", FileRead(path, "UTF-16"))
+    }
+
+    ; INI keys are written as "key=value" lines inside [sections], and the Order
+    ; lists join keys with "|", so these characters would corrupt the file.
+    TestIniKeyRules() {
+        for name in ["Sign Report", "Custom: Yell", "Custom: Ultrasound (US)"]
+            Assert.True(ProfileManager.IsSafeIniKey(name), name)
+        for name in ["", "a|b", "a=b", "[a", "a]", "a`nb", "a`rb", "a`tb", "a" Chr(1) "b", 5]
+            Assert.False(ProfileManager.IsSafeIniKey(name), "Expected unsafe key to be rejected: " name)
     }
 
     TestSaveRejectsUnsafeIniKeys() {

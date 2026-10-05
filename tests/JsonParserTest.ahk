@@ -98,6 +98,8 @@ class JsonParserTest {
             {input: '"line`nbreak"', error: "Unescaped control character"},
             {input: '"\uD83D"', error: "High surrogate is missing its low surrogate"},
             {input: '"\uDE00"', error: "Unexpected low surrogate"},
+            {input: '"\uD83D\u0041"', error: "Invalid low surrogate"},
+            {input: '"\uD83D\uE000"', error: "Invalid low surrogate"},
             {input: '"\u26"', error: "Incomplete Unicode escape"},
             {input: "01", error: "Unexpected content after JSON value"},
             {input: "-", error: "Expected a JSON value"},
