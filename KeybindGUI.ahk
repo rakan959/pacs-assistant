@@ -840,7 +840,7 @@ class KeybindGUI {
         ; Only a real end key is input to bind; treating a stopped hook's blank EndKey
         ; as data silently unassigned the command while cancelling the dialog.
         if (ih.EndReason != "EndKey")
-            return
+            return false
 
         if !this.FunctionDialogIsCurrent(promptGui, funcName, control)
             return false
@@ -850,7 +850,7 @@ class KeybindGUI {
         ; Handle Escape to cancel
         if (key = "Escape") {
             this.CancelKeybindPrompt(promptGui)
-            return
+            return false
         }
 
         ; Skip if the key is just a modifier
@@ -861,7 +861,7 @@ class KeybindGUI {
                 this.CancelKeybindPrompt(promptGui)
                 throw err
             }
-            return
+            return false
         }
 
         newBind := this.CapturedHotkey(ih)
@@ -878,7 +878,7 @@ class KeybindGUI {
             if owner {
                 MsgBox("This hotkey is already assigned to '" owner "'", "Duplicate Binding", "Icon!")
                 this.CancelKeybindPrompt(promptGui)
-                return
+                return false
             }
 
             ; First disable all existing hotkeys
@@ -899,7 +899,6 @@ class KeybindGUI {
             this.ResizeColumns(control)
             this.StopListening()
             promptGui.Destroy()
-
 
             ; Reapply all binds
             if !this.ApplyBinds() {
@@ -1094,7 +1093,7 @@ class KeybindGUI {
                 )
             }
 
-            MsgBox("Profile saved successfully!", "Success", "Icon!")
+            MsgBox("Profile saved successfully.", "Profile Saved", "Iconi")
             this.ClearProfileDirty(profileName)
             return true
         } finally this.EndProfileMutationTransaction()
@@ -1959,6 +1958,7 @@ class KeybindGUI {
         selectorGui.OnEvent("Close", (*) => selectorGui.Destroy())
 
         selectorGui.Show()
+        return true
     }
 
     /**
@@ -2117,6 +2117,7 @@ class KeybindGUI {
         customGui.Add("Text",, "{Tab} = Tab key`n^c = Ctrl+C`nHello = types 'Hello'")
 
         customGui.Show()
+        return true
     }
 
     AddCustomKeybind(name, keys, window, listView, customGui) {
@@ -2137,8 +2138,8 @@ class KeybindGUI {
         ; Create unique function name
         funcName := "Custom: " name
         if !ProfileManager.IsSafeIniKey(funcName) {
-            MsgBox("The keybind name cannot contain |, =, square brackets, or line breaks.", "Invalid Keybind Name", "Icon!")
-            return
+            MsgBox("The keybind name cannot contain |, =, square brackets, or line breaks.", "Invalid Custom Keybind", "Icon!")
+            return false
         }
 
         ; Check if name already exists in current profile
@@ -2184,7 +2185,7 @@ class KeybindGUI {
         customGui.Destroy()
 
         ; Prompt user to set the keybind
-        this.PromptKeybind(funcName, listView, profileName)
+        return this.PromptKeybind(funcName, listView, profileName)
     }
 
     CustomFunctionNameAvailable(profile, funcName) {
@@ -2323,13 +2324,13 @@ class KeybindGUI {
         }
 
         funcName := listView.GetText(listView.GetNext(0), 1)
-        this.PromptKeybind(funcName, listView)
+        return this.PromptKeybind(funcName, listView)
     }
 
     PromptKeybind(funcName, listView, profileName := "") {
         if KeybindGUI.isListening {
             MsgBox("Already waiting for a keybind. Finish or cancel that one first.", "Keybind In Progress", "Icon!")
-            return
+            return false
         }
 
         promptGui := this.NewProfileDialog("PACS Assistant - Set Keybind", profileName)
@@ -2425,6 +2426,7 @@ class KeybindGUI {
         ; The title-bar X must destroy like Cancel; Close only hides by default.
         scopeGui.OnEvent("Close", (*) => scopeGui.Destroy())
         scopeGui.Show()
+        return true
     }
 
     ApplyScope(funcName, requirePACS, requirePowerScribe, listView, rowIndex, scopeGui) {
@@ -2512,6 +2514,7 @@ class KeybindGUI {
         ; The title-bar X must destroy like Cancel; Close only hides by default.
         modGui.OnEvent("Close", (*) => modGui.Destroy())
         modGui.Show()
+        return true
     }
 
     SaveModalityAttendings(edits, modGui) {
