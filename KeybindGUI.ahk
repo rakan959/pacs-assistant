@@ -110,7 +110,10 @@ class KeybindGUI {
         y += 30
         this.gui.Add("Button", "xm y" y " w160", "Modality Attendings").OnEvent("Click", (*) => this.ShowModalityAttendingsDialog())
 
-        this.gui.OnEvent("Close", (*) => this.CloseMainWindow())
+        ; Close hides the window after any callback that does not return true. Every
+        ; successful path destroys the window or exits, so a refused close must keep
+        ; it visible rather than strand the app with no window.
+        this.gui.OnEvent("Close", (*) => (this.CloseMainWindow(), true))
         this.gui.Show()
 
         if applyBinds
@@ -430,7 +433,8 @@ class KeybindGUI {
         ; Add legend text
         selectorGui.Add("Text", "y+10", "* = Default Profile")
 
-        selectorGui.OnEvent("Close", (*) => this.CloseProfileSelector(selectorGui))
+        ; Return true so a refused close keeps the selector visible (see CreateMainGUI).
+        selectorGui.OnEvent("Close", (*) => (this.CloseProfileSelector(selectorGui), true))
         this.RegisterProfileSelector(selectorGui)
         try selectorGui.Show()
         catch as err {
@@ -522,7 +526,8 @@ class KeybindGUI {
         inputGui.Add("Text",, "Enter profile name:")
         nameEdit := inputGui.Add("Edit", "w200")
         inputGui.Add("Button",, "OK").OnEvent("Click", (*) => this.CreateProfile(nameEdit.Value, inputGui))
-        inputGui.OnEvent("Close", (*) => this.CloseNewProfilePrompt(inputGui))
+        ; Return true so a refused close keeps the prompt visible (see CreateMainGUI).
+        inputGui.OnEvent("Close", (*) => (this.CloseNewProfilePrompt(inputGui), true))
         inputGui.Show()
         return inputGui
     }
@@ -2340,7 +2345,8 @@ class KeybindGUI {
 
         ; Closing with the X has to tear the hook down as well, otherwise it keeps
         ; capturing and rebinds the next key pressed anywhere
-        promptGui.OnEvent("Close", (*) => this.CancelKeybindPrompt(promptGui))
+        ; Return true: when the hook cannot be stopped the prompt must stay open.
+        promptGui.OnEvent("Close", (*) => (this.CancelKeybindPrompt(promptGui), true))
 
         if !this.CaptureFunctionDialogState(promptGui, funcName, listView) {
             promptGui.Destroy()

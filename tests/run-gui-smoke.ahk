@@ -172,6 +172,21 @@ Main() {
     lv := FindListView(kb.gui)
     Assert(lv != 0, "main window has a keybind list")
 
+    ; A refused close (here: a clinical command holds the exclusive lease) must leave
+    ; the main window visible. Gui hides a window after any Close callback that does
+    ; not return true, which would strand the app with no visible window.
+    mainHwnd := kb.gui.Hwnd
+    PACSCommands.clinicalCommandActive := true
+    PACSCommands.activeClinicalCommand := "Smoke Command"
+    try {
+        WinClose("ahk_id " mainHwnd)
+        Sleep(150)
+    } finally {
+        PACSCommands.clinicalCommandActive := false
+        PACSCommands.activeClinicalCommand := ""
+    }
+    Assert(DllCall("IsWindowVisible", "Ptr", mainHwnd), "a refused main-window close keeps the window visible")
+
     if (lv != 0) {
         Assert(lv.GetCount() = 3, "all three binds are listed")
         Assert(lv.GetCount("Col") = 3, "the list has a scope column")
