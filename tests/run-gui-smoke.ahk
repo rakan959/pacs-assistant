@@ -70,6 +70,12 @@ OpenAndCaptureWindow(title, action) {
     return created[1]
 }
 
+; WinExist ignores hidden windows, so it cannot tell a dialog that Close merely hid
+; from one that was destroyed. IsWindow reports the HWND's real lifetime.
+WindowIsAlive(hwnd) {
+    return hwnd > 0 && DllCall("IsWindow", "Ptr", hwnd)
+}
+
 ; Close only the exact HWND created by this smoke run.
 CloseWindow(hwnd) {
     if (hwnd > 0 && WinExist("ahk_id " hwnd)) {
@@ -181,6 +187,7 @@ Main() {
             )
         ))
         CloseWindow(scopeHwnd)
+        Assert(!WindowIsAlive(scopeHwnd), "closing the scope dialog with X destroys it")
     }
 
     modalityHwnd := 0
@@ -191,6 +198,7 @@ Main() {
         )
     ))
     CloseWindow(modalityHwnd)
+    Assert(!WindowIsAlive(modalityHwnd), "closing the modality attendings dialog with X destroys it")
 
     settingsHwnd := 0
     Check("settings dialog builds", () => (
@@ -200,6 +208,7 @@ Main() {
         )
     ))
     CloseWindow(settingsHwnd)
+    Assert(!WindowIsAlive(settingsHwnd), "closing the settings dialog with X destroys it")
 
     updateInfo := {
         hasUpdate: true,
@@ -215,7 +224,7 @@ Main() {
         )
     ))
     CloseWindow(updateHwnd)
-    Assert(!WinExist("ahk_id " updateHwnd), "closing update dialog commits preferences and closes")
+    Assert(!WindowIsAlive(updateHwnd), "closing the update dialog with X destroys it")
     UpdateChecker.StopAutoCheck()
 
     registeredBeforeSwitch := HotkeyManager.activeHotkeys.Count

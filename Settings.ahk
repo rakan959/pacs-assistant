@@ -362,6 +362,8 @@ class Settings {
                 .OnEvent("Click", (*) => this.SaveSettings(controls, settingsGui))
             settingsGui.Add("Button", "x210 y365 w80", "Cancel")
                 .OnEvent("Click", (*) => settingsGui.Destroy())
+            ; The title-bar X must destroy like Cancel; Close only hides by default.
+            settingsGui.OnEvent("Close", (*) => settingsGui.Destroy())
 
             settingsGui.Show("w" this.dialogLogicalWidth " h" this.dialogLogicalHeight)
             return settingsGui

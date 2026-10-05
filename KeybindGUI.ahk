@@ -1797,6 +1797,8 @@ class KeybindGUI {
             nameEdit := renameGui.Add("Edit", "w200", name)
             renameGui.Add("Button",, "OK").OnEvent("Click", (*) => this.RenameProfile(name, nameEdit.Value, renameGui, parentGui))
             renameGui.Add("Button", "x+10", "Cancel").OnEvent("Click", (*) => renameGui.Destroy())
+            ; The title-bar X must destroy like Cancel; Close only hides by default.
+            renameGui.OnEvent("Close", (*) => renameGui.Destroy())
             renameGui.Show()
             return true
         } finally {
@@ -1953,6 +1955,8 @@ class KeybindGUI {
         ; Add action buttons
         selectorGui.Add("Button", "xm y+10", "Add Selected").OnEvent("Click", (*) => this.AddFunction(this.SelectedFunction(lbBuiltIn, lbCustom), listView, selectorGui))
         selectorGui.Add("Button", "x+10", "Cancel").OnEvent("Click", (*) => selectorGui.Destroy())
+        ; The title-bar X must destroy like Cancel; Close only hides by default.
+        selectorGui.OnEvent("Close", (*) => selectorGui.Destroy())
         
         selectorGui.Show()
     }
@@ -2105,6 +2109,8 @@ class KeybindGUI {
         
         customGui.Add("Button", "y+10", "OK").OnEvent("Click", (*) => this.AddCustomKeybind(nameEdit.Value, keysEdit.Value, windowEdit.Value, listView, customGui))
         customGui.Add("Button", "x+10", "Cancel").OnEvent("Click", (*) => customGui.Destroy())
+        ; The title-bar X must destroy like Cancel; Close only hides by default.
+        customGui.OnEvent("Close", (*) => customGui.Destroy())
         
         ; Add help text
         customGui.Add("Text", "y+20", "Examples:")
@@ -2416,6 +2422,8 @@ class KeybindGUI {
         scopeGui.Add("Button", "y+15 w80", "OK")
             .OnEvent("Click", (*) => this.ApplyScope(funcName, pacsBox.Value, psBox.Value, listView, rowIndex, scopeGui))
         scopeGui.Add("Button", "x+10 w80", "Cancel").OnEvent("Click", (*) => scopeGui.Destroy())
+        ; The title-bar X must destroy like Cancel; Close only hides by default.
+        scopeGui.OnEvent("Close", (*) => scopeGui.Destroy())
         scopeGui.Show()
     }
 
@@ -2501,6 +2509,8 @@ class KeybindGUI {
 
         modGui.Add("Button", "xm y+15 w80", "Save").OnEvent("Click", (*) => this.SaveModalityAttendings(edits, modGui))
         modGui.Add("Button", "x+10 w80", "Cancel").OnEvent("Click", (*) => modGui.Destroy())
+        ; The title-bar X must destroy like Cancel; Close only hides by default.
+        modGui.OnEvent("Close", (*) => modGui.Destroy())
         modGui.Show()
     }
 
