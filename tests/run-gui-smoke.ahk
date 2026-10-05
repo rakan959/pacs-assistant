@@ -69,6 +69,15 @@ CloseWindow(hwnd) {
     }
 }
 
+; Closes a dialog with X and checks it is destroyed. A dialog that never opened has
+; already failed its build check, so there is nothing to report here.
+AssertClosingDestroys(hwnd, message) {
+    if !hwnd
+        return
+    CloseWindow(hwnd)
+    Assert(!WindowIsAlive(hwnd), message)
+}
+
 ; Registered to run before UseIsolatedDataRoot removes tempDir: the windows close
 ; first, and Windows cannot delete the working directory.
 Cleanup(*) {
@@ -160,8 +169,7 @@ Main() {
                 () => kb.ShowScopeDialog(lv)
             )
         ))
-        CloseWindow(scopeHwnd)
-        Assert(!WindowIsAlive(scopeHwnd), "closing the scope dialog with X destroys it")
+        AssertClosingDestroys(scopeHwnd, "closing the scope dialog with X destroys it")
     }
 
     modalityHwnd := 0
@@ -171,8 +179,7 @@ Main() {
             () => kb.ShowModalityAttendingsDialog()
         )
     ))
-    CloseWindow(modalityHwnd)
-    Assert(!WindowIsAlive(modalityHwnd), "closing the modality attendings dialog with X destroys it")
+    AssertClosingDestroys(modalityHwnd, "closing the modality attendings dialog with X destroys it")
 
     settingsHwnd := 0
     Check("settings dialog builds", () => (
@@ -181,8 +188,7 @@ Main() {
             () => Settings.ShowDialog()
         )
     ))
-    CloseWindow(settingsHwnd)
-    Assert(!WindowIsAlive(settingsHwnd), "closing the settings dialog with X destroys it")
+    AssertClosingDestroys(settingsHwnd, "closing the settings dialog with X destroys it")
 
     updateInfo := {
         hasUpdate: true,
@@ -197,8 +203,7 @@ Main() {
             () => UpdateChecker.ShowUpdateDialog(updateInfo)
         )
     ))
-    CloseWindow(updateHwnd)
-    Assert(!WindowIsAlive(updateHwnd), "closing the update dialog with X destroys it")
+    AssertClosingDestroys(updateHwnd, "closing the update dialog with X destroys it")
     UpdateChecker.StopAutoCheck()
 
     registeredBeforeSwitch := HotkeyManager.activeHotkeys.Count
