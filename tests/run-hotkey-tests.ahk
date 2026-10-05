@@ -115,11 +115,13 @@ Main() {
 
     ; A scoped bind must not fire when its window is not active. Nothing in this test
     ; environment is PACS, so the predicate is false.
+    HotkeyManager.DisableAllHotkeys()
     HotkeyManager.Register("Test", "^F13", Bump, "PACS")
     AssertEqual(0, Press(), "a PACS-scoped bind does not fire outside PACS")
 
     ; ... and going back to an unscoped bind has to work, which means the scoped
     ; variant was torn down in the HotIf context it was created in
+    HotkeyManager.DisableAllHotkeys()
     HotkeyManager.Register("Test", "^F13", Bump, "Any")
     AssertEqual(1, Press(), "an unscoped bind fires again after being scoped")
 
@@ -127,14 +129,15 @@ Main() {
     HotkeyManager.Register("Test", "", Bump)
     AssertEqual(0, Press(), "an unassigned bind does not fire")
 
-    ; A rejected replacement must leave the known-good binding both tracked and live.
+    ; A function whose hotkey is live is not re-registered in place; its bind stays
+    ; tracked and live.
     HotkeyManager.Register("Test", "^F13", Bump)
     AssertEqual(
         false,
-        HotkeyManager.Register("Test", "DefinitelyNotARealKeyName", Bump),
-        "an invalid reassignment is rejected"
+        HotkeyManager.Register("Test", "^F14", Bump),
+        "a function with a live hotkey is not re-registered in place"
     )
-    AssertEqual(1, Press(), "a rejected reassignment leaves the old bind active")
+    AssertEqual(1, Press(), "the refused re-registration leaves the old bind active")
 
     ; Key aliases inside a custom combination are the same native variant. The
     ; second logical owner must be rejected instead of silently replacing the first.

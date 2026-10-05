@@ -1,6 +1,6 @@
 ; = CONTENTS
 ;   + Preamble
-;   + HotkeyManagerTest class (registration, reassignment, rollback, scopes, teardown)
+;   + HotkeyManagerTest class (registration, scopes, teardown)
 ;   + Test doubles (hotkey driver)
 
 #Requires AutoHotkey v2.0
@@ -11,15 +11,13 @@
 class HotkeyManagerTest {
     static tests := [
         "TestRegistersAndStoresHotkeys",
-        "TestReassignUpdatesBinding",
+        "TestRegisteredFunctionIsNotReplacedInPlace",
         "TestUnassignClearsBinding",
         "TestUnregisterFailureKeepsLiveRegistrationTracked",
         "TestDisableAllReportsAndRetainsFailedRegistration",
-        "TestReplacementRollbackFailureTracksEveryPossiblyLiveVariant",
         "TestRejectsMissingFunction",
         "TestDisableAllHotkeys",
         "TestRegistersWithScope",
-        "TestUnknownScopeIsRejectedWithoutReplacingRegistration",
         "TestScopedBindCanBeTurnedOffAgain",
         "TestPowerScribeScopeRequiresExactReportingWindow",
         "TestPowerScribeScopeRejectsWrongTitleAndDuplicateWindows",
@@ -28,8 +26,7 @@ class HotkeyManagerTest {
         "TestDuplicateHotkeyIsRejectedWithoutReplacingOwner",
         "TestEquivalentModifierOrderIsRejected",
         "TestEquivalentCustomCombinationPrefixesAreRejected",
-        "TestMissingCallbackReassignmentPreservesExistingRegistration",
-        "TestInvalidHotkeyReassignmentPreservesExistingRegistration",
+        "TestInvalidKeyNameIsRejectedAndNotTracked",
         "TestNonCanonicalScopeIsNotRegistered"
     ]
 
@@ -63,9 +60,18 @@ class HotkeyManagerTest {
         Assert.Equal("Any", HotkeyManager.activeHotkeys["ActionOne"].scope)
     }
 
-    TestReassignUpdatesBinding() {
-        HotkeyManager.RegisterHotkey("ActionOne", "^a")
-        HotkeyManager.RegisterHotkey("ActionOne", "^b")
+    ; Profiles are applied by disabling every hotkey and registering each bind
+    ; once, so a function that already has a hotkey is refused, not replaced.
+    TestRegisteredFunctionIsNotReplacedInPlace() {
+        Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^a"))
+
+        Assert.False(HotkeyManager.RegisterHotkey("ActionOne", "^b"))
+        Assert.True(InStr(HotkeyManager.lastError, "already has a registered hotkey") > 0)
+        Assert.Equal("^a", HotkeyManager.activeHotkeys["ActionOne"].hotkey)
+        Assert.False(HotkeyManager.hotkeyDriver.enabled.Has("^b"))
+
+        Assert.True(HotkeyManager.Unregister("ActionOne"))
+        Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^b"))
         Assert.Equal("^b", HotkeyManager.activeHotkeys["ActionOne"].hotkey)
     }
 
@@ -93,30 +99,15 @@ class HotkeyManagerTest {
     TestRegistersWithScope() {
         Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^a", "PowerScribe"))
         Assert.Equal("PowerScribe", HotkeyManager.activeHotkeys["ActionOne"].scope)
-
-        ; Re-registering under a different scope must replace, not accumulate. The
-        ; PowerScribe variant is a separate AutoHotkey hotkey, so it is turned off.
-        driver := HotkeyManager.hotkeyDriver
-        Assert.Equal(0, driver.disabled.Length)
-        Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^a", "PACS"))
-        Assert.Equal("PACS", HotkeyManager.activeHotkeys["ActionOne"].scope)
-        Assert.Equal(1, HotkeyManager.activeHotkeys.Count)
-        Assert.Equal(1, driver.disabled.Length)
-        Assert.Equal("^a", driver.disabled[1])
-    }
-
-    TestUnknownScopeIsRejectedWithoutReplacingRegistration() {
-        Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^a", "PACS"))
-
-        Assert.False(HotkeyManager.RegisterHotkey("ActionOne", "^b", "nonsense"))
-        Assert.Equal("^a", HotkeyManager.activeHotkeys["ActionOne"].hotkey)
-        Assert.Equal("PACS", HotkeyManager.activeHotkeys["ActionOne"].scope)
     }
 
     ; HotkeyContractTest covers the scope names themselves.
     TestNonCanonicalScopeIsNotRegistered() {
-        Assert.False(HotkeyManager.RegisterHotkey("ActionOne", "^F22", "pacs"))
-        Assert.False(HotkeyManager.activeHotkeys.Has("ActionOne"))
+        for scope in ["pacs", "nonsense"] {
+            Assert.False(HotkeyManager.RegisterHotkey("ActionOne", "^F22", scope), scope)
+            Assert.False(HotkeyManager.activeHotkeys.Has("ActionOne"), scope)
+            Assert.Equal("the hotkey scope is unknown", HotkeyManager.lastError)
+        }
     }
 
     ; AutoHotkey identifies a hotkey variant by the exact function object handed to
@@ -326,60 +317,21 @@ class HotkeyManagerTest {
         HotkeyManager.activeHotkeys.Delete("ActionOne")
     }
 
-    TestReplacementRollbackFailureTracksEveryPossiblyLiveVariant() {
-        driver := FakeHotkeyDriver(["^F23", "^F24"])
-        HotkeyManager.hotkeyDriver := driver
-        HotkeyManager.activeHotkeys["ActionOne"] := {
-            hotkey: "^F23",
-            scope: "Any"
-        }
 
-        Assert.False(HotkeyManager.RegisterHotkey("ActionOne", "^F24"))
-        Assert.Equal("^F23", HotkeyManager.activeHotkeys["ActionOne"].hotkey)
-        Assert.Equal(1, HotkeyManager.additionalActiveHotkeys.Count)
-        for _, entry in HotkeyManager.additionalActiveHotkeys {
-            Assert.Equal("ActionOne", entry.funcName)
-            Assert.Equal("^F24", entry.hotkey)
-        }
 
-        Assert.Throws(
-            () => HotkeyManager.DisableAllHotkeys(),
-            "could not be disabled"
-        )
-        Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
-        Assert.Equal(1, HotkeyManager.additionalActiveHotkeys.Count)
-
-        driver.failingHotkeys.Clear()
-        Assert.True(HotkeyManager.DisableAllHotkeys())
-        Assert.Equal(0, HotkeyManager.activeHotkeys.Count)
-        Assert.Equal(0, HotkeyManager.additionalActiveHotkeys.Count)
-    }
-
-    TestMissingCallbackReassignmentPreservesExistingRegistration() {
-        Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^a"))
-
-        Assert.False(HotkeyManager.Register("ActionOne", "^b", 0))
-        Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
-        Assert.Equal("^a", HotkeyManager.activeHotkeys["ActionOne"].hotkey)
-    }
-
-    TestInvalidHotkeyReassignmentPreservesExistingRegistration() {
+    TestInvalidKeyNameIsRejectedAndNotTracked() {
         ; AutoHotkey itself is the key-name authority, so this test registers through
-        ; the native driver. Ctrl+F13 has no physical key on a standard keyboard.
+        ; the native driver.
         HotkeyManager.hotkeyDriver := this.originalHotkeyDriver
-        Assert.True(HotkeyManager.RegisterHotkey("ActionOne", "^F13"))
 
         Assert.False(HotkeyManager.RegisterHotkey("ActionOne", "DefinitelyNotARealKeyName"))
-        Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
-        Assert.Equal("^F13", HotkeyManager.activeHotkeys["ActionOne"].hotkey)
-        Assert.Equal("Any", HotkeyManager.activeHotkeys["ActionOne"].scope)
+        Assert.False(HotkeyManager.activeHotkeys.Has("ActionOne"))
         Assert.True(InStr(HotkeyManager.lastError, "Invalid key name") > 0)
     }
 
     Teardown() {
         if !(HotkeyManager.hotkeyDriver == this.originalHotkeyDriver)
             HotkeyManager.activeHotkeys.Clear()
-        HotkeyManager.additionalActiveHotkeys.Clear()
         HotkeyManager.hotkeyDriver := this.originalHotkeyDriver
         AppControl.windowDriver := this.originalWindowDriver
         HotkeyManager.DisableAllHotkeys()

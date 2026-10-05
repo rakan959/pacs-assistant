@@ -14,9 +14,6 @@ class NativeHotkeyDriver {
 
 class HotkeyManager {
     static activeHotkeys := Map()  ; funcName -> {hotkey: "^j", scope: "PACS"}
-    ; Registrations whose rollback could not be verified remain separately tracked.
-    ; Losing either possibly-live variant would make later teardown fail open.
-    static additionalActiveHotkeys := Map()
     static hotkeyFunctions := PACSCommands.commands
     static hotkeyDriver := NativeHotkeyDriver()
 
@@ -116,27 +113,23 @@ class HotkeyManager {
             return false
         }
 
-        if this.additionalActiveHotkeys.Count {
-            this.lastError := "a previous hotkey rollback is still active; disable all hotkeys or restart before registering another bind"
+        ; KeybindGUI.ApplyProfileBinds disables every hotkey before registering a
+        ; profile, so a function is registered at most once. A live registration is
+        ; not replaced in place: AutoHotkey finds an existing variant by its
+        ; spelling, so re-registering under an alias (^Esc, then ^Escape) would
+        ; leave the first variant live and untracked.
+        if this.activeHotkeys.Has(funcName) {
+            this.lastError := "'" funcName "' already has a registered hotkey"
             return false
         }
 
-        owner := this.FindBindingOwner(hotkeyStr, funcName)
+        owner := this.FindBindingOwner(hotkeyStr)
         if owner {
             this.lastError := "the hotkey is already registered to '" owner "'"
             return false
         }
 
-        previous := this.activeHotkeys.Has(funcName)
-            ? this.activeHotkeys[funcName]
-            : 0
-        sameVariant := previous
-            && HotkeyContract.BindingIdentity(previous.hotkey) = HotkeyContract.BindingIdentity(hotkeyStr)
-            && previous.scope = scope
-
-        ; AutoHotkey itself is the final authority on key-name validity. Activate a
-        ; distinct replacement before retiring the known-good variant, so a rejected
-        ; key or provider error cannot silently unbind the command.
+        ; AutoHotkey itself is the final authority on key-name validity.
         try {
             this.EnterScope(scope)
             ; "On" is load-bearing. Hotkey() updates an existing variant's action but
@@ -153,51 +146,17 @@ class HotkeyManager {
             this.ExitScope()
         }
 
-        if previous && !sameVariant {
-            try {
-                this.DisableEntry(previous)
-            } catch as err {
-                ; The replacement is live but the old variant could not be retired.
-                ; Roll it back and keep the prior map entry rather than claiming an
-                ; ambiguous two-registration state succeeded.
-                try {
-                    this.DisableEntry({hotkey: hotkeyStr, scope: scope})
-                } catch as rollbackErr {
-                    ; Both variants may now be live. Keep the replacement reachable
-                    ; so DisableAllHotkeys can retry it and block new registrations
-                    ; until native teardown is proven.
-                    this.TrackAdditionalActiveHotkey(funcName, hotkeyStr, scope)
-                    this.lastError := "the previous hotkey could not be disabled: " err.Message
-                        . "; the replacement rollback also failed: " rollbackErr.Message
-                    return false
-                }
-                this.lastError := "the previous hotkey could not be disabled: " err.Message
-                return false
-            }
-        }
-
         this.activeHotkeys[funcName] := {hotkey: hotkeyStr, scope: scope}
         return true
     }
 
-    static FindBindingOwner(hotkeyStr, exceptFuncName := "") {
+    static FindBindingOwner(hotkeyStr) {
         identity := HotkeyContract.BindingIdentity(hotkeyStr)
         for funcName, entry in this.activeHotkeys {
-            if (funcName != exceptFuncName && HotkeyContract.BindingIdentity(entry.hotkey) = identity)
+            if (HotkeyContract.BindingIdentity(entry.hotkey) = identity)
                 return funcName
         }
-        for _, entry in this.additionalActiveHotkeys {
-            if (!(entry.funcName == exceptFuncName)
-                && HotkeyContract.BindingIdentity(entry.hotkey) = identity)
-                return entry.funcName
-        }
         return ""
-    }
-
-    static TrackAdditionalActiveHotkey(funcName, hotkeyStr, scope) {
-        entry := {funcName: funcName, hotkey: hotkeyStr, scope: scope}
-        key := funcName Chr(31) scope Chr(31) HotkeyContract.BindingIdentity(hotkeyStr)
-        this.additionalActiveHotkeys[key] := entry
     }
 
     static DisableEntry(entry) {
@@ -212,56 +171,33 @@ class HotkeyManager {
     ; Turn off a single registration, re-entering the context it was created in.
     ; Hotkey(name, "Off") only affects the variant of the *current* HotIf context, so
     ; the scope has to be restored before the hotkey can be turned off. On failure,
-    ; failureDetail lists each variant that stayed on with its reason.
+    ; failureDetail names the hotkey that stayed on and why.
     static Unregister(funcName, &failureDetail := "") {
         this.lastError := ""
         failureDetail := ""
-        failures := []
+        if !this.activeHotkeys.Has(funcName)
+            return true
 
-        if this.activeHotkeys.Has(funcName) {
-            entry := this.activeHotkeys[funcName]
-            try {
-                this.DisableEntry(entry)
-                this.activeHotkeys.Delete(funcName)
-            } catch as err {
-                ; Keep the registration tracked until the native provider proves it
-                ; is disabled. Losing the registry entry here can leave a live clinical
-                ; action enabled with no way for later profile operations to retire it.
-                failures.Push(entry.hotkey ": " err.Message)
-            }
-        }
-
-        for trackingKey, entry in this.additionalActiveHotkeys.Clone() {
-            if !(entry.funcName == funcName)
-                continue
-            try {
-                this.DisableEntry(entry)
-                this.additionalActiveHotkeys.Delete(trackingKey)
-            } catch as err {
-                failures.Push(entry.hotkey ": " err.Message)
-            }
-        }
-
-        if failures.Length {
-            for failure in failures
-                failureDetail .= (failureDetail = "" ? "" : "; ") failure
+        entry := this.activeHotkeys[funcName]
+        try {
+            this.DisableEntry(entry)
+        } catch as err {
+            ; Keep the registration tracked until the native provider proves it is
+            ; disabled. Losing the registry entry here can leave a live clinical
+            ; action enabled with no way for later profile operations to retire it.
+            failureDetail := entry.hotkey ": " err.Message
             this.lastError := "the hotkey could not be disabled: " failureDetail
             return false
         }
+        this.activeHotkeys.Delete(funcName)
         return true
     }
 
     static DisableAllHotkeys() {
-        ; Build one function-name set across both registries. Unregister mutates both
-        ; maps but retains every entry whose native Off call could not be proven.
-        functionNames := Map()
-        for funcName, _ in this.activeHotkeys
-            functionNames[funcName] := true
-        for _, entry in this.additionalActiveHotkeys
-            functionNames[entry.funcName] := true
-
+        ; Unregister removes each entry it turns off, so walk a copy. An entry whose
+        ; native Off call failed stays tracked.
         failed := ""
-        for funcName, _ in functionNames {
+        for funcName, _ in this.activeHotkeys.Clone() {
             if !this.Unregister(funcName, &failureDetail)
                 failed .= (failed = "" ? "" : ", ") funcName " (" failureDetail ")"
         }

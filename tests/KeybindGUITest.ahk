@@ -133,13 +133,11 @@ class KeybindGUITest {
         this.originalActiveInputHook := KeybindGUI.activeInputHook
         this.originalHotkeyFunctions := HotkeyManager.hotkeyFunctions
         this.originalActiveHotkeys := HotkeyManager.activeHotkeys
-        this.originalAdditionalActiveHotkeys := HotkeyManager.additionalActiveHotkeys
         this.originalHotkeyDriver := HotkeyManager.hotkeyDriver
         ; No test registers a real hotkey: a binding such as Ctrl+S would otherwise
         ; be live on the desktop while the suite runs. HotkeyManagerTest keeps the
         ; native key-name coverage.
         HotkeyManager.activeHotkeys := Map()
-        HotkeyManager.additionalActiveHotkeys := Map()
         HotkeyManager.hotkeyDriver := TransactionalHotkeyDriver()
     }
 
@@ -166,7 +164,6 @@ class KeybindGUITest {
         KeybindGUI.activeInputHook := this.originalActiveInputHook
         HotkeyManager.hotkeyFunctions := this.originalHotkeyFunctions
         HotkeyManager.activeHotkeys := this.originalActiveHotkeys
-        HotkeyManager.additionalActiveHotkeys := this.originalAdditionalActiveHotkeys
         HotkeyManager.hotkeyDriver := this.originalHotkeyDriver
     }
 
@@ -392,7 +389,6 @@ class KeybindGUITest {
         ProfileManager.currentProfile := "Test"
         HotkeyManager.hotkeyFunctions := Map()
         HotkeyManager.activeHotkeys := Map()
-        HotkeyManager.additionalActiveHotkeys := Map()
         KeybindGUI.isListening := false
         KeybindGUI.activeInputHook := 0
 
@@ -951,7 +947,6 @@ class KeybindGUITest {
         ProfileManager.currentProfile := "Test"
         HotkeyManager.hotkeyFunctions := Map()
         HotkeyManager.activeHotkeys := Map()
-        HotkeyManager.additionalActiveHotkeys := Map()
         KeybindGUI.isListening := false
         KeybindGUI.activeInputHook := 0
 
@@ -1073,7 +1068,6 @@ class KeybindGUITest {
         ProfileManager.currentProfile := "Test"
         HotkeyManager.hotkeyFunctions := Map()
         HotkeyManager.activeHotkeys := Map()
-        HotkeyManager.additionalActiveHotkeys := Map()
         KeybindGUI.isListening := false
         KeybindGUI.activeInputHook := 0
         Assert.True(editor.CaptureFunctionDialogState(
@@ -1962,7 +1956,6 @@ class KeybindGUITest {
 
         try {
             HotkeyManager.activeHotkeys.Clear()
-            HotkeyManager.additionalActiveHotkeys.Clear()
             HotkeyManager.hotkeyDriver := driver
             HotkeyManager.hotkeyFunctions := Map("Sign Report", (*) => 0)
             HotkeyManager.activeHotkeys["Sign Report"] := {hotkey: "^F23", scope: "Any"}
@@ -1981,7 +1974,6 @@ class KeybindGUITest {
         } finally {
             driver.failDisable.Clear()
             HotkeyManager.activeHotkeys.Clear()
-            HotkeyManager.additionalActiveHotkeys.Clear()
         }
 
         Assert.False(threw)
@@ -2010,7 +2002,6 @@ class KeybindGUITest {
             ProfileManager.currentProfile := "Test"
             ProfileManager.SaveProfile("Test", profile)
             HotkeyManager.activeHotkeys.Clear()
-            HotkeyManager.additionalActiveHotkeys.Clear()
             HotkeyManager.hotkeyDriver := driver
             HotkeyManager.hotkeyFunctions := PACSCommands.commands
             HotkeyManager.activeHotkeys["Custom: Keep"] := {hotkey: "^F23", scope: "Any"}
@@ -2033,7 +2024,6 @@ class KeybindGUITest {
             driver.failEnableCounts.Clear()
             driver.failDisable.Clear()
             HotkeyManager.activeHotkeys.Clear()
-            HotkeyManager.additionalActiveHotkeys.Clear()
         }
 
         Assert.False(threw)
