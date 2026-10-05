@@ -7,6 +7,7 @@
 #Include Settings.ahk
 #Include Version.ahk
 #Include JsonParser.ahk
+#Include ErrorText.ahk
 
 /** Bounded WinHTTP transport for asynchronous checks and interactive downloads. */
 class WinHttpTransport {
@@ -485,8 +486,8 @@ class WinHttpTextRequest {
         this.BeginClose("complete", response)
     }
 
-    Fail(error) {
-        this.BeginClose("error", error)
+    Fail(err) {
+        this.BeginClose("error", err)
     }
 
     BeginClose(kind, value) {
@@ -741,15 +742,14 @@ class UpdateChecker {
         }
     }
 
-    static FailAutoCheck(slot, error) {
+    static FailAutoCheck(slot, err) {
         if slot.completed
             return
         slot.completed := true
         slot.handle := 0
         if (this.activeRequest = slot)
             this.activeRequest := 0
-        message := IsObject(error) && HasProp(error, "Message") ? error.Message : String(error)
-        OutputDebug("Update check failed: " message)
+        OutputDebug("Update check failed: " ErrorText.Message(err))
     }
     
     static OnSettingsChanged() {
@@ -1180,18 +1180,15 @@ class UpdateChecker {
         }
     }
 
-    static FailManualCheck(slot, error) {
+    static FailManualCheck(slot, err) {
         if slot.completed
             return
         slot.completed := true
         slot.handle := 0
         if (this.activeRequest = slot)
             this.activeRequest := 0
-        message := IsObject(error) && HasProp(error, "Message")
-            ? error.Message
-            : String(error)
         this.manualResultNotifier.Call(
-            "The update check failed: " message,
+            "The update check failed: " ErrorText.Message(err),
             "Update Check Failed",
             "Icon!"
         )

@@ -8,18 +8,23 @@ FileEncoding "UTF-8"
 #Include UpdateChecker.ahk
 #Include PACSMonitor.ahk
 #Include MicrophoneManager.ahk
+#Include ErrorText.ahk
 
-; Production error record: append every uncaught runtime error to a timestamped
-; log in the app's data folder so field failures leave a persistent record. The
-; callback returns nothing, so the default error dialog still shows (additive).
+; Production error record: append every uncaught runtime error to the app's data
+; folder so field failures leave a persistent record. The callback returns nothing,
+; so the default error dialog still shows (additive). Lines are ISO-timestamped and
+; carry the error type, function and source location plus the call stack.
 OnError(OnError_Log)
 
 OnError_Log(E, mode) {
     try {
+        entry := FormatTime(, "yyyy-MM-dd HH:mm:ss") "." A_MSec " " ErrorText.Describe(E) "`n"
+        if (IsObject(E) && HasProp(E, "Stack") && E.Stack != "")
+            entry .= E.Stack "`n"
         root := AppStorage.DataRoot()
         DirCreate(root)
-        FileAppend(Format("{1} {2} line {3}: {4}`n", FormatTime(), A_MSec, E.Line, E.Message), root "\error.log")
-    } catch {
+        FileAppend(entry, root "\error.log")
+    } catch Any {
         ; A logging failure must never mask the original error.
     }
 }

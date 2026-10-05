@@ -56,18 +56,7 @@ class NativePowerScribeSessionDriver {
     }
 
     Root(session) {
-        if !this.IsLive(session)
-            return 0
-        try root := UIA.ElementFromHandle(session.target)
-        catch
-            return 0
-        try {
-            return root.WinId = session.hwnd && root.ProcessId = session.processId
-                ? root
-                : 0
-        } catch {
-            return 0
-        }
+        return this.IsLive(session) ? AppControl.VerifiedUiaRoot(session) : 0
     }
 }
 

@@ -7,19 +7,12 @@
 #Include UIA-v2/Lib/UIA.ahk
 #Include Settings.ahk
 #Include AppControl.ahk
+#Include UIAElementIdentity.ahk
+#Include ErrorText.ahk
 
 class NativePACSMonitorDriver {
     ResolvePortalSession() {
-        try sessions := AppControl.ResolveExactWindows(
-            AppControl.ExplorerPortalWindowSpec()
-        )
-        catch as err
-            return {status: "error", session: 0, error: err.Message}
-        if !sessions.Length
-            return {status: "absent", session: 0}
-        if sessions.Length > 1
-            return {status: "ambiguous", session: 0}
-        return {status: "unique", session: sessions[1]}
+        return AppControl.ResolveUniqueExactWindowStatus(AppControl.ExplorerPortalWindowSpec())
     }
 
     SessionIsLive(session) {
@@ -146,7 +139,7 @@ class PACSMonitor {
 
             for candidate in elements {
                 if (this.InspectRefreshButton(root, candidate)
-                    && !this.ContainsSameElement(matches, candidate))
+                    && !UIAElementIdentity.Contains(matches, candidate))
                     matches.Push(candidate)
             }
         } catch as err {
@@ -158,18 +151,6 @@ class PACSMonitor {
         if (matches.Length > 1)
             return {status: "ambiguous", button: 0, error: ""}
         return {status: "found", button: matches[1], error: ""}
-    }
-
-    static ContainsSameElement(elements, candidate) {
-        for existing in elements {
-            if (ObjPtr(existing) = ObjPtr(candidate))
-                return true
-            try {
-                if UIA.CompareElementsEx(existing, candidate)
-                    return true
-            }
-        }
-        return false
     }
 
     static InspectRefreshButton(root, candidate) {
@@ -197,15 +178,6 @@ class PACSMonitor {
             return false
         return candidate.IsInvokePatternAvailable
             || candidate.IsLegacyIAccessiblePatternAvailable
-    }
-
-    static SameElement(first, second) {
-        if !first || !second
-            return false
-        if (ObjPtr(first) = ObjPtr(second))
-            return true
-        try return UIA.CompareElementsEx(first, second)
-        return false
     }
 
     /**
@@ -287,7 +259,7 @@ class PACSMonitor {
         try {
             current := this.ResolveRefreshButton(root)
             if (current.status != "found"
-                || !this.SameElement(initial.button, current.button)
+                || !UIAElementIdentity.Same(initial.button, current.button)
                 || !this.driver.SessionIsLive(session)
                 || this.driver.IsActive(session))
                 return false
@@ -325,8 +297,8 @@ class PACSMonitor {
         }
     }
 
-    static RecordScanFailure(error) {
-        message := IsObject(error) && HasProp(error, "Message") ? error.Message : String(error)
+    static RecordScanFailure(err) {
+        message := ErrorText.Message(err)
         this.lastError := message
         this.consecutiveScanFailures++
         OutputDebug("PACS background monitoring failed: " message)

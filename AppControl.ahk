@@ -301,6 +301,38 @@ class AppControl {
         return sessions.Length = 1 ? sessions[1] : 0
     }
 
+    /**
+     * Resolves one exact window and reports absence, ambiguity, and lookup failure
+     * as distinct outcomes, so background services can treat "not running" as
+     * normal while still surfacing uncertainty.
+     * @returns {status: "unique"|"absent"|"ambiguous"|"error", session, error?}
+     */
+    static ResolveUniqueExactWindowStatus(spec) {
+        try sessions := this.ResolveExactWindows(spec)
+        catch as err
+            return {status: "error", session: 0, error: err.Message}
+        if !sessions.Length
+            return {status: "absent", session: 0}
+        if (sessions.Length > 1)
+            return {status: "ambiguous", session: 0}
+        return {status: "unique", session: sessions[1]}
+    }
+
+    /**
+     * The UIA root of a captured window, only when it still belongs to the same
+     * HWND and process. Callers check their own liveness contract first.
+     * @returns The root element, or 0
+     */
+    static VerifiedUiaRoot(session) {
+        try root := UIA.ElementFromHandle(session.target)
+        catch
+            return 0
+        try return root.WinId = session.hwnd && root.ProcessId = session.processId
+            ? root
+            : 0
+        return 0
+    }
+
     static ResolveUniqueExactWindowAcross(specs) {
         if !IsObject(specs) || !specs.Length
             throw ValueError("At least one exact window spec is required")

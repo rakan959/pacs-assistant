@@ -13,6 +13,7 @@
 #Include ProfileManager.ahk
 #Include PowerScribe.ahk
 #Include UIAValue.ahk
+#Include ErrorText.ahk
 
 /**
  * Resolves the PACS and Sticky Notes top-level windows without relying on the
@@ -48,26 +49,12 @@ class NativeStickyNoteWindowDriver {
         return WinGetTitle("ahk_id " hwnd)
     }
 
+    ; A disappearing or opaque same-executable window makes uniqueness uncertain,
+    ; so any lookup failure yields 0 rather than a silently shortened list.
     FindExactPacsWindows(target) {
-        matches := []
-        try windows := WinGetList("ahk_exe " target.exe)
+        try return AppControl.ResolveExactWindows(target)
         catch
             return 0
-
-        for hwnd in windows {
-            try {
-                title := WinGetTitle("ahk_id " hwnd)
-                processName := WinGetProcessName("ahk_id " hwnd)
-                processId := WinGetPID("ahk_id " hwnd)
-            } catch {
-                ; A disappearing/opaque same-process window makes uniqueness
-                ; uncertain. Do not silently exclude it from the candidate set.
-                return 0
-            }
-            if (title == target.title && StrLower(processName) == StrLower(target.exe))
-                matches.Push({hwnd: hwnd, processId: processId})
-        }
-        return matches
     }
 
     IsExpectedPacsSession(target, hwnd, processId) {
@@ -621,21 +608,13 @@ CheckAttending(reportText, powerScribeSession := 0) {
 AttendingFailureMessage(reportText, routingError := 0) {
     if (reportText = "") {
         message := "Could not read the report from PowerScribe, so the attending was not assigned"
-        if routingError {
-            detail := IsObject(routingError) && HasProp(routingError, "Message")
-                ? routingError.Message
-                : String(routingError)
-            message .= ": " detail
-        }
+        if routingError
+            message .= ": " ErrorText.Message(routingError)
         return message ". Set it manually."
     }
 
-    if routingError {
-        detail := IsObject(routingError) && HasProp(routingError, "Message")
-            ? routingError.Message
-            : String(routingError)
-        return "The report was read, but the attending could not be assigned: " detail ". Set it manually."
-    }
+    if routingError
+        return "The report was read, but the attending could not be assigned: " ErrorText.Message(routingError) ". Set it manually."
 
     return "The report was read, but no attending was assigned. Set it manually."
 }

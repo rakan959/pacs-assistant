@@ -12,6 +12,7 @@ OnError(OnError_StdErr)
 #Include TestRunner.ahk
 #Include TestRunnerTest.ahk
 #Include AppStorageTest.ahk
+#Include ErrorTextTest.ahk
 #Include JsonParserTest.ahk
 #Include UpdateCheckerTest.ahk
 #Include UpdateVerificationTest.ahk
@@ -28,6 +29,7 @@ OnError(OnError_StdErr)
 
 TestRunner.AddTest(TestRunnerTest)
 TestRunner.AddTest(AppStorageTest)
+TestRunner.AddTest(ErrorTextTest)
 TestRunner.AddTest(JsonParserTest)
 TestRunner.AddTest(UpdateCheckerTest)
 TestRunner.AddTest(UpdateVerificationTest)

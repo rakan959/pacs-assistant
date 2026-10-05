@@ -64,8 +64,34 @@ class ClinicalAutomationTest {
         "ReportSelectionRejectsUnrelatedFallbackText",
         "ReportCaptureFailsClosedOnEnumerationError",
         "ReportCaptureFailsClosedOnUnreadableSibling",
-        "ReportCaptureFailsClosedOnUnsupportedSibling"
+        "ReportCaptureFailsClosedOnUnsupportedSibling",
+        "ExactWindowStatusDistinguishesAbsenceAmbiguityAndFailure"
     ]
+
+    ExactWindowStatusDistinguishesAbsenceAmbiguityAndFailure() {
+        originalWindowDriver := AppControl.windowDriver
+        spec := AppControl.ExplorerPortalWindowSpec()
+        portal := {hwnd: 100, pid: 42, exe: "msedge.exe", title: "Explorer Portal", active: false}
+        try {
+            AppControl.windowDriver := ScopeLikeWindowDriver([])
+            Assert.Equal("absent", AppControl.ResolveUniqueExactWindowStatus(spec).status)
+
+            AppControl.windowDriver := ScopeLikeWindowDriver([portal])
+            unique := AppControl.ResolveUniqueExactWindowStatus(spec)
+            Assert.Equal("unique", unique.status)
+            Assert.Equal(100, unique.session.hwnd)
+
+            second := {hwnd: 101, pid: 43, exe: "msedge.exe", title: "Explorer Portal", active: false}
+            AppControl.windowDriver := ScopeLikeWindowDriver([portal, second])
+            Assert.Equal("ambiguous", AppControl.ResolveUniqueExactWindowStatus(spec).status)
+
+            ; A title read failing mid-enumeration is uncertainty, not absence.
+            AppControl.windowDriver := ScopeLikeWindowDriver([portal], true)
+            failed := AppControl.ResolveUniqueExactWindowStatus(spec)
+            Assert.Equal("error", failed.status)
+            Assert.True(InStr(failed.error, "simulated title failure"), failed.error)
+        } finally AppControl.windowDriver := originalWindowDriver
+    }
 
     Setup() {
         this.originalDriver := AppControl.windowDriver
@@ -1641,5 +1667,43 @@ class SimulatedClockRestartDriver extends NativePacsRestartDriver {
 
     Pause(milliseconds) {
         this.now += milliseconds
+    }
+}
+
+class ScopeLikeWindowDriver {
+    __New(windows, failTitles := false) {
+        this.windows := windows
+        this.failTitles := failTitles
+    }
+
+    ListWindowsByExecutable(executable) {
+        handles := []
+        for window in this.windows {
+            if (window.exe = executable)
+                handles.Push(window.hwnd)
+        }
+        return handles
+    }
+
+    Window(hwnd) {
+        for window in this.windows {
+            if (window.hwnd = hwnd)
+                return window
+        }
+        throw TargetError("unknown fake window")
+    }
+
+    GetTitle(hwnd) {
+        if this.failTitles
+            throw Error("simulated title failure")
+        return this.Window(hwnd).title
+    }
+
+    GetProcessName(hwnd) {
+        return this.Window(hwnd).exe
+    }
+
+    GetProcessId(hwnd) {
+        return this.Window(hwnd).pid
     }
 }

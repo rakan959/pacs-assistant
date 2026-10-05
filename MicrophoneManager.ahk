@@ -8,19 +8,12 @@
 #Include Settings.ahk
 #Include AppControl.ahk
 #Include UIAValue.ahk
+#Include UIAElementIdentity.ahk
+#Include ErrorText.ahk
 
 class NativeMicrophoneSessionDriver {
     CaptureResult() {
-        try sessions := AppControl.ResolveExactWindows(
-            AppControl.PowerScribeWindowSpec()
-        )
-        catch as err
-            return {status: "error", session: 0, error: err.Message}
-        if !sessions.Length
-            return {status: "absent", session: 0}
-        if sessions.Length > 1
-            return {status: "ambiguous", session: 0}
-        return {status: "unique", session: sessions[1]}
+        return AppControl.ResolveUniqueExactWindowStatus(AppControl.PowerScribeWindowSpec())
     }
 
     IsLive(session) {
@@ -28,15 +21,7 @@ class NativeMicrophoneSessionDriver {
     }
 
     Root(session) {
-        if !this.IsLive(session)
-            return 0
-        try root := UIA.ElementFromHandle(session.target)
-        catch
-            return 0
-        try return root.WinId = session.hwnd && root.ProcessId = session.processId
-            ? root
-            : 0
-        return 0
+        return this.IsLive(session) ? AppControl.VerifiedUiaRoot(session) : 0
     }
 
     NowMilliseconds() {
@@ -233,8 +218,8 @@ class MicrophoneManager {
         this.ResetAttemptState()
     }
 
-    static RecordOperationalError(error) {
-        this.lastError := IsObject(error) && HasProp(error, "Message") ? error.Message : String(error)
+    static RecordOperationalError(err) {
+        this.lastError := ErrorText.Message(err)
         OutputDebug("PowerScribe microphone selection failed: " this.lastError)
     }
 
@@ -272,7 +257,7 @@ class MicrophoneManager {
             matches := []
             for candidate in candidates {
                 if (this.InspectMicrophoneCombo(root, candidate)
-                    && !this.ContainsSameElement(matches, candidate))
+                    && !UIAElementIdentity.Contains(matches, candidate))
                     matches.Push(candidate)
             }
         } catch as err {
@@ -330,32 +315,7 @@ class MicrophoneManager {
             && Trim(item.Name) != "")
             return false
         container := item.SelectionItemPattern.SelectionContainer
-        return this.SameElementStrict(container, combo)
-    }
-
-    static ContainsSameElement(elements, candidate) {
-        for existing in elements {
-            if this.SameElement(existing, candidate)
-                return true
-        }
-        return false
-    }
-
-    static SameElement(left, right) {
-        if !left || !right
-            return false
-        if (ObjPtr(left) = ObjPtr(right))
-            return true
-        try return UIA.CompareElementsEx(left, right)
-        return false
-    }
-
-    static SameElementStrict(left, right) {
-        if !left || !right
-            return false
-        if (ObjPtr(left) = ObjPtr(right))
-            return true
-        return UIA.CompareElementsEx(left, right)
+        return UIAElementIdentity.SameStrict(container, combo)
     }
 
     static ResolveMicrophoneItems(root, combo) {
@@ -368,7 +328,7 @@ class MicrophoneManager {
                 throw Error("microphone item lookup returned an invalid collection")
             for item in comboItems {
                 if (this.InspectMicrophoneItem(root, combo, item)
-                    && !this.ContainsSameElement(items, item))
+                    && !UIAElementIdentity.Contains(items, item))
                     items.Push(item)
             }
             ; Some UI frameworks host the open dropdown beside the ComboBox in the
@@ -378,7 +338,7 @@ class MicrophoneManager {
                 throw Error("microphone item lookup returned an invalid collection")
             for item in rootItems {
                 if (this.InspectMicrophoneItem(root, combo, item)
-                    && !this.ContainsSameElement(items, item))
+                    && !UIAElementIdentity.Contains(items, item))
                     items.Push(item)
             }
         } catch as err {
@@ -434,7 +394,7 @@ class MicrophoneManager {
             return 0
         result := this.ResolveMicrophoneComboInRoot(root)
         return result.status == "found"
-            && this.SameElement(result.combo, expectedCombo)
+            && UIAElementIdentity.Same(result.combo, expectedCombo)
             ? {root: root, combo: result.combo}
             : 0
     }
@@ -502,7 +462,7 @@ class MicrophoneManager {
         liveResolved := liveResult.selection
         if (!liveResolved
             || !(liveResolved.name == resolved.name)
-            || !this.SameElement(liveResolved.item, resolved.item)) {
+            || !UIAElementIdentity.Same(liveResolved.item, resolved.item)) {
             this.CollapseVerifiedCombo(session, combo)
             return false
         }
@@ -512,7 +472,7 @@ class MicrophoneManager {
         ; last safe boundary before SelectionItem.Select().
         finalCombo := this.RevalidateCombo(session, combo)
         if (!finalCombo
-            || !this.SameElement(finalCombo.combo, current.combo)) {
+            || !UIAElementIdentity.Same(finalCombo.combo, current.combo)) {
             this.CollapseVerifiedCombo(session, combo)
             return false
         }
@@ -544,7 +504,7 @@ class MicrophoneManager {
         finalResolved := finalItemResult.selection
         try itemIsExpected := finalResolved
             && finalResolved.name == liveResolved.name
-            && this.SameElement(finalResolved.item, liveResolved.item)
+            && UIAElementIdentity.Same(finalResolved.item, liveResolved.item)
             && this.InspectMicrophoneItem(
                 finalCombo.root,
                 finalCombo.combo,
