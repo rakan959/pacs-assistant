@@ -313,10 +313,13 @@ class SettingsTest {
         ; The last value is 2^64 + 10, which Integer() would wrap to 10.
         for interval in [9, 0, 86401, "18446744073709551626"] {
             dialog := FakeSettingsDialog()
+            dialogsBefore := TestRunner.dialogs.Length
             result := Settings.SaveSettings(this.SettingsControls(false, interval), dialog)
 
             Assert.Equal(false, result, "Interval " interval " must be rejected with false")
             Assert.False(dialog.destroyed)
+            ; Each rejection explains itself with its own dialog.
+            Assert.Equal(dialogsBefore + 1, TestRunner.dialogs.Length, "Interval " interval " showed no dialog")
             Assert.Equal("Invalid Setting", TestRunner.dialogs[TestRunner.dialogs.Length].title)
         }
         Assert.Equal(60, Settings.Get("RefreshInterval"))

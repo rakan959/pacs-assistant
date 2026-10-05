@@ -30,7 +30,7 @@ class ClinicalAutomationTest {
         "AttendingRoutingUsesInjectedDependencies",
         "BlankAttendingSkipsPowerScribeWrite",
         "UnknownExaminationRequiresManualAssignment",
-        "FailedAttendingControlIsReported",
+        "UnavailableAttendingAssignmentIsReported",
         "NativeLookupErrorsAreNotAbsence",
         "WindowCloseUncertaintyCancelsStop",
         "WindowCloseCarriesAndRevalidatesCapturedSession",
@@ -446,12 +446,11 @@ class ClinicalAutomationTest {
         Assert.Equal(0, writes)
     }
 
-    FailedAttendingControlIsReported() {
+    UnavailableAttendingAssignmentIsReported() {
         profile := ProfileManager.NewProfile()
         profile.modalityAttendings["Chest"] := "Smith"
         ProfileManager.profiles["Test"] := profile
         ProfileManager.currentProfile := "Test"
-        AppControl.windowDriver := FakeWindowDriver(false)
 
         Assert.Throws(
             () => CheckAttending("EXAMINATION: CT CHEST"),
