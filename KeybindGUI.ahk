@@ -1049,14 +1049,15 @@ class KeybindGUI {
             }
 
             applyError := ""
+            failedBinds := ""
             runtimeApplied := false
-            try runtimeApplied := this.ApplyProfileBinds(savedProfile, false)
+            try runtimeApplied := this.ApplyProfileBinds(savedProfile, false, &failedBinds)
             catch as err
                 applyError := err.Message
 
             if !runtimeApplied {
                 if (applyError = "")
-                    applyError := "one or more saved keybinds could not be registered"
+                    applyError := "These saved keybinds could not be registered: " failedBinds
                 restoreError := ""
                 if !this.RestoreRuntimeProfile(savedProfile, &restoreError) {
                     message := "The profile was saved, but its runtime shortcuts could not be verified."
@@ -1264,7 +1265,12 @@ class KeybindGUI {
         }
     }
 
-    ApplyProfileBinds(currentProfile, showErrors := true) {
+    /**
+     * Registers every bind of a profile. On failure, failureText lists each bind that
+     * failed with its reason, as "Name (reason); Name (reason)".
+     */
+    ApplyProfileBinds(currentProfile, showErrors := true, &failureText := "") {
+        failureText := ""
         HotkeyManager.DisableAllHotkeys()
         failed := []
 
@@ -1292,9 +1298,11 @@ class KeybindGUI {
         ; Logged on every failed apply, including the silent ones a restore or a
         ; candidate check makes; one dialog for the whole apply when shown.
         errMsg := "These keybinds failed to register:"
-        for item in failed
+        for item in failed {
             errMsg .= "`n- " item
-        AppLog.Write(StrReplace(errMsg, "`n", " "))
+            failureText .= (A_Index > 1 ? "; " : "") item
+        }
+        AppLog.Write("These keybinds failed to register: " failureText)
         if showErrors
             this.NotifyUser(errMsg, "Keybind Errors", "Icon!")
         return false
@@ -1303,9 +1311,8 @@ class KeybindGUI {
     RestoreRuntimeProfile(profile, &failureText) {
         failureText := ""
         try {
-            if this.ApplyProfileBinds(profile, false)
+            if this.ApplyProfileBinds(profile, false, &failureText)
                 return true
-            failureText := "one or more previous keybinds could not be re-registered"
         } catch as err {
             failureText := err.Message
             AppLog.Write("Runtime keybinds could not be restored: " ErrorText.Describe(err))
@@ -1632,12 +1639,11 @@ class KeybindGUI {
 
     ApplyProfileCandidate(candidate, originalProfile, operationName) {
         applyError := ""
+        failedBinds := ""
         try {
-            if this.ApplyProfileBinds(candidate, false)
+            if this.ApplyProfileBinds(candidate, false, &failedBinds)
                 return true
-            applyError := HotkeyManager.lastError != ""
-                ? HotkeyManager.lastError
-                : "one or more candidate keybinds could not be registered"
+            applyError := "These keybinds could not be registered: " failedBinds
         } catch as err {
             applyError := err.Message
         }

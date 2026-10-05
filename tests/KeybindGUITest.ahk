@@ -1744,13 +1744,15 @@ class KeybindGUITest {
             Assert.False(editor.ApplyProfileCandidate(candidate, ProfileManager.NewProfile(), "function removal"))
             shownUnderLease := notifications.calls.Length
             editor.EndProfileMutationTransaction()
-            logged := capturedLog.Count("Keybinds failed to register: - Unknown Command")
+            logged := capturedLog.Count("Keybinds failed to register: Unknown Command (")
         } finally capturedLog.Restore()
 
         Assert.Equal(0, shownUnderLease)
         Assert.Equal(1, notifications.calls.Length)
         Assert.False(notifications.calls[1].leaseHeld)
         Assert.True(InStr(notifications.calls[1].message, "function removal was not applied"), notifications.calls[1].message)
+        ; Names the bind that failed, not only the last registration's reason.
+        Assert.True(InStr(notifications.calls[1].message, "Unknown Command (no command is defined for it)"), notifications.calls[1].message)
         Assert.Equal(1, logged)
     }
 
@@ -2116,6 +2118,7 @@ class KeybindGUITest {
         Assert.Equal(1, editor.restoreCalls)
         Assert.True(InStr(notifications.message, "profile was saved") > 0)
         Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
+        Assert.True(InStr(notifications.message, "Sign Report (simulated registration failure)") > 0)
         Assert.True(InStr(notifications.message, "simulated saved-profile restore failure") > 0)
     }
 
@@ -2516,8 +2519,9 @@ class ModifierRestartRestoreFailingKeybindGUI extends KeybindGUI {
 }
 
 class SaveRuntimeFailingKeybindGUI extends KeybindGUI {
-    ApplyProfileBinds(*) {
+    ApplyProfileBinds(profile, showErrors := true, &failureText := "") {
         this.applyCalls++
+        failureText := "Sign Report (simulated registration failure)"
         return false
     }
 

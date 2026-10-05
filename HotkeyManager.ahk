@@ -21,8 +21,8 @@ class HotkeyManager {
     static hotkeyDriver := NativeHotkeyDriver()
 
     ; Why the last Register call failed. Registration reports failure by return value
-    ; rather than a dialog, so ApplyBinds can collect every failure and show one
-    ; message instead of a dialog per bind.
+    ; rather than a dialog, so KeybindGUI.ApplyProfileBinds can collect every failure
+    ; and show one message instead of a dialog per bind.
     static lastError := ""
 
     ; One persistent predicate per scope. AutoHotkey identifies a hotkey *variant* by
