@@ -28,7 +28,8 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - New-study worklist scanning on a configurable interval. Automated refresh clicking
   currently fails closed: no live-captured, stable Explorer Portal refresh-button
   AutomationId has been approved in the repository.
-- New study detection with tray notifications and optional sounds
+- New study detection with a tray notification, a sound, or both. Scanning needs Auto
+  refresh PACS and at least one of these alerts; all three are off by default.
 - Alert sounds are backed by distinct files, so the options are audibly different
 - Says once per run that Explorer Portal cannot be refreshed while no refresh control is
   approved, and warns if an approved refresh keeps failing, instead of failing silently
@@ -67,7 +68,8 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
   direct write after confirming the original note is unchanged. If another actor changes
   the note, it does not retry or roll back over that newer value. No clinical note is
   staged into clipboard history or cloud synchronization.
-- Enable "Convert clipboard line endings" in Settings to normalize LF→CRLF before pasting.
+- "Convert clipboard line endings" in Settings (on by default) normalizes LF→CRLF
+  before pasting; turn it off to paste the text exactly as copied.
 
 4) **Keybind scope**
 - Select a bind and click **Set Scope**.
@@ -86,8 +88,9 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 ## Settings
 - Auto refresh PACS: turns on new-study scanning at the set interval, and the refresh
   click before each scan (semantic refresh clicking remains disabled until the exact
-  live control identity is approved)
-- Convert clipboard line endings (LF→CRLF) for wet reads
+  live control identity is approved). Off by default. The scan runs only while a new-case
+  sound or Windows notification is also on, since alerts are all it is used for.
+- Convert clipboard line endings (LF→CRLF) for wet reads; on by default
 - PowerScribe: set microphone on login, and the name to match. An exact name is
   preferred; a partial name such as `PowerMic` is accepted only when exactly one
   full device name matches.
