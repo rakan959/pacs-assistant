@@ -21,6 +21,7 @@ class PACSMonitorTest {
         "TestAmbiguousFlattenedRowDoesNotNotify",
         "TestProcessRowsRequiresAnExactEightDigitAccession",
         "TestAmbiguousNumericColumnsDoNotBecomeAccessions",
+        "TestTwoAccessionsInOneRowDoNotNotify",
         "TestRepeatedAccessionAlertsOnce",
         "TestDisabledAlertsDoNotConsumeFutureStudyNotification",
         "TestInterruptedScanDoesNotConsumeUnalertedAccessions",
@@ -34,6 +35,9 @@ class PACSMonitorTest {
         "TestRefreshWaitDoesNotHoldClinicalLease",
         "TestPortalRootMustBeTheCapturedWindowAndProcess",
         "TestRefreshAndScanUseOneCapturedPortalSession",
+        "TestPortalRootChangedBeforeRefreshIsNotClicked",
+        "TestPortalClosedDuringRefreshWaitIsNotScanned",
+        "TestPortalRootChangedBeforeScanIsNotScanned",
         "TestAmbiguousPortalWindowsAreReportedAsScanFailure",
         "TestStudyListFallbackRequiresExpectedTypeAndProcess",
         "TestStudyListDoesNotUseGenericFirstMatch",
@@ -168,6 +172,17 @@ class PACSMonitorTest {
         Assert.False(PACSMonitor.HasAccession("19800101"))
         Assert.False(PACSMonitor.HasAccession("12345678"))
         Assert.False(PACSMonitor.HasAccession("20260815"))
+    }
+
+    ; Two non-date eight-digit numbers leave no way to tell which is the accession.
+    TestTwoAccessionsInOneRowDoNotNotify() {
+        studies := PACSMonitor.ProcessRows([
+            {name: "CT CHEST 12345678 87654321"}
+        ], (*) => true)
+
+        Assert.Equal(0, studies.Length)
+        Assert.False(PACSMonitor.HasAccession("12345678"))
+        Assert.False(PACSMonitor.HasAccession("87654321"))
     }
 
     ; An accession can appear in more than one row of a single refresh. It must be
@@ -395,6 +410,57 @@ class PACSMonitorTest {
         Assert.True(driver.liveChecks >= 2)
         Assert.Equal(1, button.clickCalls)
         Assert.Equal(0, button.controlClickCalls)
+    }
+
+    TestPortalRootChangedBeforeRefreshIsNotClicked() {
+        button := FakePACSActionButton(42, 100, "Refresh", "refreshPrimary")
+        studyList := FakePACSStudyList(42, 100, {Name: "CT HEAD WITHOUT CONTRAST 12345678"})
+        driver := ScriptedRootPortalDriver(this.PortalSession(), button, studyList)
+        driver.refreshRootWindow := 999
+
+        PACSMonitor.driver := driver
+        SetTestSetting("MessageBoxNewCase", true)
+        PACSMonitor.RefreshAndCheck()
+
+        Assert.Equal(0, button.clickCalls)
+        Assert.Equal(1, driver.rootCalls)
+        Assert.False(PACSMonitor.HasAccession("12345678"))
+        Assert.True(InStr(PACSMonitor.lastError, "portal root identity changed before refresh"), PACSMonitor.lastError)
+    }
+
+    ; The render wait does not hold the clinical lease, so the portal can close
+    ; or be replaced before the scan takes it again.
+    TestPortalClosedDuringRefreshWaitIsNotScanned() {
+        button := FakePACSActionButton(42, 100, "Refresh", "refreshPrimary")
+        studyList := FakePACSStudyList(42, 100, {Name: "CT HEAD WITHOUT CONTRAST 12345678"})
+        driver := ScriptedRootPortalDriver(this.PortalSession(), button, studyList)
+        driver.liveAfterRefresh := false
+
+        PACSMonitor.driver := driver
+        SetTestSetting("MessageBoxNewCase", true)
+        PACSMonitor.RefreshAndCheck()
+
+        Assert.Equal(1, button.clickCalls)
+        Assert.Equal(1, driver.rootCalls)
+        Assert.False(PACSMonitor.HasAccession("12345678"))
+        Assert.True(InStr(PACSMonitor.lastError, "portal window changed during refresh"), PACSMonitor.lastError)
+    }
+
+    TestPortalRootChangedBeforeScanIsNotScanned() {
+        button := FakePACSActionButton(42, 100, "Refresh", "refreshPrimary")
+        ; A study list that matches the replaced root, as another window's would.
+        studyList := FakePACSStudyList(42, 999, {Name: "CT HEAD WITHOUT CONTRAST 12345678"})
+        driver := ScriptedRootPortalDriver(this.PortalSession(), button, studyList)
+        driver.scanRootWindow := 999
+
+        PACSMonitor.driver := driver
+        SetTestSetting("MessageBoxNewCase", true)
+        PACSMonitor.RefreshAndCheck()
+
+        Assert.Equal(1, button.clickCalls)
+        Assert.Equal(2, driver.rootCalls)
+        Assert.False(PACSMonitor.HasAccession("12345678"))
+        Assert.True(InStr(PACSMonitor.lastError, "portal root identity changed before scan"), PACSMonitor.lastError)
     }
 
     TestAmbiguousPortalWindowsAreReportedAsScanFailure() {
@@ -816,6 +882,38 @@ class PinnedPortalMonitorDriver {
     }
 
     WaitForRefresh() {
+    }
+}
+
+; Roots for the refresh and the scan can each come from another window, and the
+; session can stop being live once the refresh wait has run.
+class ScriptedRootPortalDriver extends PinnedPortalMonitorDriver {
+    __New(session, button, studyList) {
+        super.__New(session, button, studyList)
+        this.refreshRootWindow := session.hwnd
+        this.scanRootWindow := session.hwnd
+        this.liveAfterRefresh := true
+        this.waited := false
+    }
+
+    SessionIsLive(session) {
+        if (this.waited && !this.liveAfterRefresh) {
+            this.liveChecks++
+            return false
+        }
+        return super.SessionIsLive(session)
+    }
+
+    RootForSession(session) {
+        this.rootTargets.Push(session.target)
+        this.rootCalls++
+        if (this.rootCalls = 1)
+            return FakePACSRefreshRoot(session.processId, this.refreshRootWindow, [this.button])
+        return FakePACSStudyRoot(session.processId, this.scanRootWindow, this.studyList, 0)
+    }
+
+    WaitForRefresh() {
+        this.waited := true
     }
 }
 
