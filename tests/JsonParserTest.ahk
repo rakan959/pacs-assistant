@@ -10,12 +10,14 @@ class JsonParserTest {
         "TestHandlesEscapesAndUnicode",
         "TestLongStringRoundTripsExactly",
         "TestRejectsUppercaseTokensAndEscapes",
-        "TestRejectsMalformedStructure"
+        "TestRejectsMalformedStructure",
+        "TestRejectsNestingDeeperThanTheLimit"
     ]
 
     ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
     static helpers := [
-        "AssertAllRejected"
+        "AssertAllRejected",
+        "Nested"
     ]
 
     TestParsesNestedValuesAcrossWhitespace() {
@@ -109,6 +111,30 @@ class JsonParserTest {
             {input: "{} {}", error: "Unexpected content after JSON value"}
         ]
         this.AssertAllRejected(invalidCases)
+    }
+
+    ; Deep nesting is rejected with an error at the limit, never recursed into
+    ; until the interpreter's stack runs out and the process ends.
+    TestRejectsNestingDeeperThanTheLimit() {
+        limit := JsonParser.maxDepth
+        Assert.True(JsonParser.Parse(this.Nested("[", "]", limit)) is Array)
+        Assert.True(JsonParser.Parse(this.Nested('{"a":', "}", limit - 1, "{}")) is Map)
+
+        tooDeep := [
+            this.Nested("[", "]", limit + 1),
+            this.Nested('{"a":', "}", limit, "{}"),
+            this.Nested("[", "", 10000)
+        ]
+        for candidate in tooDeep {
+            ; A closure cannot see the loop variable, so it captures a local copy.
+            text := candidate
+            Assert.Throws(() => JsonParser.Parse(text), "JSON nesting is deeper than " limit " levels")
+        }
+    }
+
+    ; open repeated count times, then inner, then close repeated count times.
+    Nested(open, close, count, inner := "") {
+        return StrReplace(Format("{:" count "}", ""), " ", open) inner StrReplace(Format("{:" count "}", ""), " ", close)
     }
 
     AssertAllRejected(invalidCases) {

@@ -11,6 +11,10 @@ class JsonParser {
     static plainRunPattern := '\G[^"\\\x00-\x1F]+'
     static numberPattern := "\G-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?"
     static whitespacePattern := "\G[ \t\r\n]+"
+    ; Objects and arrays recurse; nesting past the interpreter's stack ends the
+    ; process with no error to catch, so input nested deeper than this is rejected.
+    ; Release metadata nests a few levels.
+    static maxDepth := 64
 
     static Parse(text) {
         parser := JsonParser(text)
@@ -27,6 +31,7 @@ class JsonParser {
         this.text := text
         this.length := StrLen(text)
         this.position := 1
+        this.depth := 0
     }
 
     ParseValue() {
@@ -35,9 +40,11 @@ class JsonParser {
             throw ValueError("Unexpected end of JSON input")
 
         char := this.Peek()
-        switch char {
-            case "{": return this.ParseObject()
-            case "[": return this.ParseArray()
+        if (char == "{" || char == "[") {
+            if (++this.depth > JsonParser.maxDepth)
+                throw ValueError("JSON nesting is deeper than " JsonParser.maxDepth " levels", , this.position)
+            try return char == "{" ? this.ParseObject() : this.ParseArray()
+            finally this.depth--
         }
         if (char == Chr(34))
             return this.ParseString()
