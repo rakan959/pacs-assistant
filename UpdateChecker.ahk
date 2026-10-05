@@ -35,6 +35,7 @@ class UpdateChecker {
     static maxMetadataSizeBytes := 1024 * 1024
     static maxReleaseNotesCharacters := 20000
     static installProbeSequence := 0
+    static moveFile := (source, destination) => FileMove(source, destination, false)
 
     static updateTimer := 0
     static activeRequest := 0
@@ -955,10 +956,13 @@ class UpdateChecker {
             probeFile.Write("PACS Assistant update write probe")
             probeFile.Close()
             probeFile := 0
-            FileMove(probePath, movedPath, false)
+            this.moveFile.Call(probePath, movedPath)
             FileDelete(movedPath)
             return true
-        } catch OSError {
+        } catch Error as err {
+            ; FileMove reports failure as a plain Error, the other file calls as
+            ; OSError; either means the folder cannot take an in-place update.
+            AppLog.Write("The app folder failed the update write probe: " ErrorText.Describe(err))
             return false
         } finally {
             if IsObject(probeFile)

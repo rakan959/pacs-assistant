@@ -37,6 +37,7 @@ class UpdateCheckerTest {
         "TestSettingsChangeCancelsInFlightAutomaticCheck",
         "TestClinicalCommandBlocksUpdateExit",
         "TestReadOnlyInstallDirectoryBlocksUpdateBeforeShutdown",
+        "TestFolderThatCannotRenameFailsTheWriteProbe",
         "TestUpdaterPathFailureReleasesShutdownTransaction",
         "TestVersionComesFromAppVersion",
         "TestReleaseParserShortensOversizedNotes",
@@ -63,6 +64,7 @@ class UpdateCheckerTest {
         this.originalDialogAcquire := UpdateChecker.dialogAcquire
         this.originalDialogRelease := UpdateChecker.dialogRelease
         this.originalAutoCheckFailureLogged := UpdateChecker.autoCheckFailureLogged
+        this.originalMoveFile := UpdateChecker.moveFile
         this.originalPendingUpdateInfo := UpdateChecker.pendingUpdateInfo
         this.originalNotifiedVersion := UpdateChecker.notifiedVersion
         this.originalUpdateDialog := UpdateChecker.updateDialog
@@ -601,6 +603,28 @@ class UpdateCheckerTest {
         Assert.Equal(0, coordinator.completeCalls)
     }
 
+    ; A failed FileMove throws a plain Error rather than OSError. A folder that
+    ; allows writing but not renaming must still fail the probe, not escape it.
+    TestFolderThatCannotRenameFailsTheWriteProbe() {
+        probes := []
+        UpdateChecker.moveFile := (source, destination) => (
+            probes.Push(source),
+            FileDelete(source),
+            FileMove(source, destination, false)
+        )
+        capturedLog := LogCapture()
+        try {
+            writable := UpdateChecker.InstallDirectoryIsWritable()
+            logged := capturedLog.Count("failed the update write probe")
+        } finally capturedLog.Restore()
+
+        Assert.False(writable)
+        Assert.Equal(1, probes.Length)
+        Assert.False(FileExist(probes[1]))
+        Assert.False(FileExist(probes[1] ".moved"))
+        Assert.Equal(1, logged)
+    }
+
     TestReadOnlyInstallDirectoryBlocksUpdateBeforeShutdown() {
         transport := CountingDownloadTransport()
         ReadOnlyInstallUpdateChecker.transport := transport
@@ -653,6 +677,7 @@ class UpdateCheckerTest {
         UpdateChecker.dialogAcquire := this.originalDialogAcquire
         UpdateChecker.dialogRelease := this.originalDialogRelease
         UpdateChecker.autoCheckFailureLogged := this.originalAutoCheckFailureLogged
+        UpdateChecker.moveFile := this.originalMoveFile
         UpdateChecker.pendingUpdateInfo := this.originalPendingUpdateInfo
         UpdateChecker.notifiedVersion := this.originalNotifiedVersion
         UpdateChecker.updateDialog := this.originalUpdateDialog
