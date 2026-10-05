@@ -493,6 +493,7 @@ class Settings {
                 )
                 return false
             }
+            AppLog.Write("Settings could not be saved: " ErrorText.Describe(err))
             MsgBox(
                 "The settings could not be saved. The previous file was left unchanged.`n`n" err.Message,
                 "Save Failed",

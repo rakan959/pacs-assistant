@@ -1038,6 +1038,7 @@ class KeybindGUI {
                 )
                 ProfileManager.SaveProfile(profileName, savedProfile)
             } catch as err {
+                AppLog.Write("Profile '" profileName "' could not be saved: " ErrorText.Describe(err))
                 this.NotifyUser("The profile could not be saved. The previous file was left unchanged.`n`n" err.Message, "Save Failed", "Icon!")
                 return false
             }
@@ -2007,6 +2008,7 @@ class KeybindGUI {
 
                 try ProfileManager.SaveProfile(profileName, candidate)
                 catch as err {
+                    AppLog.Write("Custom function deletion could not be saved: " ErrorText.Describe(err))
                     message := "The custom function could not be deleted. The previous profile was left unchanged.`n`n" err.Message
                     this.RestoreRuntimeAndNotify(originalProfile, message, "Delete Failed")
                     return false
@@ -2489,6 +2491,7 @@ class KeybindGUI {
                 return false
             try ProfileManager.SaveProfile(profileName, candidate)
             catch as err {
+                AppLog.Write("Attending assignments could not be saved: " ErrorText.Describe(err))
                 this.NotifyUser("The attending assignments could not be saved. The previous file was left unchanged.`n`n" err.Message, "Save Failed", "Icon!")
                 return false
             }

@@ -231,6 +231,7 @@ class UpdateChecker {
             )
             return false
         } catch as err {
+            AppLog.Write("Update preferences could not be saved: " ErrorText.Describe(err))
             MsgBox(
                 "The update preferences could not be saved. The previous settings were left unchanged.`n`n" err.Message,
                 "Save Failed",

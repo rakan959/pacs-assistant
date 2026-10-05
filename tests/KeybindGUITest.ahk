@@ -1290,15 +1290,20 @@ class KeybindGUITest {
         ProfileManager.currentProfile := "Test"
         dialog := FakeProfileDialog()
 
-        this.gui.SaveModalityAttendings(
-            Map("Neuro", {Value: "New Attending"}),
-            dialog
-        )
+        capturedLog := LogCapture()
+        try {
+            this.gui.SaveModalityAttendings(
+                Map("Neuro", {Value: "New Attending"}),
+                dialog
+            )
+            logged := capturedLog.Count("Attending assignments could not be saved: ")
+        } finally capturedLog.Restore()
         savedValue := ProfileManager.profiles["Test"].modalityAttendings["Neuro"]
         destroyed := dialog.destroyed
 
         Assert.Equal("Old Attending", savedValue)
         Assert.False(destroyed)
+        Assert.Equal(1, logged)
     }
 
     TestStaleModalityDialogCannotWriteAnotherProfile() {
@@ -1900,15 +1905,20 @@ class KeybindGUITest {
         dialog := FakeProfileDialog()
         threw := false
 
-        try this.gui.DeleteCustomFunction("Custom: Keep", dialog)
-        catch Any {
-            threw := true
-        }
+        capturedLog := LogCapture()
+        try {
+            try this.gui.DeleteCustomFunction("Custom: Keep", dialog)
+            catch Any {
+                threw := true
+            }
+            logged := capturedLog.Count("Custom function deletion could not be saved: ")
+        } finally capturedLog.Restore()
         stillConfigured := ProfileManager.profiles["Test"].customFuncs.Has("Custom: Keep")
         stillBound := ProfileManager.profiles["Test"].binds.Has("Custom: Keep")
         destroyed := dialog.destroyed
 
         Assert.False(threw)
+        Assert.Equal(1, logged)
         Assert.True(stillConfigured)
         Assert.True(stillBound)
         Assert.False(destroyed)

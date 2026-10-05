@@ -363,9 +363,14 @@ class SettingsTest {
         Settings.mutationGuard := (*) => false
         dialog := FakeSettingsDialog()
 
-        result := Settings.SaveSettings(this.SettingsControls(false, 45), dialog)
+        capturedLog := LogCapture()
+        try {
+            result := Settings.SaveSettings(this.SettingsControls(false, 45), dialog)
+            logged := capturedLog.Count("Settings could not be saved: ")
+        } finally capturedLog.Restore()
 
         Assert.Equal(false, result)
+        Assert.Equal(1, logged)
         Assert.False(dialog.destroyed)
         Assert.Equal("Save Failed", TestRunner.dialogs[1].title)
         Assert.Equal(60, Settings.Get("RefreshInterval"))
