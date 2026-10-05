@@ -80,6 +80,7 @@ class ClinicalAutomationTest {
         "ReportSelectionRejectsUnrelatedFallbackText",
         "ReportControlIdentityRequiresEachProperty",
         "ReportCaptureReadsTheOneCurrentReport",
+        "ReportReadFromAWindowThatClosedIsDiscarded",
         "ReportCaptureFailsClosedOnEnumerationError",
         "ReportCaptureFailsClosedOnUnreadableSibling",
         "ReportCaptureFailsClosedOnUnsupportedSibling",
@@ -1299,6 +1300,18 @@ class ClinicalAutomationTest {
             Assert.False(PowerScribe.InspectExpectedReportControl(testCase.root, testCase.control), testCase.label)
     }
 
+    ; A report read while PowerScribe closed, or switched session, cannot be
+    ; trusted to belong to the session that was captured.
+    ReportReadFromAWindowThatClosedIsDiscarded() {
+        driver := ClosingPowerScribeSessionDriver("EXAMINATION: CT CHEST`nFINDINGS: Current report.")
+        PowerScribe.sessionDriver := driver
+
+        capture := PowerScribe.CaptureReport()
+
+        Assert.Equal(1, driver.rootCalls)
+        Assert.Equal("", capture.text)
+    }
+
     ReportCaptureReadsTheOneCurrentReport() {
         report := "EXAMINATION: CT CHEST`nFINDINGS: Current report."
         driver := FakePowerScribeSessionDriver(report)
@@ -1681,6 +1694,24 @@ class FakePowerScribeSessionDriver {
         return this.IsLive(session)
             ? FakePowerScribeReportRoot(session.hwnd, session.processId, this.reportText)
             : 0
+    }
+}
+
+; The PowerScribe session ends as soon as its root has been read.
+class ClosingPowerScribeSessionDriver extends FakePowerScribeSessionDriver {
+    __New(reportText) {
+        super.__New(reportText)
+        this.rootCalls := 0
+    }
+
+    IsLive(session) {
+        return !this.rootCalls && super.IsLive(session)
+    }
+
+    Root(session) {
+        root := super.Root(session)
+        this.rootCalls++
+        return root
     }
 }
 

@@ -61,6 +61,7 @@ class WetReadTest {
         "ThrowingStickyOpenerStillReportsAttendingOutcome",
         "UnexpectedWorkflowFaultsAreLoggedWithTheirStack",
         "WetReadStopsBeforePastingAreLogged",
+        "PasteTimeRechecksStopBeforeAnyWrite",
         "ThrowingReportCaptureStillPastesAndReportsAttendingOutcome",
         "StickyTargetIsPinnedBeforePowerScribeRouting"
     ]
@@ -772,6 +773,23 @@ class WetReadTest {
         Assert.Equal("Sticky Note Target Not Verified", TestRunner.dialogs[TestRunner.dialogs.Length].title)
     }
 
+    ; The pinned window is proven again at the moment of pasting: one that no longer
+    ; activates is not touched, and a located field that is not the expected note
+    ; field gets nothing.
+    PasteTimeRechecksStopBeforeAnyWrite() {
+        session := {stickyHwnd: 200, pacsRoot: {ProcessId: 42, WinId: 100}}
+
+        session.driver := FakePinnedStickyDriver(false, 0)
+        Assert.False(PerformWetReadPaste("wet read", "uia", session))
+        Assert.Equal(0, session.driver.rootCalls)
+        Assert.True(InStr(TestRunner.dialogs[-1].text, "no longer the verified target"), TestRunner.dialogs[-1].text)
+
+        button := FakeStickyTargetElement(UIA.Type.Button, 42, true, 200)
+        session.driver := FakePinnedStickyDriver(true, LocatingStickyTargetRoot(42, [button], 200, button))
+        Assert.False(PerformWetReadPaste("wet read", "uia", session))
+        Assert.True(InStr(TestRunner.dialogs[-1].text, "unexpected text target"), TestRunner.dialogs[-1].text)
+    }
+
     ThrowingStickyOpenerStillReportsAttendingOutcome() {
         notifications := []
         captureCalls := 0
@@ -1037,6 +1055,37 @@ class UnreadableNoteFieldElement {
         get {
             throw Error("simulated unreadable note-field property")
         }
+    }
+}
+
+; A Sticky Notes root whose positional path locates the given element.
+class LocatingStickyTargetRoot extends FakeStickyTargetRoot {
+    __New(processId, children, windowId, pathElement) {
+        super.__New(processId, children, windowId)
+        this.pathElement := pathElement
+    }
+
+    ElementFromPath(*) {
+        return this.pathElement
+    }
+}
+
+; The pinned Sticky Notes session PerformWetReadPaste reacquires: whether its
+; window still activates, and the root it returns afterwards.
+class FakePinnedStickyDriver {
+    __New(activates, root) {
+        this.activates := activates
+        this.root := root
+        this.rootCalls := 0
+    }
+
+    ActivateSticky(*) {
+        return this.activates
+    }
+
+    GetRoot(*) {
+        this.rootCalls++
+        return this.root
     }
 }
 

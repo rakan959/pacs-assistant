@@ -46,6 +46,7 @@ class UpdateCheckerTest {
         "TestUpdateIsNotDownloadedWhenItCannotBeTrusted",
         "TestRejectedDownloadIsDiscardedWithoutLaunchingTheUpdater",
         "TestUpdateIsNotInstalledWithoutAShutdownCoordinator",
+        "TestUpdateSkippedSinceItWasOfferedIsNotInstalled",
         "TestVersionComesFromAppVersion",
         "TestReleaseParserShortensOversizedNotes",
         "TestUpdaterScriptRequiresHealthyRelaunch",
@@ -815,6 +816,23 @@ class UpdateCheckerTest {
         )
         Assert.Equal(0, transport.downloads.Length)
         Assert.Equal(0, launches.Length)
+    }
+
+    ; Update Now re-checks eligibility: a version skipped since the dialog opened
+    ; is not downloaded and shutdown is not started.
+    TestUpdateSkippedSinceItWasOfferedIsNotInstalled() {
+        updateInfo := InterpreterUpdateInfo()
+        transport := RecordingDownloadTransport(A_AhkPath)
+        UpdateChecker.transport := transport
+        coordinator := FakeShutdownCoordinator(true)
+        UpdateChecker.shutdownCoordinator := coordinator
+        UpdateChecker.skippedVersion := updateInfo.latestVersion
+
+        Assert.False(UpdateChecker.PerformUpdate(updateInfo, FakeUpdateGui()))
+        Assert.Equal("Update No Longer Eligible", TestRunner.dialogs[-1].title)
+        Assert.Equal(0, coordinator.beginCalls)
+        Assert.Equal(0, transport.downloads.Length)
+        Assert.Equal(0, this.launches.Length)
     }
 
     Teardown() {

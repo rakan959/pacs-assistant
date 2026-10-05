@@ -24,6 +24,7 @@ class MicrophoneManagerTest {
         "MicrophoneItemMustBelongToTheExactCombo",
         "UnreadableMicrophoneItemAlongsideValidDoesNotSelect",
         "ItemInvalidatedByFinalComboCheckIsNotSelected",
+        "SelectionStopsWhenATargetChangesBeforeSelect",
         "SelectionUsesOneExactItemWithoutDirectTextWrite",
         "SelectedItemCannotReplaceTheComboValuePostcondition",
         "AmbiguousPartialSelectionDoesNotMutate",
@@ -42,6 +43,11 @@ class MicrophoneManagerTest {
         "UnconfirmedSelectionNamesTheTimeoutNotTheName",
         "UnverifiableMicrophoneListIsNotBlamedOnTheName",
         "AmbiguousNameReasonReachesBothNotices"
+    ]
+
+    ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
+    static helpers := [
+        "ChangePicker"
     ]
 
     Setup() {
@@ -87,6 +93,60 @@ class MicrophoneManagerTest {
             MicrophoneManager.OnSettingsChanged()
             Assert.Equal(0, MicrophoneManager.pollTimer)
         } finally MicrophoneManager.StopMonitoring()
+    }
+
+    ; Each recheck before Select() stops the selection when its target changed.
+    ; Root reads during a selection: 1 and 2 revalidate the picker around Expand,
+    ; 3 checks whether the microphone is already selected, 4 re-resolves the picker
+    ; and item, and 5 is the final picker read.
+    SelectionStopsWhenATargetChangesBeforeSelect() {
+        cases := [
+            {label: "picker replaced", atRead: 1, change: "combo", reason: MicrophoneManager.selectorChangedReason},
+            {label: "item replaced before the live check", atRead: 4, change: "item",
+                reason: MicrophoneManager.listChangedReason},
+            {label: "item replaced before the final check", atRead: 5, change: "item",
+                reason: MicrophoneManager.listChangedReason},
+            {label: "picker unreadable once the final read resolved it", atRead: 5, change: "unreadable",
+                reason: "the microphone selector's value could not be read"}
+        ]
+        for testCase in cases {
+            fixture := MicrophoneFixture(["PowerMic III"])
+            original := fixture.items[1]
+            replacement := FakeMicrophoneItem(fixture.session.processId, fixture.session.hwnd, "PowerMic III", fixture.combo)
+            ; Closures cannot see the loop variable, so they use local copies.
+            atRead := testCase.atRead
+            change := testCase.change
+            MicrophoneManager.sessionDriver := HookedMicrophoneSessionDriver(
+                fixture.session,
+                fixture.root,
+                (read) => read = atRead ? this.ChangePicker(fixture, replacement, change) : 0
+            )
+            MicrophoneManager.lastError := ""
+
+            Assert.False(MicrophoneManager.SelectMicrophone(fixture.session, fixture.combo, "PowerMic III"), testCase.label)
+            Assert.Equal(0, original.selectCalls, testCase.label)
+            Assert.Equal(0, replacement.selectCalls, testCase.label)
+            Assert.Equal(testCase.reason, MicrophoneManager.lastError, testCase.label)
+        }
+    }
+
+    ; Changes the picker as PowerScribe can between reads: a new ComboBox, a
+    ; rerendered list item, or a value that stops being readable right after the
+    ; read that resolves the picker.
+    ChangePicker(fixture, replacement, change) {
+        switch change {
+            case "combo":
+                fixture.root.combos := [FakeMicrophoneCombo(
+                    fixture.session.processId,
+                    fixture.session.hwnd,
+                    MicrophoneManager.comboAutomationId
+                )]
+            case "item":
+                fixture.combo.items := [replacement]
+                fixture.root.items := [replacement]
+            case "unreadable":
+                fixture.combo.valueReadsLeft := 1
+        }
     }
 
     ApplyNowSelectsTheConfiguredMicrophone() {
@@ -411,10 +471,11 @@ class MicrophoneManagerTest {
         fixture.items := [item]
         fixture.combo.items := fixture.items
         fixture.root.items := fixture.items
-        fixture.driver := FinalComboInvalidatingSessionDriver(
+        ; Root read 5 is the final picker read before Select().
+        fixture.driver := HookedMicrophoneSessionDriver(
             fixture.session,
             fixture.root,
-            item
+            (read) => read = 5 ? item.valid := false : 0
         )
         MicrophoneManager.sessionDriver := fixture.driver
 
@@ -674,17 +735,18 @@ class FakeMicrophoneSessionDriver {
     }
 }
 
-class FinalComboInvalidatingSessionDriver extends FakeMicrophoneSessionDriver {
-    __New(session, root, item) {
+; Calls onRoot(read) before each Root read, numbered from 1, so a test can change
+; the picker at an exact point in a selection.
+class HookedMicrophoneSessionDriver extends FakeMicrophoneSessionDriver {
+    __New(session, root, onRoot) {
         super.__New(session, root)
-        this.item := item
+        this.onRoot := onRoot
         this.rootCalls := 0
     }
 
     Root(session) {
         this.rootCalls++
-        if (this.rootCalls = 5)
-            this.item.valid := false
+        this.onRoot.Call(this.rootCalls)
         return super.Root(session)
     }
 }
@@ -752,12 +814,19 @@ class FakeMicrophoneCombo {
         this._value := "Internal Microphone"
         this.items := []
         this.ExpandCollapsePattern := FakeMicrophoneExpandPattern(this)
+        ; When set (>= 0), how many more value reads succeed before the value can no
+        ; longer be read, as when the picker rerenders.
+        this.valueReadsLeft := -1
     }
 
     GetPropertyValue(propertyId) {
+        readable := this.valueReadsLeft != 0
         switch propertyId {
-            case UIA.Property.ValueValue: return this._value
-            case UIA.Property.IsValuePatternAvailable: return this.IsValuePatternAvailable
+            case UIA.Property.ValueValue:
+                if (this.valueReadsLeft > 0)
+                    this.valueReadsLeft--
+                return readable ? this._value : ""
+            case UIA.Property.IsValuePatternAvailable: return readable && this.IsValuePatternAvailable
             case UIA.Property.IsLegacyIAccessiblePatternAvailable: return this.IsLegacyIAccessiblePatternAvailable
         }
         return ""
