@@ -16,91 +16,91 @@
 
 #Include ../HotkeyManager.ahk
 
-global Fired := 0
-global AliasFirstFired := 0
-global AliasSecondFired := 0
-global TestsRun := 0
-global TestsFailed := 0
+global fired := 0
+global aliasFirstFired := 0
+global aliasSecondFired := 0
+global testsRun := 0
+global testsFailed := 0
 
 Out(text) {
     FileAppend(text "`n", "*")
 }
 
 AssertEqual(actual, expected, label) {
-    global TestsRun, TestsFailed
-    TestsRun++
+    global testsRun, testsFailed
+    testsRun++
     if (actual == expected) {
         Out("  ok   " label)
         return
     }
-    TestsFailed++
+    testsFailed++
     Out("  FAIL " label " -- expected '" expected "', got '" actual "'")
 }
 
 Bump(*) {
-    global Fired
-    Fired++
+    global fired
+    fired++
 }
 
 BumpAliasFirst(*) {
-    global AliasFirstFired
-    AliasFirstFired++
+    global aliasFirstFired
+    aliasFirstFired++
 }
 
 BumpAliasSecond(*) {
-    global AliasSecondFired
-    AliasSecondFired++
+    global aliasSecondFired
+    aliasSecondFired++
 }
 
 PressAliasCombo() {
-    global AliasFirstFired, AliasSecondFired
-    firstBefore := AliasFirstFired
-    secondBefore := AliasSecondFired
+    global aliasFirstFired, aliasSecondFired
+    firstBefore := aliasFirstFired
+    secondBefore := aliasSecondFired
     SendEvent("{Esc down}{F24}{Esc up}")
     Loop 40 {
         Sleep(25)
-        if (AliasFirstFired != firstBefore || AliasSecondFired != secondBefore)
+        if (aliasFirstFired != firstBefore || aliasSecondFired != secondBefore)
             break
     }
     return {
-        first: AliasFirstFired - firstBefore,
-        second: AliasSecondFired - secondBefore
+        first: aliasFirstFired - firstBefore,
+        second: aliasSecondFired - secondBefore
     }
 }
 
 PressBehaviorCombo() {
-    global AliasFirstFired, AliasSecondFired
-    firstBefore := AliasFirstFired
-    secondBefore := AliasSecondFired
+    global aliasFirstFired, aliasSecondFired
+    firstBefore := aliasFirstFired
+    secondBefore := aliasSecondFired
     SendEvent("{F23 down}{F24}{F23 up}")
     Loop 40 {
         Sleep(25)
-        if (AliasFirstFired != firstBefore || AliasSecondFired != secondBefore)
+        if (aliasFirstFired != firstBefore || aliasSecondFired != secondBefore)
             break
     }
     return {
-        first: AliasFirstFired - firstBefore,
-        second: AliasSecondFired - secondBefore
+        first: aliasFirstFired - firstBefore,
+        second: aliasSecondFired - secondBefore
     }
 }
 
 ; Sends Ctrl+F13 and reports how many times the bound action ran
 Press() {
-    global Fired
-    before := Fired
+    global fired
+    before := fired
     SendEvent("^{F13}")
 
     ; Hotkeys run on their own thread; give it a chance before concluding it did not fire
     Loop 40 {
         Sleep(25)
-        if (Fired != before)
+        if (fired != before)
             break
     }
-    return Fired - before
+    return fired - before
 }
 
 Main() {
-    global TestsRun, TestsFailed
+    global testsRun, testsFailed
 
     ; Artificial keystrokes only trigger the script's own hotkeys above input level 0
     SendLevel(1)
@@ -190,11 +190,11 @@ Main() {
     HotkeyManager.DisableAllHotkeys()
 
     Out("")
-    Out(TestsFailed = 0
-        ? "PASS - " TestsRun " assertions"
-        : "FAIL - " TestsFailed " of " TestsRun " assertions failed")
+    Out(testsFailed = 0
+        ? "PASS - " testsRun " assertions"
+        : "FAIL - " testsFailed " of " testsRun " assertions failed")
 
-    ExitApp(TestsFailed = 0 ? 0 : 1)
+    ExitApp(testsFailed = 0 ? 0 : 1)
 }
 
 Main()

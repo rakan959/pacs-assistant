@@ -11,45 +11,45 @@
 
 #Include ../KeybindGUI.ahk
 
-global TestsRun := 0
-global TestsFailed := 0
-global RunPid := DllCall("GetCurrentProcessId")
-global TempDir := A_Temp "\pacs-assistant-gui-smoke-" RunPid "-" DllCall("GetTickCount64", "UInt64") "-" Random(100000, 999999)
-global OpenedWindows := []
-global SmokeKB := 0
-global OriginalConfigPath := ""
-global OriginalProfilesPath := ""
-global OriginalSettingsPath := ""
+global testsRun := 0
+global testsFailed := 0
+global runPid := DllCall("GetCurrentProcessId")
+global tempDir := A_Temp "\pacs-assistant-gui-smoke-" runPid "-" DllCall("GetTickCount64", "UInt64") "-" Random(100000, 999999)
+global openedWindows := []
+global smokeKB := 0
+global originalConfigPath := ""
+global originalProfilesPath := ""
+global originalSettingsPath := ""
 
 Out(text) {
     FileAppend(text "`n", "*")
 }
 
 Check(label, action) {
-    global TestsRun, TestsFailed
-    TestsRun++
+    global testsRun, testsFailed
+    testsRun++
     try {
         action()
         Out("  ok   " label)
     } catch as err {
-        TestsFailed++
+        testsFailed++
         Out("  FAIL " label " -- " err.Message " (" err.File ":" err.Line ")")
     }
 }
 
 Assert(condition, label) {
-    global TestsRun, TestsFailed
-    TestsRun++
+    global testsRun, testsFailed
+    testsRun++
     if condition {
         Out("  ok   " label)
         return
     }
-    TestsFailed++
+    testsFailed++
     Out("  FAIL " label)
 }
 
 OpenAndCaptureWindow(title, action) {
-    global OpenedWindows
+    global openedWindows
     before := Map()
     for hwnd in WinGetList(title)
         before[hwnd] := true
@@ -62,7 +62,7 @@ OpenAndCaptureWindow(title, action) {
     }
     if (created.Length != 1)
         throw Error("Expected one new '" title "' window, found " created.Length)
-    OpenedWindows.Push(created[1])
+    openedWindows.Push(created[1])
     return created[1]
 }
 
@@ -75,28 +75,28 @@ CloseWindow(hwnd) {
 }
 
 Cleanup(*) {
-    global TempDir, OpenedWindows, SmokeKB, RunPid
-    global OriginalConfigPath, OriginalProfilesPath, OriginalSettingsPath
+    global tempDir, openedWindows, smokeKB, runPid
+    global originalConfigPath, originalProfilesPath, originalSettingsPath
     try HotkeyManager.DisableAllHotkeys()
     try UpdateChecker.StopAutoCheck()
-    for hwnd in OpenedWindows
+    for hwnd in openedWindows
         try CloseWindow(hwnd)
-    if SmokeKB
-        try SmokeKB.gui.Destroy()
-    if (OriginalConfigPath != "")
-        ProfileManager.configPath := OriginalConfigPath
-    if (OriginalProfilesPath != "")
-        ProfileManager.profilesPath := OriginalProfilesPath
-    if (OriginalSettingsPath != "")
-        Settings.settingsFile := OriginalSettingsPath
+    if smokeKB
+        try smokeKB.gui.Destroy()
+    if (originalConfigPath != "")
+        ProfileManager.configPath := originalConfigPath
+    if (originalProfilesPath != "")
+        ProfileManager.profilesPath := originalProfilesPath
+    if (originalSettingsPath != "")
+        Settings.settingsFile := originalSettingsPath
     try SetWorkingDir(A_ScriptDir)
 
     ; The recursive cleanup target is private to this PID/run and must remain a
     ; direct child of the system temp directory.
     try {
         tempParent := RTrim(AppControl.NormalizePath(A_Temp), "\") "\"
-        resolved := AppControl.NormalizePath(TempDir)
-        expectedName := "pacs-assistant-gui-smoke-" RunPid "-"
+        resolved := AppControl.NormalizePath(tempDir)
+        expectedName := "pacs-assistant-gui-smoke-" runPid "-"
         if (InStr(resolved, tempParent, true) = 1
             && InStr(SubStr(resolved, StrLen(tempParent) + 1), expectedName, true) = 1)
             DirDelete(resolved, true)
@@ -112,24 +112,24 @@ FindListView(guiObj) {
 }
 
 Main() {
-    global TestsRun, TestsFailed, TempDir, SmokeKB
-    global OriginalConfigPath, OriginalProfilesPath, OriginalSettingsPath
+    global testsRun, testsFailed, tempDir, smokeKB
+    global originalConfigPath, originalProfilesPath, originalSettingsPath
 
-    DirCreate(TempDir)
-    DirCreate(TempDir "\profiles")
-    SetWorkingDir(TempDir)
-    OriginalConfigPath := ProfileManager.configPath
-    OriginalProfilesPath := ProfileManager.profilesPath
-    OriginalSettingsPath := Settings.settingsFile
-    ProfileManager.configPath := TempDir "\config.ini"
-    ProfileManager.profilesPath := TempDir "\profiles"
-    Settings.settingsFile := TempDir "\settings.ini"
+    DirCreate(tempDir)
+    DirCreate(tempDir "\profiles")
+    SetWorkingDir(tempDir)
+    originalConfigPath := ProfileManager.configPath
+    originalProfilesPath := ProfileManager.profilesPath
+    originalSettingsPath := Settings.settingsFile
+    ProfileManager.configPath := tempDir "\config.ini"
+    ProfileManager.profilesPath := tempDir "\profiles"
+    Settings.settingsFile := tempDir "\settings.ini"
     Settings.SaveAllSettings()
 
     ; A profile with a built-in bind, a scoped bind and a custom function.
     ; F13/F14 do not exist on a normal keyboard, so applying these binds cannot
     ; swallow a key the user might actually press.
-    path := TempDir "\profiles\Smoke.ini"
+    path := tempDir "\profiles\Smoke.ini"
     IniWrite("Sign Report|Draft Report|Custom: Smoke|", path, "Functions", "Order")
     IniWrite("^F13", path, "Keybinds", "Sign Report")
     IniWrite("^F14", path, "Keybinds", "Draft Report")
@@ -157,7 +157,7 @@ Main() {
     Check("main window builds", () => (kb := KeybindGUI()))
     if !kb
         throw Error("The main KeybindGUI instance could not be constructed")
-    SmokeKB := kb
+    smokeKB := kb
 
     lv := FindListView(kb.gui)
     Assert(lv != 0, "main window has a keybind list")
@@ -247,11 +247,11 @@ Main() {
     }
 
     Out("")
-    Out(TestsFailed = 0
-        ? "PASS - " TestsRun " checks"
-        : "FAIL - " TestsFailed " of " TestsRun " checks failed")
+    Out(testsFailed = 0
+        ? "PASS - " testsRun " checks"
+        : "FAIL - " testsFailed " of " testsRun " checks failed")
 
-    return TestsFailed = 0 ? 0 : 1
+    return testsFailed = 0 ? 0 : 1
 }
 
 AssertScope(listView, funcName, expected) {
