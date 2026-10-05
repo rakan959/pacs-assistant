@@ -24,8 +24,8 @@ class UpdateChecker {
     ; Wired by the composition root to the clinical command gate. Keeping the
     ; probe injectable avoids a dependency from the updater back into PACSCommands.
     static clinicalActivityProbe := (*) => false
-    ; The composition root supplies the authoritative two-phase shutdown owner.
-    ; Tests may leave this unset and exercise the legacy clinical probe directly.
+    ; The two-phase shutdown owner (KeybindGUI), set by the composition root.
+    ; PerformUpdate will not install without it.
     static shutdownCoordinator := 0
     static autoCheckIntervalMs := 60 * 60 * 1000
     static autoCheckFailureLogged := false
@@ -1109,6 +1109,8 @@ class UpdateChecker {
     }
 
     static PerformUpdate(updateInfo, updateGui) {
+        if !IsObject(this.shutdownCoordinator)
+            throw Error("UpdateChecker.shutdownCoordinator must be set before an update is installed")
         if !this.UpdateInfoIsEligible(updateInfo, false) {
             MsgBox(
                 "This update is no longer eligible under the current preferences. Check for updates again.",
@@ -1126,19 +1128,8 @@ class UpdateChecker {
             )
             return false
         }
-        shutdownStarted := false
-        if IsObject(this.shutdownCoordinator) {
-            if !this.shutdownCoordinator.BeginShutdown("install the update")
-                return false
-            shutdownStarted := true
-        } else if this.clinicalActivityProbe.Call() {
-            MsgBox(
-                "Wait for the active clinical command to finish before updating PACS Assistant.",
-                "Clinical Command In Progress",
-                "Icon!"
-            )
+        if !this.shutdownCoordinator.BeginShutdown("install the update")
             return false
-        }
         currentExe := ""
         backupExe := ""
         newExe := ""
@@ -1182,17 +1173,14 @@ class UpdateChecker {
                 this.installDirectory
             )
             updateGui.Destroy()
-            if shutdownStarted
-                return this.shutdownCoordinator.CompleteShutdown()
-            ExitApp()
+            return this.shutdownCoordinator.CompleteShutdown()
         } catch as err {
-            if shutdownStarted
-                this.shutdownCoordinator.CancelShutdown()
+            this.shutdownCoordinator.CancelShutdown()
             ; Includes a rejected download (size, SHA-256, PE or version check).
             AppLog.Write("Update failed: " ErrorText.Describe(err))
             MsgBox("Update failed: " err.Message, "Update Failed", "Icon!")
-            ; The running executable is not touched until the updater starts after
-            ; ExitApp, so a preflight failure only needs to remove staged artifacts.
+            ; The running executable is not touched until the updater runs after the
+            ; app exits, so a preflight failure only needs to remove staged artifacts.
             if (newExe != "")
                 try FileDelete(newExe)
             if (updaterPath != "")

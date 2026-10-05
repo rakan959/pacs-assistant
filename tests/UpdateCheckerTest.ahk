@@ -45,6 +45,7 @@ class UpdateCheckerTest {
         "TestVerifiedUpdateLaunchesTheUpdaterOnce",
         "TestUpdateIsNotDownloadedWhenItCannotBeTrusted",
         "TestRejectedDownloadIsDiscardedWithoutLaunchingTheUpdater",
+        "TestUpdateIsNotInstalledWithoutAShutdownCoordinator",
         "TestVersionComesFromAppVersion",
         "TestReleaseParserShortensOversizedNotes",
         "TestUpdaterScriptRequiresHealthyRelaunch",
@@ -797,6 +798,21 @@ class UpdateCheckerTest {
         Assert.Equal(0, coordinator.completeCalls)
         Assert.Equal(1, TestRunner.dialogs.Length)
         Assert.True(InStr(TestRunner.dialogs[1].text, "SHA-256"))
+    }
+
+    ; Installing ends the app, which only the shutdown coordinator may do: without
+    ; one, nothing is downloaded or launched.
+    TestUpdateIsNotInstalledWithoutAShutdownCoordinator() {
+        launches := this.UseTestInstall()
+        transport := RecordingDownloadTransport(A_AhkPath)
+        UpdateChecker.transport := transport
+
+        Assert.Throws(
+            () => UpdateChecker.PerformUpdate(InterpreterUpdateInfo(), FakeUpdateGui()),
+            "shutdownCoordinator must be set"
+        )
+        Assert.Equal(0, transport.downloads.Length)
+        Assert.Equal(0, launches.Length)
     }
 
     Teardown() {
