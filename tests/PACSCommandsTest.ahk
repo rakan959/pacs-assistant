@@ -113,7 +113,7 @@ class PACSCommandsTest {
     }
 
     ; Picks the report body out of the other text fields in the PowerScribe window,
-    ; so the report no longer has to be found by a fixed positional path (issue #28)
+    ; so the fixed positional path is only a fallback (issue #28)
     TestLooksLikeReport() {
         Assert.True(PowerScribe.LooksLikeReport("EXAMINATION: CT CHEST`n`nFINDINGS: ..."))
         Assert.True(PowerScribe.LooksLikeReport("examination: mri brain"))

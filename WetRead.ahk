@@ -452,9 +452,9 @@ class NativeWetReadDriver {
         ; identifier raises before mutation, so report this mode as unsupported.
         if !hwnd
             return false
-        ; The HWND-targeted write does not require focus. A best-effort ControlFocus
-        ; here created a second mutation boundary where the provider could rerender
-        ; after validation and before SetText, so do exactly one validated action.
+        ; The HWND-targeted write does not require focus. A ControlFocus here would
+        ; add a second mutation boundary, where the provider could rerender between
+        ; validation and SetText, so this is exactly one validated action.
         this.controlDriver.SetText(hwnd, value)
         return true
     }
@@ -840,8 +840,9 @@ PromptWetReadMode() {
     modeGui.Add("Button", "w200", "UIA Value pattern").OnEvent("Click", (*) => (choice := "uia", modeGui.Destroy()))
     modeGui.Add("Button", "w200", "ControlSetText").OnEvent("Click", (*) => (choice := "control", modeGui.Destroy()))
     modeGui.Add("Button", "w200", "Cancel").OnEvent("Click", (*) => (choice := "cancel", modeGui.Destroy()))
-    ; The X button must destroy, not merely hide: WinWaitClose returns only on
-    ; destruction, and a hidden Gui object would outlive this function.
+    ; The X button must destroy, not merely hide: WinWaitClose also returns for a
+    ; hidden window, but the hidden Gui would outlive this function, kept alive by
+    ; its own button callbacks.
     modeGui.OnEvent("Close", (*) => modeGui.Destroy())
     modeGui.Show()
     WinWaitClose(modeGui.Hwnd)

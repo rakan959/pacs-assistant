@@ -51,11 +51,10 @@ class PACSMonitor {
     ; No stable live Explorer Portal refresh AutomationId has been captured yet.
     ; Keep the click path closed instead of accepting any label containing "refresh".
     static approvedRefreshAutomationIds := []
-    ; Accessions already alerted on, held as a set. This was an Array scanned
-    ; linearly on every accession of every row, over a list that only ever grows.
-    ; Measured, 400 lookups (10 refresh passes over 40 rows): 0 ms at 50 known,
-    ; 15 ms at 250, 62 ms at 1000, 188 ms at 3000 - against 0 ms for Map.Has at
-    ; every size.
+    ; Accessions already alerted on, held as a set: every accession of every row is
+    ; looked up in a list that only grows. Measured, 400 lookups (10 refresh passes
+    ; over 40 rows) in a linear Array take 0 ms at 50 known, 15 ms at 250, 62 ms at
+    ; 1000 and 188 ms at 3000, against 0 ms for Map.Has at every size.
     static knownAccessions := Map()
     static refreshTimer := 0
 
@@ -69,9 +68,8 @@ class PACSMonitor {
     ; a live-approved exact AutomationId and uniqueness; none is approved by default.
     static studyListPath := "Y/YYY/YqYYYVRxrTR"
 
-    ; Refresh failures used to be swallowed entirely: the portal kept being scraped,
-    ; so new studies still alerted, while nothing was actually being refreshed and
-    ; nothing said so. Count them and speak up once instead.
+    ; The portal is scanned whether or not refresh works, so new studies can still
+    ; alert while nothing refreshes. Count refresh failures and speak up once.
     static consecutiveRefreshFailures := 0
     static refreshFailureThreshold := 3
     static refreshFailureNotified := false

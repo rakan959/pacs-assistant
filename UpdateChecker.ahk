@@ -269,9 +269,8 @@ class UpdateChecker {
      * latter to its SemVer equivalent (2.0.0-b.4) so old and new tags still order
      * correctly against each other.
      *
-     * The previous parser read only major and minor, so every patch release compared
-     * equal - v2.0.1 and v2.0.9 were indistinguishable and no client would ever have
-     * been offered a patch update.
+     * Patch takes part in precedence, so v2.0.1 and v2.0.9 are distinct versions and
+     * a patch release is offered as an update.
      */
     static ParseVersion(version) {
         version := Trim(version)
@@ -679,7 +678,7 @@ class UpdateChecker {
             updateGui.Add("Edit", "y+5 r10 w400 ReadOnly", updateInfo.releaseNotes)
 
             ; Auto-update checkbox
-            autoUpdateCheckbox := updateGui.Add("Checkbox", "y+10", "Automatically check for updates on launch")
+            autoUpdateCheckbox := updateGui.Add("Checkbox", "y+10", "Automatically check for updates")
             autoUpdateCheckbox.Value := Settings.Get("AutoUpdate")
 
             ; Skip beta versions checkbox

@@ -38,8 +38,7 @@ class NativePowerScribeSessionDriver {
 
 /**
  * The PowerScribe report itself: locating it, reading it, and routing it to an
- * attending. Split out of PACSCommands, which had become the command registry plus
- * every workflow's implementation in one file.
+ * attending. PACSCommands keeps the command registry; the report workflow is here.
  */
 class PowerScribe {
     static sessionDriver := NativePowerScribeSessionDriver()
