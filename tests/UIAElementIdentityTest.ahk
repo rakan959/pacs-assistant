@@ -24,8 +24,13 @@ class UIAElementIdentityTest {
     TestIndistinguishableElementsCompareEqual() {
         Assert.True(UIAElementIdentity.Same(FakeIdentityElement(), FakeIdentityElement()))
         Assert.True(UIAElementIdentity.SameStrict(FakeIdentityElement(), FakeIdentityElement()))
-        ; Names compare without regard to case.
+        ; Name, class name and AutomationId compare without regard to case.
         Assert.True(UIAElementIdentity.Same(FakeIdentityElement(), FakeIdentityElement({Name: "POWERMIC III"})))
+        Assert.True(UIAElementIdentity.Same(FakeIdentityElement(), FakeIdentityElement({ClassName: "LISTBOXITEM"})))
+        Assert.True(UIAElementIdentity.Same(
+            FakeIdentityElement({AutomationId: "mic"}),
+            FakeIdentityElement({AutomationId: "MIC"})
+        ))
     }
 
     TestAnyDifferingPropertySeparatesElements() {

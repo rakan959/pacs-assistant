@@ -7,11 +7,12 @@
  * through UIA rather than by object identity alone.
  *
  * The comparison is UIA-v2's CompareElementsEx: elements are the same when the
- * provider says so, or otherwise when their type, name (ignoring case), class
- * name, AutomationId and on-screen rectangle are all equal. CompareElements misses
- * true matches on some providers, which is why the library adds the property
- * check. Two distinct elements pass it only when they show the same role and name
- * in the same place, such as two identically named items of one collapsed list.
+ * provider says so, or otherwise when their type, name, class name, AutomationId
+ * (the three strings compared ignoring case) and on-screen rectangle are all
+ * equal. CompareElements misses true matches on some providers, which is why the
+ * library adds the property check. Two distinct elements pass it only when they
+ * show the same role and name in the same place, such as two identically named
+ * items of one collapsed list.
  */
 class UIAElementIdentity {
     /**
