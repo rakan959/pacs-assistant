@@ -39,6 +39,7 @@ class PACSMonitorTest {
         "TestRefreshFailureNotificationUsesTextThenTitle",
         "TestScanFailuresNotifyOnceAndReset",
         "TestUnapprovedRefreshIsReportedOnceAsUnavailable",
+        "TestNoAlertKindSkipsTheWorklistScan",
         "TestNewStudyNotificationUsesTextThenTitle",
         "TestFailedAlertDoesNotConsumeAccession",
         "TestCompactDateRecognitionHonorsCalendarRules"
@@ -547,6 +548,38 @@ class PACSMonitorTest {
         Assert.Equal(1, titles.Length)
         Assert.Equal("PACS Auto-Refresh Unavailable", titles[1])
         Assert.True(InStr(this.notifications[1].text, "yourself"), this.notifications[1].text)
+    }
+
+    ; The scan only feeds the alerts. With both kinds off, its result would be
+    ; thrown away, so the study list is not read and no second lease is taken.
+    TestNoAlertKindSkipsTheWorklistScan() {
+        SetTestSetting("AudioAlertNewCase", false)
+        SetTestSetting("MessageBoxNewCase", false)
+        leases := []
+        PACSMonitor.automationAcquire := (name) => (
+            leases.Push(name),
+            {status: "acquired", busyCommand: ""}
+        )
+        session := {
+            hwnd: 100,
+            target: "ahk_id 100",
+            processId: 42,
+            title: "Explorer Portal",
+            exe: "msedge.exe"
+        }
+        driver := PinnedPortalMonitorDriver(
+            session,
+            FakePACSActionButton(42, 100, "Refresh", "refreshPrimary"),
+            FakePACSStudyList(42, 100, {Name: "CT HEAD WITHOUT CONTRAST 12345678"})
+        )
+        PACSMonitor.driver := driver
+
+        PACSMonitor.RefreshAndCheck()
+
+        Assert.Equal(1, leases.Length)
+        Assert.Equal("PACS worklist refresh", leases[1])
+        Assert.Equal(1, driver.rootCalls)
+        Assert.Equal(0, PACSMonitor.knownAccessions.Count)
     }
 
     TestScanFailuresNotifyOnceAndReset() {

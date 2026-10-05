@@ -411,6 +411,11 @@ class PACSMonitor {
             }
         }
 
+        ; The scan only feeds the new-study alerts. With both kinds off its result
+        ; would be discarded, so it does not take the clinical lease at all.
+        if !this.NewCaseAlertsEnabled()
+            return false
+
         scanLease := this.automationAcquire.Call("PACS worklist scan")
         if (!IsObject(scanLease)
             || !HasProp(scanLease, "status")
@@ -562,6 +567,10 @@ class PACSMonitor {
         if (month = 2 && (Mod(year, 400) = 0 || (Mod(year, 4) = 0 && Mod(year, 100) != 0)))
             days[2] := 29
         return day <= days[month]
+    }
+
+    static NewCaseAlertsEnabled() {
+        return Settings.Get("AudioAlertNewCase") || Settings.Get("MessageBoxNewCase")
     }
 
     static AlertNewCases(newStudies) {
