@@ -61,10 +61,9 @@ class KeybindGUI {
         this.gui.Add("Text", "xm y+20", "Active Keybinds:")
         y := 70
 
-        ; Create ListView for keybinds with adjusted column widths (removed Type column)
+        ; Keybind list: function, its key, and the window it is restricted to
         lv := this.gui.Add("ListView", "xm y" y " w520 h200", ["Function", "Keybind", "Active In"])
 
-        ; Populate ListView with current bindings (no more type column)
         currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
         for funcName, bind in currentProfile.binds {
             lv.Add(, funcName, this.PrettifyHotkey(bind), this.ScopeLabel(funcName))
@@ -144,12 +143,14 @@ class KeybindGUI {
             return false
         }
 
+        ; catch Any: whatever escapes, a held shutdown lease would block every
+        ; clinical command until restart.
         try {
             if !this.ResolveDirtyProfileBeforeLeaving(false, true) {
                 this.CancelShutdown()
                 return false
             }
-        } catch {
+        } catch Any {
             this.CancelShutdown()
             throw
         }
@@ -412,7 +413,7 @@ class KeybindGUI {
         selectorGui.OnEvent("Close", (*) => (this.CloseProfileSelector(selectorGui), true))
         this.RegisterProfileSelector(selectorGui)
         try selectorGui.Show()
-        catch as err {
+        catch Any as err {
             this.RetireProfileSelector(selectorGui)
             throw err
         }
@@ -749,7 +750,7 @@ class KeybindGUI {
         try originalProfile := ProfileManager.CloneProfile(
                 ProfileManager.profiles[ProfileManager.currentProfile]
             )
-        catch as err {
+        catch Any as err {
             this.ReleaseCaptureTransaction()
             throw err
         }
@@ -815,7 +816,7 @@ class KeybindGUI {
         return ""
     }
 
-    OnInputEnd(funcName, control, promptGui, ih?) {
+    OnInputEnd(funcName, control, promptGui, ih) {
         ; Stop(), timeout, and replacement by another InputHook all raise OnEnd too.
         ; Only a real end key is input to bind; treating a stopped hook's blank EndKey
         ; as data silently unassigned the command while cancelling the dialog.
@@ -837,7 +838,7 @@ class KeybindGUI {
         if key ~= "^[LR]?(Control|Alt|Shift|Win)$" {
             ; Create and start a new input hook since the old one is ended
             try this.StartInputHook(funcName, control, promptGui)
-            catch as err {
+            catch Any as err {
                 this.CancelKeybindPrompt(promptGui)
                 throw err
             }
@@ -1840,10 +1841,10 @@ class KeybindGUI {
         selectorGui.Add("Text", "xm y+20", "Built-in Functions:")
         lbBuiltIn := selectorGui.Add("ListBox", "w200 h150", builtInFunctions)
 
-        ; Add custom functions section (now always show if there are any custom functions).
-        ; lbCustom stays defined either way - the Add Selected handler reads it, and an
-        ; unassigned local raised an unset-variable error whenever a profile had no
-        ; custom functions and nothing was selected in the built-in list.
+        ; Custom functions get their own list when the profile has any. lbCustom stays
+        ; defined either way: the Add Selected handler reads it, and an unassigned
+        ; local raised an unset-variable error whenever a profile had no custom
+        ; functions and nothing was selected in the built-in list.
         lbCustom := ""
         if (customFunctions.Length > 0) {
             selectorGui.Add("Text", "xm y+10", "Custom Functions:")
@@ -1896,9 +1897,6 @@ class KeybindGUI {
             return false
         }
 
-        ; Note the parentheses: without them this parses as "(!InStr(...)) = 1", which
-        ; is true only when the prefix is absent entirely and lets a name containing
-        ; "Custom: " anywhere past the start through
         if (InStr(funcName, "Custom: ") != 1) {
             MsgBox("Only custom functions can be deleted.", "Built-in Function", "Icon!")
             return false
@@ -2069,7 +2067,7 @@ class KeybindGUI {
                 row := listView.Add(, funcName, "Unassigned", "Any window")
                 this.ResizeColumns(listView)
                 this.MarkProfileDirty(profileName)
-            } catch {
+            } catch Any {
                 if currentProfile.customFuncs.Has(funcName)
                     currentProfile.customFuncs.Delete(funcName)
                 if currentProfile.binds.Has(funcName)
@@ -2133,7 +2131,7 @@ class KeybindGUI {
                 row := listView.Add(, funcName, "Unassigned", "Any window")
                 this.ResizeColumns(listView)
                 this.MarkProfileDirty(profileName)
-            } catch {
+            } catch Any {
                 if profile.binds.Has(funcName)
                     profile.binds.Delete(funcName)
                 if profile.scopes.Has(funcName)
@@ -2207,7 +2205,8 @@ class KeybindGUI {
                     )
                     return false
                 }
-                ; No longer delete the custom function itself, only its binding.
+                ; Removing a row unbinds a custom function but keeps its definition;
+                ; DeleteCustomFunction removes the definition.
                 ProfileManager.profiles[profileName] := candidate
                 this.MarkProfileDirty(profileName)
                 try this.ResizeColumns(listView)

@@ -59,6 +59,7 @@ class KeybindGUITest {
         "TestCreateProfileSurfacesStorageRecovery",
         "TestDirtyScopeEditBlocksProfileSwitchWhenCancelled",
         "TestClosingSavesDirtyProfileBeforeExit",
+        "TestShutdownLeaseIsReleasedWhenTheDirtyPromptThrowsANonError",
         "TestProfileSwitchCanDiscardDirtyChanges",
         "TestFailedCustomDeletePreservesLiveProfile",
         "TestRemoveFunctionKeepsProfileAndRowWhenNativeOffFails",
@@ -1759,6 +1760,21 @@ class KeybindGUITest {
         Assert.Equal(1, editor.exitCalls)
     }
 
+    ; A held shutdown lease blocks every clinical command until restart, so it must be
+    ; released whatever escapes the dirty-profile prompt, a non-Error value included.
+    TestShutdownLeaseIsReleasedWhenTheDirtyPromptThrowsANonError() {
+        editor := {base: NonErrorDirtyPromptGUI.Prototype, gui: ""}
+
+        threw := false
+        try editor.BeginShutdown("close PACS Assistant")
+        catch Any
+            threw := true
+
+        Assert.True(threw)
+        Assert.False(ExclusiveOperations.shutdownActive)
+        Assert.Equal("", ExclusiveOperations.Active())
+    }
+
     TestProfileSwitchCanDiscardDirtyChanges() {
         tempRoot := TestTempPath("pacs-dirty-discard")
         profile := ProfileManager.NewProfile()
@@ -2839,6 +2855,12 @@ class ArrayNotificationDriver {
 
     Notify(message, title, options := "") {
         this.messages.Push({message: message, title: title, options: options})
+    }
+}
+
+class NonErrorDirtyPromptGUI extends KeybindGUI {
+    ResolveDirtyProfileBeforeLeaving(*) {
+        throw "simulated non-Error value"
     }
 }
 

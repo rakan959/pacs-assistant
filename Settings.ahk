@@ -243,7 +243,7 @@ class Settings {
 
     static RequireMutationAllowed() {
         if !this.mutationGuard.Call()
-            throw Error("Settings cannot be changed while a clinical command or shutdown transaction is active")
+            throw Error("Settings cannot be changed while a clinical command, key capture, profile change, dialog or shutdown is in progress")
     }
 
     static BeginWriteTransaction() {
@@ -291,7 +291,8 @@ class Settings {
     ; Show settings dialog
     static ShowDialog() {
         ; The presentation lease excludes every clinical, capture, profile, settings
-        ; and shutdown operation, so it is the only gate the dialog needs.
+        ; and shutdown operation while the window is built; it is released once Show
+        ; returns. Save is gated separately, by BeginWriteTransaction.
         if !this.dialogAcquire.Call("open Settings") {
             this.dialogUnavailableNotifier.Call(
                 "Wait for the active clinical or configuration operation to finish before opening Settings.",

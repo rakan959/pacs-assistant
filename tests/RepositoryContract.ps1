@@ -390,7 +390,7 @@ foreach ($subscriber in @('UpdateChecker', 'PACSMonitor', 'MicrophoneManager')) 
 }
 Assert-Matches $winHttpTransport 'static WINHTTP_FLAG_ASYNC := 0x10000000' 'WINHTTP_FLAG_ASYNC must keep its winhttp.h value.'
 Assert-Matches $winHttpTextRequest '(?s)WinHttpOpen.*?WinHttpTransport\.WINHTTP_FLAG_ASYNC' 'Automatic update metadata requests must use native WinHTTP asynchronous mode.'
-Assert-Matches $main '(?s)kbGUI\s*:=\s*KeybindGUI\(\).*PACSMonitor\.automationAcquire\s*:=.*MicrophoneManager\.automationAcquire\s*:=.*PACSMonitor\.Start\(\).*MicrophoneManager\.Start\(\).*UpdateChecker\.Start\(\)' 'The GUI and shared automation gates must initialize before clinical timers, and clinical timers before automatic network checks.'
+Assert-Matches $main '(?s)PACSMonitor\.automationAcquire\s*:=.*MicrophoneManager\.automationAcquire\s*:=.*kbGUI\s*:=\s*KeybindGUI\(\).*PACSMonitor\.Start\(\).*MicrophoneManager\.Start\(\).*UpdateChecker\.Start\(\)' 'Every lease, the background automation gates included, must be wired before the GUI is shown, the GUI before clinical timers, and clinical timers before automatic network checks.'
 
 Assert-Matches $readme 'git clone --recurse-submodules' 'README must document cloning with submodules.'
 Assert-Matches $readme 'AutoHotkey v2\.0\.26' 'README must state the AutoHotkey version used by CI.'

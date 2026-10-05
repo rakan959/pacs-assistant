@@ -46,15 +46,15 @@ Settings.dialogAcquire := ObjBindMethod(ExclusiveOperations, "TryBegin", "uiPres
 Settings.dialogRelease := ObjBindMethod(ExclusiveOperations, "End", "uiPresentation")
 UpdateChecker.dialogAcquire := ObjBindMethod(ExclusiveOperations, "TryBegin", "uiPresentation")
 UpdateChecker.dialogRelease := ObjBindMethod(ExclusiveOperations, "End", "uiPresentation")
+PACSMonitor.automationAcquire := ObjBindMethod(PACSCommands, "AcquireClinicalAutomation")
+PACSMonitor.automationRelease := ObjBindMethod(PACSCommands, "ReleaseClinicalAutomation")
+MicrophoneManager.automationAcquire := ObjBindMethod(PACSCommands, "AcquireClinicalAutomation")
+MicrophoneManager.automationRelease := ObjBindMethod(PACSCommands, "ReleaseClinicalAutomation")
 
 ; Initialize the GUI when the script starts
 kbGUI := KeybindGUI()
 UpdateChecker.shutdownCoordinator := kbGUI
 OnExit((exitReason, exitCode) => kbGUI.HandleProcessExit(exitReason, exitCode))
-PACSMonitor.automationAcquire := ObjBindMethod(PACSCommands, "AcquireClinicalAutomation")
-PACSMonitor.automationRelease := ObjBindMethod(PACSCommands, "ReleaseClinicalAutomation")
-MicrophoneManager.automationAcquire := ObjBindMethod(PACSCommands, "AcquireClinicalAutomation")
-MicrophoneManager.automationRelease := ObjBindMethod(PACSCommands, "ReleaseClinicalAutomation")
 
 ; Start background clinical services only after the shared automation and
 ; configuration gates are fully composed.
