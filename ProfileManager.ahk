@@ -1,3 +1,8 @@
+; = CONTENTS
+;   + Preamble
+;   + NativeProfileStorageDriver (INI profile persistence primitives)
+;   + ProfileManager class (profile CRUD, keybind & scope persistence, modality/attending)
+
 #Requires AutoHotkey v2.0
 #Include Settings.ahk
 #Include HotkeyContract.ahk

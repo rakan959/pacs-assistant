@@ -1,3 +1,8 @@
+; = CONTENTS
+;   + Preamble
+;   + WinHttpTransport / WinHttpTextRequest (bounded WinHTTP streaming + release parsing)
+;   + UpdateChecker class (version check, update download/verify, updater launch, dialog)
+
 #Requires AutoHotkey v2.0
 #Include Settings.ahk
 #Include Version.ahk

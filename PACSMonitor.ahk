@@ -1,3 +1,8 @@
+; = CONTENTS
+;   + Preamble
+;   + NativePACSMonitorDriver / NativePACSMonitorTimerDriver (portal UIA & timer primitives)
+;   + PACSMonitor class (background study-list refresh, new-study detection & alerts)
+
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
 #Include Settings.ahk

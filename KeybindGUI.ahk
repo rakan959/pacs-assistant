@@ -1,3 +1,8 @@
+; = CONTENTS
+;   + Preamble
+;   + KeybindGUI class (main window: profile & keybind editing, hotkey capture,
+;       modality/attending assignment, save/rename/delete, profile switching)
+
 #Requires AutoHotkey v2.0
 
 #Include HotkeyManager.ahk

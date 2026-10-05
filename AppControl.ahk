@@ -1,3 +1,10 @@
+; = CONTENTS
+;   + Preamble
+;   + NativeWindowDriver / NativeAppLifecycleDriver (Win32 window & process primitives)
+;   + AppControl class (exact-window resolution, targeted key send, graceful close, restart)
+;   + NativeGracefulCloseDriver / NativePacsRestartDriver (clinical close & restart)
+;   + CloseWithSavePrompt, RestartPACS (file-scope workflow entry points)
+
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
 

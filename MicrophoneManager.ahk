@@ -1,3 +1,8 @@
+; = CONTENTS
+;   + Preamble
+;   + NativeMicrophoneSessionDriver (microphone picker window & UIA primitives)
+;   + MicrophoneManager class (background microphone check, selection, notifications)
+
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
 #Include Settings.ahk
