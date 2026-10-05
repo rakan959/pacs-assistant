@@ -453,6 +453,40 @@ Assert-Matches $main 'Settings\.dialogRelease\s*:=\s*ObjBindMethod\(ExclusiveOpe
 Assert-Matches $main 'UpdateChecker\.dialogAcquire\s*:=\s*ObjBindMethod\(ExclusiveOperations,\s*"TryBegin",\s*"uiPresentation"\)' 'Update presentation must acquire the shared UI transaction.'
 Assert-Matches $main 'UpdateChecker\.dialogRelease\s*:=\s*ObjBindMethod\(ExclusiveOperations,\s*"End",\s*"uiPresentation"\)' 'Update presentation must release the shared UI transaction.'
 Assert-Matches $updateChecker 'manualResultNotifier\s*:=\s*\(text, title, options\) => TrayTip' 'Asynchronous update results must use a nonactivating notification by default.'
+
+# The self-update script runs under Windows PowerShell after the app has exited:
+# if it did not parse, nothing would be installed, relaunched or logged.
+$updaterMatch = [regex]::Match($updateChecker, '(?ms)static BuildUpdaterScript\(\) \{\s*script := "\s*\r?\n\s*\(\r?\n(?<body>.*?)\r?\n\s*\)"')
+if (-not $updaterMatch.Success) {
+    $failures.Add('The updater script continuation section in UpdateChecker.BuildUpdaterScript was not found.')
+} else {
+    $updaterScript = $updaterMatch.Groups['body'].Value
+    # Without double quotes or backticks the section's text is exactly the string
+    # AutoHotkey builds, so this parses the script that runs.
+    if ($updaterScript -match '[`"]') {
+        $failures.Add('The updater script must not use double quotes or backticks, so this check reads the exact script that runs.')
+    }
+    $parseErrors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseInput($updaterScript, [ref]$null, [ref]$parseErrors)
+    foreach ($parseError in $parseErrors) {
+        $failures.Add("The updater script does not parse: $($parseError.Message) (line $($parseError.Extent.StartLineNumber))")
+    }
+    # The installed updater runs under Windows PowerShell 5.1, whose grammar is
+    # narrower than this engine's; check it there too where it exists (CI).
+    $windowsPowerShell = if ($env:SystemRoot) { Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' } else { '' }
+    if ($windowsPowerShell -and (Test-Path -LiteralPath $windowsPowerShell)) {
+        $scriptFile = Join-Path ([IO.Path]::GetTempPath()) "pacs-assistant-updater-parse-$PID.ps1"
+        try {
+            [IO.File]::WriteAllText($scriptFile, $updaterScript)
+            & $windowsPowerShell -NoProfile -NonInteractive -Command "`$e = `$null; [void][Management.Automation.Language.Parser]::ParseFile('$scriptFile', [ref]`$null, [ref]`$e); exit `$e.Count"
+            if ($LASTEXITCODE -ne 0) {
+                $failures.Add("The updater script does not parse under Windows PowerShell 5.1 ($LASTEXITCODE errors).")
+            }
+        } finally {
+            Remove-Item -LiteralPath $scriptFile -ErrorAction SilentlyContinue
+        }
+    }
+}
 foreach ($subscriber in @('UpdateChecker', 'PACSMonitor', 'MicrophoneManager')) {
     Assert-Matches $main ("Settings\.AddChangeListener\(ObjBindMethod\(" + $subscriber) ("main.ahk must explicitly subscribe " + $subscriber + " to settings changes.")
 }
