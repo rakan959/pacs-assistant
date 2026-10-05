@@ -8,6 +8,7 @@
 #Include ../Settings.ahk
 #Include TestRunner.ahk
 #Include FakePresentationLease.ahk
+#Include LogCapture.ahk
 
 class UpdateCheckerTest {
     static tests := [
@@ -16,6 +17,7 @@ class UpdateCheckerTest {
         "TestVersionPrecedenceTable",
         "TestVersionEquivalence",
         "TestAutoCheckTimerRespectsSettings",
+        "TestAutomaticCheckFailuresAreLoggedOncePerOutage",
         "TestSettingsChangeRestartsTimer",
         "TestAutomaticCheckUsesAsyncTransport",
         "TestSynchronousAsyncFailureIsNotReportedAsStarted",
@@ -63,12 +65,9 @@ class UpdateCheckerTest {
         this.originalUpdateCheckEligibleProbe := UpdateChecker.updateCheckEligibleProbe
         this.originalUpdateAvailableNotifier := UpdateChecker.updateAvailableNotifier
         this.originalManualResultNotifier := UpdateChecker.manualResultNotifier
-        this.originalDialogAcquire := UpdateChecker.HasOwnProp("dialogAcquire")
-            ? UpdateChecker.dialogAcquire
-            : 0
-        this.originalDialogRelease := UpdateChecker.HasOwnProp("dialogRelease")
-            ? UpdateChecker.dialogRelease
-            : 0
+        this.originalDialogAcquire := UpdateChecker.dialogAcquire
+        this.originalDialogRelease := UpdateChecker.dialogRelease
+        this.originalAutoCheckFailureLogged := UpdateChecker.autoCheckFailureLogged
         this.originalPendingUpdateInfo := UpdateChecker.pendingUpdateInfo
         this.originalNotifiedVersion := UpdateChecker.notifiedVersion
         this.originalUpdateDialog := UpdateChecker.updateDialog
@@ -92,6 +91,7 @@ class UpdateCheckerTest {
         UpdateChecker.notifiedVersion := ""
         UpdateChecker.updateDialog := 0
         UpdateChecker.activeRequest := 0
+        UpdateChecker.autoCheckFailureLogged := false
     }
 
     TestVersionParsing() {
@@ -426,6 +426,27 @@ class UpdateCheckerTest {
         Assert.Equal(0, UpdateChecker.activeRequest)
     }
 
+    ; An offline workstation fails the hourly check every time: one log entry per
+    ; outage, and a new outage after a successful check is logged again.
+    TestAutomaticCheckFailuresAreLoggedOncePerOutage() {
+        capturedLog := LogCapture()
+        try {
+            transport := FakeAsyncUpdateTransport()
+            UpdateChecker.transport := transport
+            loop 2 {
+                Assert.True(UpdateChecker.BeginAutoCheck(true))
+                transport.Resolve({status: 503, body: ""})
+            }
+            Assert.Equal(1, capturedLog.Count("Automatic update check failed: Error: GitHub release request returned HTTP 503"))
+
+            Assert.True(UpdateChecker.BeginAutoCheck(true))
+            transport.Resolve({status: 404, body: ""})
+            Assert.True(UpdateChecker.BeginAutoCheck(true))
+            transport.Resolve({status: 503, body: ""})
+            Assert.Equal(2, capturedLog.Count("Automatic update check failed"))
+        } finally capturedLog.Restore()
+    }
+
     TestSynchronousAsyncFailureIsNotReportedAsStarted() {
         UpdateChecker.transport := SynchronousFailingAsyncTransport()
 
@@ -678,14 +699,9 @@ class UpdateCheckerTest {
         UpdateChecker.updateCheckEligibleProbe := this.originalUpdateCheckEligibleProbe
         UpdateChecker.updateAvailableNotifier := this.originalUpdateAvailableNotifier
         UpdateChecker.manualResultNotifier := this.originalManualResultNotifier
-        if this.originalDialogAcquire
-            UpdateChecker.dialogAcquire := this.originalDialogAcquire
-        else
-            try UpdateChecker.DeleteProp("dialogAcquire")
-        if this.originalDialogRelease
-            UpdateChecker.dialogRelease := this.originalDialogRelease
-        else
-            try UpdateChecker.DeleteProp("dialogRelease")
+        UpdateChecker.dialogAcquire := this.originalDialogAcquire
+        UpdateChecker.dialogRelease := this.originalDialogRelease
+        UpdateChecker.autoCheckFailureLogged := this.originalAutoCheckFailureLogged
         UpdateChecker.pendingUpdateInfo := this.originalPendingUpdateInfo
         UpdateChecker.notifiedVersion := this.originalNotifiedVersion
         UpdateChecker.updateDialog := this.originalUpdateDialog

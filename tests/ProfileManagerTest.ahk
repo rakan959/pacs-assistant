@@ -6,6 +6,7 @@
 #Requires AutoHotkey v2.0
 #Include ../ProfileManager.ahk
 #Include TestRunner.ahk
+#Include LogCapture.ahk
 
 class ProfileManagerTest {
     static tests := [
@@ -658,7 +659,13 @@ class ProfileManagerTest {
         ProfileManager.SaveProfile("Good", good)
         FileAppend("this is not an INI profile", ProfileManager.profilesPath "\Malformed.ini")
 
-        ProfileManager.LoadProfiles()
+        capturedLog := LogCapture()
+        try ProfileManager.LoadProfiles()
+        finally {
+            logged := capturedLog.Count("Profile could not be loaded: " ProfileManager.profilesPath "\Malformed.ini: ")
+            capturedLog.Restore()
+        }
+        Assert.Equal(1, logged)
 
         Assert.True(ProfileManager.profiles.Has("Good"))
         Assert.False(ProfileManager.profiles.Has("Malformed"))

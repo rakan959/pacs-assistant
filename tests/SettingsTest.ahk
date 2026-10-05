@@ -7,6 +7,7 @@
 #Include ../Settings.ahk
 #Include TestRunner.ahk
 #Include FakePresentationLease.ahk
+#Include LogCapture.ahk
 
 class SettingsTest {
     static tests := [
@@ -400,11 +401,17 @@ class SettingsTest {
         dialog := FakeSettingsDialog()
         reports := []
 
-        savedAndApplied := Settings.SaveSettings(
+        capturedLog := LogCapture()
+        try savedAndApplied := Settings.SaveSettings(
             controls,
             dialog,
             (message, errors) => reports.Push({message: message, errors: errors})
         )
+        finally {
+            logged := capturedLog.Count("Settings change listener failed: ")
+            capturedLog.Restore()
+        }
+        Assert.Equal(1, logged)
 
         Assert.False(savedAndApplied)
         Assert.True(dialog.destroyed)

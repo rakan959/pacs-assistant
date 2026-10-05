@@ -7,6 +7,7 @@
 #Include ../MicrophoneManager.ahk
 #Include ../PACSCommands.ahk
 #Include TestRunner.ahk
+#Include LogCapture.ahk
 
 class MicrophoneManagerTest {
     static tests := [
@@ -31,7 +32,8 @@ class MicrophoneManagerTest {
         "PickerUncertaintyConsumesOneBoundedSessionBudget",
         "ActiveClinicalLeaseSkipsBackgroundMicrophoneCheck",
         "RecycledWindowHandleWithNewProcessStartsANewLoginSession",
-        "MonitoringStartsOnlyWithSwapEnabledAndANamedMicrophone"
+        "MonitoringStartsOnlyWithSwapEnabledAndANamedMicrophone",
+        "ApplyNowNamesEachFailureAndKeepsTheResolutionError"
     ]
 
     MonitoringStartsOnlyWithSwapEnabledAndANamedMicrophone() {
@@ -56,6 +58,27 @@ class MicrophoneManagerTest {
                 FileDelete(Settings.settingsFile)
             Settings.settingsFile := originalSettingsFile
         }
+    }
+
+    ApplyNowNamesEachFailureAndKeepsTheResolutionError() {
+        fixture := MicrophoneFixture([])
+        originalName := Settings.Get("MicrophoneName")
+        try {
+            SetTestSetting("MicrophoneName", "")
+            Assert.False(MicrophoneManager.ApplyNow())
+
+            SetTestSetting("MicrophoneName", "PowerMic III")
+            MicrophoneManager.sessionDriver := SequencedMicrophoneSessionDriver(fixture.session, fixture.root, ["error"])
+            Assert.False(MicrophoneManager.ApplyNow())
+            MicrophoneManager.sessionDriver := SequencedMicrophoneSessionDriver(fixture.session, fixture.root, ["absent"])
+            Assert.False(MicrophoneManager.ApplyNow())
+        } finally SetTestSetting("MicrophoneName", originalName)
+
+        Assert.Equal(3, TestRunner.dialogs.Length)
+        Assert.Equal("No Microphone Configured", TestRunner.dialogs[1].title)
+        Assert.Equal("PowerScribe Not Verified", TestRunner.dialogs[2].title)
+        Assert.True(InStr(TestRunner.dialogs[2].text, "simulated provider uncertainty"), TestRunner.dialogs[2].text)
+        Assert.Equal("PowerScribe Not Running", TestRunner.dialogs[3].title)
     }
 
     Setup() {
@@ -336,13 +359,22 @@ class MicrophoneManagerTest {
         fixture.driver.rootError := "simulated picker lookup failure"
         MicrophoneManager.sessionDriver := fixture.driver
 
-        loop MicrophoneManager.maxAttempts
-            MicrophoneManager.CheckForLogin()
+        capturedLog := LogCapture()
+        try {
+            loop MicrophoneManager.maxAttempts
+                MicrophoneManager.CheckForLogin()
+        } finally {
+            logged := capturedLog.Count("PowerScribe microphone was not changed: ")
+            capturedLog.Restore()
+        }
 
         Assert.Equal(MicrophoneManager.maxAttempts, MicrophoneManager.attempts)
         Assert.True(MicrophoneManager.failureNotified)
         Assert.Equal(1, this.notifications.Length)
         Assert.Equal("simulated picker lookup failure", MicrophoneManager.lastError)
+        ; The notice and one log entry per login session carry the cause.
+        Assert.True(InStr(this.notifications[1].text, "Last error: simulated picker lookup failure"), this.notifications[1].text)
+        Assert.Equal(1, logged)
     }
 
     FinalSelectionFailureNotifiesOnce() {

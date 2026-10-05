@@ -16,6 +16,7 @@ class KeybindGUITest {
         "TestCustomFunctionNameChecksUnboundFunctions",
         "TestCustomFunctionNamesUsePersistedCaseInsensitiveIdentity",
         "TestCustomKeybindRejectsABlankLookingWindow",
+        "TestLoadErrorSummaryNamesEachFileAndCause",
         "TestStaleAddFunctionCannotClearANewerBinding",
         "TestProfileBindingOwnerUsesRuntimeIdentity",
         "TestCaptureSuppressesInputToTheForegroundWindow",
@@ -197,6 +198,18 @@ class KeybindGUITest {
         Assert.Equal(1, TestRunner.dialogs.Length)
         Assert.Equal("Invalid Custom Keybind", TestRunner.dialogs[1].title)
         Assert.False(dialog.destroyed)
+    }
+
+    TestLoadErrorSummaryNamesEachFileAndCause() {
+        summary := KeybindGUI.LoadErrorSummary([
+            {path: "C:\data\profiles\Night.ini", message: "Profile is missing [Functions] Order"},
+            {path: "C:\data\profiles\Day.ini", message: "unknown legacy hotkey scope"}
+        ])
+
+        Assert.True(InStr(summary, "2 profile file(s) could not be loaded") = 1, summary)
+        Assert.True(InStr(summary, "C:\data\profiles\Night.ini`nProfile is missing [Functions] Order"), summary)
+        Assert.True(InStr(summary, "C:\data\profiles\Day.ini`nunknown legacy hotkey scope"), summary)
+        Assert.True(InStr(summary, "error.log"), summary)
     }
 
     TestStaleAddFunctionCannotClearANewerBinding() {

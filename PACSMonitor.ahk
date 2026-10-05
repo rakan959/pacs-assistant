@@ -9,6 +9,7 @@
 #Include AppControl.ahk
 #Include UIAElementIdentity.ahk
 #Include ErrorText.ahk
+#Include AppLog.ahk
 
 class NativePACSMonitorDriver {
     ResolvePortalSession() {
@@ -291,8 +292,8 @@ class PACSMonitor {
             this.notifier.Call(text, title, options)
             return true
         }
-        catch as err {
-            OutputDebug("PACS notification failed: " err.Message)
+        catch Any as err {
+            AppLog.Write("PACS notification failed: " ErrorText.Describe(err))
             return false
         }
     }
@@ -305,11 +306,10 @@ class PACSMonitor {
 
         if (this.consecutiveScanFailures >= this.scanFailureThreshold && !this.scanFailureNotified) {
             this.scanFailureNotified := true
-            this.Notify(
-                "Explorer Portal could not be read after " this.consecutiveScanFailures " attempts. Last error: " message,
-                "PACS background monitoring failed",
-                "Icon!"
-            )
+            notice := "Explorer Portal could not be read after " this.consecutiveScanFailures " attempts. Last error: " message
+            ; Logged once per failure episode, with the notice, rather than once per poll.
+            AppLog.Write("PACS background monitoring failed: " notice)
+            this.Notify(notice, "PACS background monitoring failed", "Icon!")
         }
     }
 

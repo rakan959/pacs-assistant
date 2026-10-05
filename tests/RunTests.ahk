@@ -16,6 +16,7 @@ UseIsolatedDataRoot("pacs-assistant-unit-tests")
 #Include TestRunner.ahk
 #Include TestRunnerTest.ahk
 #Include AppStorageTest.ahk
+#Include AppLogTest.ahk
 #Include ErrorTextTest.ahk
 #Include JsonParserTest.ahk
 #Include UpdateCheckerTest.ahk
@@ -34,6 +35,7 @@ UseIsolatedDataRoot("pacs-assistant-unit-tests")
 
 TestRunner.AddTest(TestRunnerTest)
 TestRunner.AddTest(AppStorageTest)
+TestRunner.AddTest(AppLogTest)
 TestRunner.AddTest(ErrorTextTest)
 TestRunner.AddTest(JsonParserTest)
 TestRunner.AddTest(UpdateCheckerTest)

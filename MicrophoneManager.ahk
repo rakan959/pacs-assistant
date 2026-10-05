@@ -10,6 +10,7 @@
 #Include UIAValue.ahk
 #Include UIAElementIdentity.ahk
 #Include ErrorText.ahk
+#Include AppLog.ahk
 
 class NativeMicrophoneSessionDriver {
     CaptureResult() {
@@ -175,8 +176,8 @@ class MicrophoneManager {
 
     static Notify(text, title, options := "") {
         try this.notifier.Call(text, title, options)
-        catch as err {
-            OutputDebug("Microphone notification failed: " err.Message)
+        catch Any as err {
+            AppLog.Write("Microphone notification failed: " ErrorText.Describe(err))
         }
     }
 
@@ -227,11 +228,12 @@ class MicrophoneManager {
         if (this.attempts < this.maxAttempts || this.failureNotified)
             return
         this.failureNotified := true
-        this.Notify(
-            "PACS Assistant could not confirm microphone '" Trim(micName) "' after " this.attempts " attempts.",
-            "PowerScribe microphone was not changed",
-            "Icon!"
-        )
+        message := "PACS Assistant could not confirm microphone '" Trim(micName) "' after " this.attempts " attempts."
+        if (this.lastError != "")
+            message .= " Last error: " this.lastError
+        ; Logged once per login session, with the notice, rather than once per poll.
+        AppLog.Write("PowerScribe microphone was not changed: " message)
+        this.Notify(message, "PowerScribe microphone was not changed", "Icon!")
     }
 
     ; Picker absence is expected after login. Identity ambiguity and provider failures
@@ -564,51 +566,49 @@ class MicrophoneManager {
      */
     static ApplyNow() {
         micName := Trim(Settings.Get("MicrophoneName"))
-        if (micName = "") {
-            MsgBox("No microphone is configured. Set one under Settings > PowerScribe.", "PACS Assistant", "Icon!")
-            return false
-        }
+        if (micName = "")
+            return this.ApplyNowFailed("No microphone is configured. Set one under Settings > PowerScribe.", "No Microphone Configured")
 
         resolution := this.sessionDriver.CaptureResult()
-        if (!IsObject(resolution) || !HasProp(resolution, "status")) {
-            MsgBox("PowerScribe window identity could not be verified.", "PACS Assistant", "Icon!")
-            return false
-        }
-        if (resolution.status == "absent") {
-            MsgBox("PowerScribe is not running.", "PACS Assistant", "Icon!")
-            return false
-        }
-        if (resolution.status == "ambiguous") {
-            MsgBox("Multiple exact PowerScribe reporting windows are open. Close the extra window before selecting a microphone.", "PACS Assistant", "Icon!")
-            return false
-        }
-        if (!(resolution.status == "unique")
-            || !HasProp(resolution, "session")
-            || !resolution.session) {
-            MsgBox("PowerScribe window identity could not be verified.", "PACS Assistant", "Icon!")
-            return false
+        status := IsObject(resolution) && HasProp(resolution, "status") ? resolution.status : ""
+        if (status == "absent")
+            return this.ApplyNowFailed("PowerScribe is not running.", "PowerScribe Not Running")
+        if (status == "ambiguous")
+            return this.ApplyNowFailed(
+                "Multiple exact PowerScribe reporting windows are open. Close the extra window before selecting a microphone.",
+                "Multiple PowerScribe Windows"
+            )
+        if (!(status == "unique") || !HasProp(resolution, "session") || !resolution.session) {
+            detail := status == "error" && HasProp(resolution, "error") && resolution.error != ""
+                ? "`n`n" resolution.error
+                : ""
+            return this.ApplyNowFailed("PowerScribe window identity could not be verified." detail, "PowerScribe Not Verified")
         }
         session := resolution.session
 
         comboResult := this.ResolveMicrophoneCombo(session)
-        if (comboResult.status == "absent") {
-            MsgBox("The microphone selector was not found. It is only available on the PowerScribe login screen.", "PACS Assistant", "Icon!")
-            return false
-        }
-        if !(comboResult.status == "found") {
-            MsgBox(
-                "The microphone selector identity could not be verified.`n`n" comboResult.error,
-                "PACS Assistant",
-                "Icon!"
+        if (comboResult.status == "absent")
+            return this.ApplyNowFailed(
+                "The microphone selector was not found. It is only available on the PowerScribe login screen.",
+                "Microphone Selector Not Found"
             )
-            return false
-        }
-        combo := comboResult.combo
+        if !(comboResult.status == "found")
+            return this.ApplyNowFailed(
+                "The microphone selector identity could not be verified.`n`n" comboResult.error,
+                "Microphone Selector Not Verified"
+            )
 
-        if this.SelectMicrophone(session, combo, micName)
+        if this.SelectMicrophone(session, comboResult.combo, micName)
             return true
+        return this.ApplyNowFailed(
+            "Could not select microphone '" micName "'. Check that the name matches an entry in the PowerScribe list.",
+            "Microphone Not Selected"
+        )
+    }
 
-        MsgBox("Could not select microphone '" micName "'. Check that the name matches an entry in the PowerScribe list.", "PACS Assistant", "Icon!")
+    ; ApplyNow runs from the user's own hotkey, so its result is a dialog.
+    static ApplyNowFailed(message, title) {
+        MsgBox(message, title, "Icon!")
         return false
     }
 }

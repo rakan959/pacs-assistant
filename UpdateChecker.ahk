@@ -7,6 +7,7 @@
 #Include Version.ahk
 #Include JsonParser.ahk
 #Include ErrorText.ahk
+#Include AppLog.ahk
 #Include WinHttpTransport.ahk
 #Include WinHttpTextRequest.ahk
 
@@ -27,6 +28,7 @@ class UpdateChecker {
     ; Tests may leave this unset and exercise the legacy clinical probe directly.
     static shutdownCoordinator := 0
     static autoCheckIntervalMs := 60 * 60 * 1000
+    static autoCheckFailureLogged := false
     ; "Remind Me Later" suppresses the dialog for this long.
     static remindLaterMs := 4 * 60 * 60 * 1000
     static maxUpdateSizeBytes := 100 * 1024 * 1024
@@ -111,7 +113,7 @@ class UpdateChecker {
             slot.handle := 0
             if (this.activeRequest = slot)
                 this.activeRequest := 0
-            OutputDebug("Update check failed: " err.Message)
+            this.RecordAutoCheckFailure(err)
             return false
         }
 
@@ -129,10 +131,11 @@ class UpdateChecker {
 
         try {
             updateInfo := this.ProcessReleaseResponse(response, stableOnly)
+            this.autoCheckFailureLogged := false
             if updateInfo.hasUpdate
                 this.RecordAvailableUpdate(updateInfo)
         } catch as err {
-            OutputDebug("Update check failed: " err.Message)
+            this.RecordAutoCheckFailure(err)
         }
     }
 
@@ -151,7 +154,17 @@ class UpdateChecker {
     static FailAutoCheck(slot, err) {
         if !this.ClaimSlot(slot)
             return
+        this.RecordAutoCheckFailure(err)
+    }
+
+    ; The hourly check fails every time on an offline workstation, so only the first
+    ; failure after a successful check is logged.
+    static RecordAutoCheckFailure(err) {
         OutputDebug("Update check failed: " ErrorText.Message(err))
+        if this.autoCheckFailureLogged
+            return
+        this.autoCheckFailureLogged := true
+        AppLog.Write("Automatic update check failed: " ErrorText.Describe(err))
     }
 
     static OnSettingsChanged() {

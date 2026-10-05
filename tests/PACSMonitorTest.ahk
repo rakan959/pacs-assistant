@@ -8,6 +8,7 @@
 #Include ../PACSCommands.ahk
 #Include ../Settings.ahk
 #Include TestRunner.ahk
+#Include LogCapture.ahk
 
 class PACSMonitorTest {
     static tests := [
@@ -510,8 +511,16 @@ class PACSMonitorTest {
     }
 
     TestScanFailuresNotifyOnceAndReset() {
-        loop PACSMonitor.scanFailureThreshold + 2
-            PACSMonitor.RecordScanFailure("study list unavailable")
+        capturedLog := LogCapture()
+        try {
+            loop PACSMonitor.scanFailureThreshold + 2
+                PACSMonitor.RecordScanFailure("study list unavailable")
+        } finally {
+            logged := capturedLog.Count("PACS background monitoring failed: ")
+            capturedLog.Restore()
+        }
+        ; One log entry per failure episode, with the notice, not one per poll.
+        Assert.Equal(1, logged)
 
         Assert.Equal(1, this.notifications.Length)
         Assert.True(InStr(this.notifications[1].text, "study list unavailable") > 0)

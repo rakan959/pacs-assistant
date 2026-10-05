@@ -6,6 +6,7 @@
 #Requires AutoHotkey v2.0
 #Include Settings.ahk
 #Include HotkeyContract.ahk
+#Include AppLog.ahk
 
 class NativeProfileStorageDriver {
     DeleteFile(path) => FileDelete(path)
@@ -81,7 +82,7 @@ class ProfileManager {
                     this.profiles[profileName] := this.LoadProfile(A_LoopFilePath)
                     this.profileRevisions[profileName] := 0
                 } catch as err {
-                    this.loadErrors.Push({path: A_LoopFilePath, message: err.Message})
+                    this.RecordLoadError(A_LoopFilePath, err.Message)
                 }
             }
         }
@@ -152,10 +153,10 @@ class ProfileManager {
                 this.LoadProfile(canonicalPath)
             } catch as err {
                 this.recoveryRequired := true
-                this.loadErrors.Push({
-                    path: temporaryPath,
-                    message: "Interrupted case-only rename could not be recovered: " err.Message
-                })
+                this.RecordLoadError(
+                    temporaryPath,
+                    "Interrupted case-only rename could not be recovered: " err.Message
+                )
             }
         }
     }
@@ -788,8 +789,13 @@ class ProfileManager {
         this.lastError := message
         if recoveryRequired
             this.recoveryRequired := true
-        OutputDebug("Profile storage operation failed: " message)
+        AppLog.Write("Profile storage operation failed: " message)
         return false
+    }
+
+    static RecordLoadError(path, message) {
+        this.loadErrors.Push({path: path, message: message})
+        AppLog.Write("Profile could not be loaded: " path ": " message)
     }
 
     static RefreshDefaultProfileFromStorage() {

@@ -5,6 +5,7 @@
 
 #Requires AutoHotkey v2.0
 #Include AppStorage.ahk
+#Include AppLog.ahk
 
 class Settings {
     static settingsFile := AppStorage.DataRoot() "\settings.ini"
@@ -274,10 +275,11 @@ class Settings {
     static NotifyChanged() {
         errors := []
         for listener in this.changeListeners.Clone() {
+            ; catch Any: one failing listener must not stop the others.
             try listener.Call()
-            catch as err {
-                errors.Push(err.Message)
-                OutputDebug("Settings change listener failed: " err.Message)
+            catch Any as err {
+                errors.Push(ErrorText.Message(err))
+                AppLog.Write("Settings change listener failed: " ErrorText.Describe(err))
             }
         }
         return errors

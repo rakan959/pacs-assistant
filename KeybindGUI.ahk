@@ -34,13 +34,8 @@ class KeybindGUI {
         ; GitHub request every launch for a dialog that had already been offered.
 
         ProfileManager.LoadProfiles()
-        if (ProfileManager.loadErrors.Length > 0) {
-            MsgBox(
-                ProfileManager.loadErrors.Length " profile file(s) could not be loaded. The original files were left unchanged.",
-                "Profile Load Error",
-                "Icon!"
-            )
-        }
+        if (ProfileManager.loadErrors.Length > 0)
+            MsgBox(KeybindGUI.LoadErrorSummary(ProfileManager.loadErrors), "Profile Load Error", "Icon!")
         if ProfileManager.profiles.Count = 0 {
             this.PromptNewProfile()
         } else if (ProfileManager.defaultProfile != "" && ProfileManager.profiles.Has(ProfileManager.defaultProfile)) {
@@ -1316,6 +1311,13 @@ class KeybindGUI {
             errorText := err.Message
         }
         return false
+    }
+
+    static LoadErrorSummary(loadErrors) {
+        text := loadErrors.Length " profile file(s) could not be loaded. The original files were left unchanged."
+        for loadError in loadErrors
+            text .= "`n`n" loadError.path "`n" loadError.message
+        return text "`n`nThis list is also in error.log in the PACS Assistant data folder."
     }
 
     ConfirmDestructiveAction(message, title) {

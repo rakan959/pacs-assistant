@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include WinHttpTransport.ahk
+#Include AppLog.ahk
 
 /**
  * One bounded asynchronous WinHTTP GET for GitHub release metadata. The response
@@ -138,8 +139,8 @@ class WinHttpTextRequest {
             callback := this.onError
             this.CleanupStartFailure()
             try callback.Call(err)
-            catch as callbackError
-                OutputDebug("Asynchronous update error handling failed: " callbackError.Message)
+            catch Any as callbackError
+                AppLog.WriteError(callbackError)
             return 0
         }
     }
@@ -385,13 +386,14 @@ class WinHttpTextRequest {
         this.terminalValue := 0
 
         if (kind = "complete") {
+            ; The callbacks handle their own failures; reaching these is a bug.
             try completeCallback.Call(value)
-            catch as err
-                OutputDebug("Asynchronous update completion failed: " err.Message)
+            catch Any as err
+                AppLog.WriteError(err)
         } else if (kind = "error") {
             try errorCallback.Call(value)
-            catch as err
-                OutputDebug("Asynchronous update error handling failed: " err.Message)
+            catch Any as err
+                AppLog.WriteError(err)
         }
     }
 
