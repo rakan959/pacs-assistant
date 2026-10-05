@@ -1,5 +1,14 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Off
+#ErrorStdOut
+#Warn All, StdOut
+FileEncoding "UTF-8"
+
+; Headless CI runner: load errors and warnings go to stdout/stderr, and an uncaught
+; runtime error exits with code 10 instead of opening a dialog (HarnessErrors.ahk).
+#Include HarnessErrors.ahk
+OnError(OnError_StdErr)
+
 #Include TestRunner.ahk
 #Include TestRunnerTest.ahk
 #Include AppStorageTest.ahk

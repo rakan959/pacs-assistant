@@ -9,7 +9,7 @@
 #Include TestRunner.ahk
 
 class ClinicalAutomationTest {
-    static Tests := [
+    static tests := [
         "ActivationFailureDoesNotSend",
         "ActivationCanSucceedButFocusCheckStopsSend",
         "TargetedSendActivatesBeforeSending",

@@ -1,6 +1,8 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Off
-#Warn All, Off
+#ErrorStdOut
+#Warn All, StdOut
+FileEncoding "UTF-8"
 
 ; Functional tests for hotkey registration. Unlike the unit suite in RunTests.ahk,
 ; these actually register hotkeys and synthesise keystrokes, so they exercise
@@ -15,6 +17,8 @@
 ;   "C:\Program Files\AutoHotkey\v2\AutoHotkey.exe" tests\run-hotkey-tests.ahk
 
 #Include ../HotkeyManager.ahk
+#Include HarnessErrors.ahk
+OnError(OnError_StdErr)
 
 global fired := 0
 global aliasFirstFired := 0

@@ -8,7 +8,7 @@
 #Include TestRunner.ahk
 
 class WetReadTest {
-    static Tests := [
+    static tests := [
         "ClipboardPasteModeIsRejectedWithoutMutation",
         "UnsupportedUIADoesNotClearTheNote",
         "PostMutationUIAErrorCanSucceedOnlyWithExactReadback",
@@ -714,8 +714,8 @@ class FakeWritableWetReadElement {
 }
 
 class FakeStickyTargetElement {
-    __New(type, processId, readable := false, windowId := 100, name := "") {
-        this.Type := type
+    __New(elementType, processId, readable := false, windowId := 100, name := "") {
+        this.Type := elementType
         this.ProcessId := processId
         this.WinId := windowId
         this.Name := name

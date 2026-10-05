@@ -4,7 +4,7 @@
 #Include TestRunner.ahk
 
 class HotkeyManagerTest {
-    static Tests := [
+    static tests := [
         "TestRegistersAndStoresHotkeys",
         "TestReassignUpdatesBinding",
         "TestUnassignClearsBinding",

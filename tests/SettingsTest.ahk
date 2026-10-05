@@ -3,7 +3,7 @@
 #Include TestRunner.ahk
 
 class SettingsTest {
-    static Tests := [
+    static tests := [
         "TestDefaultSettingsLoaded",
         "TestSaveAndGetValues",
         "TestMutationGuardRejectsSettingsWrite",
@@ -182,8 +182,8 @@ class SettingsTest {
     ; runtime capability and production deliberately falls back when one is absent.
     TestAlertSoundsAreDistinct() {
         seen := Map()
-        for name, file in Settings.soundFiles {
-            key := StrLower(Trim(file))
+        for name, soundFile in Settings.soundFiles {
+            key := StrLower(Trim(soundFile))
             Assert.True(key != "", "No filename configured for alert sound: " name)
             Assert.False(seen.Has(key), "Alert sound reuses another sound's file: " name)
             seen[key] := name

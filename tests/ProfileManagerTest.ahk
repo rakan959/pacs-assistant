@@ -8,7 +8,7 @@
 #Include TestRunner.ahk
 
 class ProfileManagerTest {
-    static Tests := [
+    static tests := [
         "TestProfileSaveAndLoad",
         "TestProfileNameContainingIniRoundTrips",
         "TestDefaultProfileTracking",

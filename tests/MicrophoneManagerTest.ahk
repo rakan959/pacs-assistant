@@ -9,7 +9,7 @@
 #Include TestRunner.ahk
 
 class MicrophoneManagerTest {
-    static Tests := [
+    static tests := [
         "WaitForSelectionRequiresTheExactResolvedValue",
         "WaitForSelectionIgnoresDisplayCasing",
         "MicrophoneComboRequiresExactIdentityAndCapability",
@@ -543,10 +543,10 @@ class FakeMicrophoneRoot {
         if HasProp(criteria, "AutomationId")
             return this.combos.Clone()
         if HasProp(criteria, "Type") {
-            type := criteria.Type
-            if (type = "ComboBox" || type = UIA.Type.ComboBox)
+            elementType := criteria.Type
+            if (elementType = "ComboBox" || elementType = UIA.Type.ComboBox)
                 return this.combos.Clone()
-            if (type = "ListItem" || type = UIA.Type.ListItem)
+            if (elementType = "ListItem" || elementType = UIA.Type.ListItem)
                 return this.items.Clone()
         }
         return []

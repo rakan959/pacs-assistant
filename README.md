@@ -128,7 +128,10 @@ $archive = 'C:\path\to\download.zip'
 
 ## Tests
 
-All suites exit non-zero on failure.
+All suites exit non-zero on failure. The three AutoHotkey runners use a headless
+preamble (`#ErrorStdOut`, `#Warn All, StdOut`), so warnings print to stdout and an
+uncaught runtime error is written to stderr and exits with code 10 instead of opening a
+dialog that would block an unattended run.
 
 ```powershell
 $ahk = "$Env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe"
@@ -156,8 +159,9 @@ Invoke-AutoHotkeyChecked @('/ErrorStdOut', 'tests/run-gui-smoke.ahk')
 & tests/RepositoryContract.ps1
 ```
 
-The unit runner suppresses MsgBoxes and writes results to stdout. Add a new test by
-writing a class with a `static Tests` list and registering it in `tests/RunTests.ahk`.
+The unit runner suppresses MsgBoxes, records them in `TestRunner.dialogs` for the
+current test, and writes results to stdout. Add a new test by
+writing a class with a `static tests` list and registering it in `tests/RunTests.ahk`.
 
 To reproduce the uncompressed release build with the verified archives:
 

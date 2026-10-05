@@ -1,7 +1,7 @@
 #Requires AutoHotkey v2.0
 
 class TestRunnerTest {
-    static Tests := [
+    static tests := [
         "ThrowsRejectsAFunctionThatReturnsNormally",
         "EqualRejectsCaseOnlyAndTypeOnlyDifferences",
         "NotEqualAcceptsCaseOnlyAndTypeOnlyDifferences",
@@ -9,7 +9,11 @@ class TestRunnerTest {
         "SetupFailureIsCountedAndDoesNotStopTheClass",
         "TeardownRunsAfterSetupFailure",
         "TeardownFailureCountsAsTheTestFailure",
-        "TeardownRunsAfterABodyFailure"
+        "TeardownRunsAfterABodyFailure",
+        "NonErrorThrowIsCountedAsAFailure",
+        "ClassWithoutTestListIsAFailure",
+        "ThrowsAcceptsAFalsyThrownValue",
+        "DialogsAreRecordedPerTest"
     ]
 
     ThrowsRejectsAFunctionThatReturnsNormally() {
@@ -104,6 +108,35 @@ class TestRunnerTest {
         Assert.Equal(1, BodyFailureProbe.teardownCalls)
     }
 
+    NonErrorThrowIsCountedAsAFailure() {
+        result := this.RunProbe(NonErrorThrowProbe)
+
+        Assert.Equal(0, result.successes)
+        Assert.Equal(1, result.failures)
+    }
+
+    ClassWithoutTestListIsAFailure() {
+        result := this.RunProbe(MissingTestListProbe)
+
+        Assert.Equal(0, result.successes)
+        Assert.Equal(1, result.failures)
+    }
+
+    ThrowsAcceptsAFalsyThrownValue() {
+        Assert.Throws(ObjBindMethod(NonErrorThrowProbe, "ThrowValue", 0))
+        Assert.Throws(ObjBindMethod(NonErrorThrowProbe, "ThrowValue", "plain text"), "plain text")
+    }
+
+    DialogsAreRecordedPerTest() {
+        priorDialogs := TestRunner.dialogs
+        try {
+            result := this.RunProbe(DialogProbe)
+            Assert.Equal(2, result.successes)
+            Assert.Equal(1, DialogProbe.observed[1], "A MsgBox call must be recorded")
+            Assert.Equal(0, DialogProbe.observed[2], "Each test must start with an empty dialog record")
+        } finally TestRunner.dialogs := priorDialogs
+    }
+
     RunProbe(testClass) {
         priorSuccesses := TestRunner.successes
         priorFailures := TestRunner.failures
@@ -129,7 +162,7 @@ class TestRunnerTest {
 }
 
 class SetupFailureProbe {
-    static Tests := ["First", "Second"]
+    static tests := ["First", "Second"]
     static setupCalls := 0
     static bodyCalls := 0
 
@@ -154,7 +187,7 @@ class SetupFailureProbe {
 }
 
 class TeardownFailureProbe {
-    static Tests := ["Passes"]
+    static tests := ["Passes"]
 
     static Reset() {
     }
@@ -168,7 +201,7 @@ class TeardownFailureProbe {
 }
 
 class PartialSetupFailureProbe {
-    static Tests := ["NeverRuns"]
+    static tests := ["NeverRuns"]
     static dirty := false
     static teardownCalls := 0
 
@@ -193,7 +226,7 @@ class PartialSetupFailureProbe {
 }
 
 class BodyFailureProbe {
-    static Tests := ["Fails"]
+    static tests := ["Fails"]
     static teardownCalls := 0
 
     static Reset() {
@@ -206,5 +239,34 @@ class BodyFailureProbe {
 
     Teardown() {
         BodyFailureProbe.teardownCalls++
+    }
+}
+
+class NonErrorThrowProbe {
+    static tests := ["ThrowsAString"]
+
+    static ThrowValue(value) {
+        throw value
+    }
+
+    ThrowsAString() {
+        throw "not an Error object"
+    }
+}
+
+class MissingTestListProbe {
+}
+
+class DialogProbe {
+    static tests := ["ShowsOne", "SeesNone"]
+    static observed := []
+
+    ShowsOne() {
+        MsgBox("probe dialog", "Probe", "Iconi")
+        DialogProbe.observed := [TestRunner.dialogs.Length]
+    }
+
+    SeesNone() {
+        DialogProbe.observed.Push(TestRunner.dialogs.Length)
     }
 }

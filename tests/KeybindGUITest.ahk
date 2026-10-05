@@ -8,7 +8,7 @@
 #Include TestRunner.ahk
 
 class KeybindGUITest {
-    static Tests := [
+    static tests := [
         "TestSelectedFunctionPrefersBuiltIn",
         "TestSelectedFunctionSurvivesMissingCustomList",
         "TestPrettifyHotkey",
@@ -299,7 +299,7 @@ class KeybindGUITest {
         listView := FunctionalListView("Sign Report", "Unassigned", "Any window")
         prompt := FakeProfileDialog("Test")
         notifications := CapturingNotificationDriver()
-        gui := {
+        editor := {
             base: CaptureStartRestoreFailingKeybindGUI.Prototype,
             restoreCalls: 0,
             notificationDriver: notifications
@@ -317,13 +317,13 @@ class KeybindGUITest {
             KeybindGUI.listeningControl := ""
             KeybindGUI.activeInputHook := 0
 
-            Assert.True(gui.CaptureFunctionDialogState(
+            Assert.True(editor.CaptureFunctionDialogState(
                 prompt,
                 "Sign Report",
                 listView,
                 1
             ))
-            try gui.BeginListening("Sign Report", listView, prompt)
+            try editor.BeginListening("Sign Report", listView, prompt)
             catch as err {
                 threw := true
                 caughtMessage := err.Message
@@ -345,7 +345,7 @@ class KeybindGUITest {
         Assert.True(InStr(caughtMessage, "simulated hook start failure") > 0)
         Assert.False(capturedListening)
         Assert.Equal(0, capturedHook)
-        Assert.Equal(1, gui.restoreCalls)
+        Assert.Equal(1, editor.restoreCalls)
         Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
         Assert.True(InStr(notifications.message, "simulated capture restore failure") > 0)
     }
@@ -362,7 +362,7 @@ class KeybindGUITest {
         listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
         prompt := ThrowingShowProfileDialog("Test")
         owner := FakeCaptureOwnerGui()
-        gui := {
+        editor := {
             base: ShowFailureRecoveryGUI.Prototype,
             gui: owner,
             restoreCalls: 0,
@@ -375,16 +375,16 @@ class KeybindGUITest {
             HotkeyManager.activeHotkeys := Map()
             KeybindGUI.isListening := false
             KeybindGUI.activeInputHook := 0
-            Assert.True(gui.CaptureFunctionDialogState(
+            Assert.True(editor.CaptureFunctionDialogState(
                 prompt,
                 "Sign Report",
                 listView,
                 1
             ))
-            Assert.True(gui.BeginListening("Sign Report", listView, prompt))
+            Assert.True(editor.BeginListening("Sign Report", listView, prompt))
             hook := KeybindGUI.activeInputHook
 
-            result := gui.ShowStartedCapturePrompt(prompt)
+            result := editor.ShowStartedCapturePrompt(prompt)
         } finally {
             ProfileManager.profiles := originalProfiles
             ProfileManager.currentProfile := originalCurrent
@@ -396,7 +396,7 @@ class KeybindGUITest {
         Assert.False(result)
         Assert.True(prompt.destroyed)
         Assert.True(hook.stopped)
-        Assert.Equal(1, gui.restoreCalls)
+        Assert.Equal(1, editor.restoreCalls)
         Assert.False(KeybindGUI.captureTransactionActive)
         Assert.False(owner.disabled)
     }
@@ -417,9 +417,9 @@ class KeybindGUITest {
         listView := RemovableListView("Sign Report", "Ctrl + F13", "Any window")
         prompt := FakeProfileDialog("Test")
         customDialog := FakeProfileDialog("Test")
-        gui := {base: CaptureMutationGuardGUI.Prototype}
-        gui.confirmationDriver := AlwaysConfirmDriver()
-        gui.notifications := []
+        editor := {base: CaptureMutationGuardGUI.Prototype}
+        editor.confirmationDriver := AlwaysConfirmDriver()
+        editor.notifications := []
 
         try {
             try DirDelete(tempRoot, true)
@@ -429,18 +429,18 @@ class KeybindGUITest {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
             ProfileManager.SaveProfile("Test", profile)
-            Assert.True(gui.CaptureFunctionDialogState(
+            Assert.True(editor.CaptureFunctionDialogState(
                 prompt,
                 "Sign Report",
                 listView,
                 1
             ))
-            Assert.True(gui.BeginListening("Sign Report", listView, prompt))
+            Assert.True(editor.BeginListening("Sign Report", listView, prompt))
 
             profile.binds["Sign Report"] := "^F14"
-            saveResult := gui.SaveCurrentProfile()
-            removeResult := gui.RemoveFunction(listView)
-            scopeResult := gui.ApplyScope(
+            saveResult := editor.SaveCurrentProfile()
+            removeResult := editor.RemoveFunction(listView)
+            scopeResult := editor.ApplyScope(
                 "Sign Report",
                 true,
                 false,
@@ -448,8 +448,8 @@ class KeybindGUITest {
                 1,
                 prompt
             )
-            renameResult := gui.PromptRenameProfile("Test")
-            customDeleteResult := gui.DeleteCustomFunction(
+            renameResult := editor.PromptRenameProfile("Test")
+            customDeleteResult := editor.DeleteCustomFunction(
                 "Custom: Keep",
                 customDialog
             )
@@ -459,7 +459,7 @@ class KeybindGUITest {
             customStillExists := profile.customFuncs.Has("Custom: Keep")
             rowCount := listView.GetCount()
         } finally {
-            try gui.CancelKeybindPrompt(prompt)
+            try editor.CancelKeybindPrompt(prompt)
             KeybindGUI.captureRuntimeProfile := 0
             KeybindGUI.isListening := false
             KeybindGUI.activeInputHook := 0
@@ -495,7 +495,7 @@ class KeybindGUITest {
         dialog.profileStorageRevision := 1
         dialog.profileMutationSnapshot := 0
         dialog.ownerHwnd := 0
-        gui := {base: LiveDialogIdentityGUI.Prototype}
+        editor := {base: LiveDialogIdentityGUI.Prototype}
 
         try {
             ProfileManager.profiles := Map("Test", oldProfile)
@@ -503,7 +503,7 @@ class KeybindGUITest {
             ProfileManager.profileRevisions := Map("Test", 1)
             ProfileManager.profiles["Test"] := replacement
 
-            result := gui.DialogProfileIsCurrent(dialog)
+            result := editor.DialogProfileIsCurrent(dialog)
         } finally {
             ProfileManager.profiles := originalProfiles
             ProfileManager.currentProfile := originalCurrent
@@ -515,18 +515,18 @@ class KeybindGUITest {
     }
 
     TestClinicalCommandBlocksProfileMutationAndExit() {
-        gui := {
+        editor := {
             base: DirtyLeaveTestGUI.Prototype,
             exitCalls: 0,
             notifications: []
         }
-        gui.notificationDriver := ArrayNotificationDriver(gui.notifications)
+        editor.notificationDriver := ArrayNotificationDriver(editor.notifications)
         PACSCommands.clinicalCommandActive := true
         PACSCommands.activeClinicalCommand := "Paste Wet Read"
 
         try {
-            mutationAllowed := gui.ProfileMutationAllowed("change profiles")
-            closeResult := gui.CloseMainWindow()
+            mutationAllowed := editor.ProfileMutationAllowed("change profiles")
+            closeResult := editor.CloseMainWindow()
         } finally {
             PACSCommands.clinicalCommandActive := false
             PACSCommands.activeClinicalCommand := ""
@@ -534,9 +534,9 @@ class KeybindGUITest {
 
         Assert.False(mutationAllowed)
         Assert.False(closeResult)
-        Assert.Equal(0, gui.exitCalls)
-        Assert.Equal(2, gui.notifications.Length)
-        Assert.True(InStr(gui.notifications[1].message, "Paste Wet Read") > 0)
+        Assert.Equal(0, editor.exitCalls)
+        Assert.Equal(2, editor.notifications.Length)
+        Assert.True(InStr(editor.notifications[1].message, "Paste Wet Read") > 0)
     }
 
     TestProfileSelectorCloseCannotInterruptDefaultProfileTransaction() {
@@ -546,15 +546,15 @@ class KeybindGUITest {
         originalStorageDriver := ProfileManager.storageDriver
         profile := ProfileManager.NewProfile()
         selector := ReentrantSelectorDialog()
-        gui := {
+        editor := {
             base: ProfileSelectorTransactionGUI.Prototype,
             mainWindowCalls: 0,
             selectorCalls: 0,
             notifications: []
         }
-        gui.notificationDriver := ArrayNotificationDriver(gui.notifications)
+        editor.notificationDriver := ArrayNotificationDriver(editor.notifications)
         driver := ReentrantDefaultProfileStorageDriver(
-            (*) => gui.CloseProfileSelector(selector),
+            (*) => editor.CloseProfileSelector(selector),
             selector
         )
 
@@ -563,8 +563,8 @@ class KeybindGUITest {
             ProfileManager.currentProfile := "Night"
             ProfileManager.defaultProfile := ""
             ProfileManager.storageDriver := driver
-            gui.RegisterProfileSelector(selector)
-            result := gui.SetDefaultProfile("Night", selector)
+            editor.RegisterProfileSelector(selector)
+            result := editor.SetDefaultProfile("Night", selector)
             capturedDefault := ProfileManager.defaultProfile
         } finally {
             ProfileManager.profiles := originalProfiles
@@ -578,8 +578,8 @@ class KeybindGUITest {
         Assert.False(driver.closeResult)
         Assert.True(driver.observedDisabled)
         Assert.Equal(1, selector.destroyCalls)
-        Assert.Equal(0, gui.mainWindowCalls)
-        Assert.Equal(1, gui.selectorCalls)
+        Assert.Equal(0, editor.mainWindowCalls)
+        Assert.Equal(1, editor.selectorCalls)
         Assert.Equal("Night", capturedDefault)
     }
 
@@ -587,7 +587,7 @@ class KeybindGUITest {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
         inputGui := ReentrantSelectorDialog()
-        gui := {
+        editor := {
             base: ReentrantProfileCreationGUI.Prototype,
             inputGui: inputGui,
             mainWindowCalls: 0,
@@ -602,7 +602,7 @@ class KeybindGUITest {
             ProfileManager.profiles := Map("Existing", ProfileManager.NewProfile())
             ProfileManager.currentProfile := ""
 
-            result := gui.CreateProfile("New", inputGui)
+            result := editor.CreateProfile("New", inputGui)
             capturedCurrent := ProfileManager.currentProfile
         } finally {
             ProfileManager.profiles := originalProfiles
@@ -610,13 +610,13 @@ class KeybindGUITest {
         }
 
         Assert.True(result)
-        Assert.True(gui.closeAttempted)
-        Assert.False(gui.closeResult)
-        Assert.True(gui.observedDisabled)
+        Assert.True(editor.closeAttempted)
+        Assert.False(editor.closeResult)
+        Assert.True(editor.observedDisabled)
         Assert.Equal(1, inputGui.destroyCalls)
-        Assert.Equal(1, gui.mainWindowCalls)
-        Assert.Equal(0, gui.selectorCalls)
-        Assert.Equal(0, gui.exitCalls)
+        Assert.Equal(1, editor.mainWindowCalls)
+        Assert.Equal(0, editor.selectorCalls)
+        Assert.Equal(0, editor.exitCalls)
         Assert.Equal("New", capturedCurrent)
     }
 
@@ -624,7 +624,7 @@ class KeybindGUITest {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
         inputGui := FakeProfileDialog()
-        gui := {
+        editor := {
             base: QueuedNewProfileGUI.Prototype,
             mainWindowCalls: 0,
             selectorCalls: 0,
@@ -637,8 +637,8 @@ class KeybindGUITest {
             ProfileManager.currentProfile := "Existing"
             inputGui.Destroy()
 
-            closeResult := gui.CloseNewProfilePrompt(inputGui)
-            createResult := gui.CreateProfile("Queued", inputGui)
+            closeResult := editor.CloseNewProfilePrompt(inputGui)
+            createResult := editor.CreateProfile("Queued", inputGui)
             queuedExists := ProfileManager.profiles.Has("Queued")
         } finally {
             ProfileManager.profiles := originalProfiles
@@ -648,10 +648,10 @@ class KeybindGUITest {
         Assert.False(closeResult)
         Assert.False(createResult)
         Assert.False(queuedExists)
-        Assert.Equal(0, gui.createRecordCalls)
-        Assert.Equal(0, gui.mainWindowCalls)
-        Assert.Equal(0, gui.selectorCalls)
-        Assert.Equal(0, gui.exitCalls)
+        Assert.Equal(0, editor.createRecordCalls)
+        Assert.Equal(0, editor.mainWindowCalls)
+        Assert.Equal(0, editor.selectorCalls)
+        Assert.Equal(0, editor.exitCalls)
     }
 
     TestUiPresentationLeaseBlocksClinicalEntry() {
@@ -686,7 +686,7 @@ class KeybindGUITest {
         originalCurrent := ProfileManager.currentProfile
         selector := ReentrantSelectorDialog()
         confirmation := CountingRejectConfirmationDriver()
-        gui := {
+        editor := {
             base: ProfileSelectorTransactionGUI.Prototype,
             mainWindowCalls: 0,
             selectorCalls: 0,
@@ -702,13 +702,13 @@ class KeybindGUITest {
                 "B", ProfileManager.NewProfile()
             )
             ProfileManager.currentProfile := "A"
-            gui.RegisterProfileSelector(selector)
+            editor.RegisterProfileSelector(selector)
 
-            Assert.True(gui.CloseProfileSelector(selector))
-            selectResult := gui.SelectProfile("B", selector)
-            newResult := gui.OpenNewProfilePrompt(selector)
-            renameResult := gui.PromptRenameProfile("B", selector)
-            deleteResult := gui.DeleteProfile("B", selector)
+            Assert.True(editor.CloseProfileSelector(selector))
+            selectResult := editor.SelectProfile("B", selector)
+            newResult := editor.OpenNewProfilePrompt(selector)
+            renameResult := editor.PromptRenameProfile("B", selector)
+            deleteResult := editor.DeleteProfile("B", selector)
         } finally {
             ProfileManager.profiles := originalProfiles
             ProfileManager.currentProfile := originalCurrent
@@ -718,10 +718,10 @@ class KeybindGUITest {
         Assert.False(newResult)
         Assert.False(renameResult)
         Assert.False(deleteResult)
-        Assert.Equal(1, gui.mainWindowCalls)
-        Assert.Equal(0, gui.promptCalls)
-        Assert.Equal(0, gui.dialogCalls)
-        Assert.Equal(0, gui.selectorCalls)
+        Assert.Equal(1, editor.mainWindowCalls)
+        Assert.Equal(0, editor.promptCalls)
+        Assert.Equal(0, editor.dialogCalls)
+        Assert.Equal(0, editor.selectorCalls)
         Assert.Equal(0, confirmation.calls)
     }
 
@@ -733,7 +733,7 @@ class KeybindGUITest {
         originalRevisions := ProfileManager.profileRevisions
         tempRoot := TestTempPath("pacs-selector-delete")
         selector := ReentrantSelectorDialog()
-        gui := {
+        editor := {
             base: ProfileSelectorTransactionGUI.Prototype,
             mainWindowCalls: 0,
             selectorCalls: 0,
@@ -742,10 +742,10 @@ class KeybindGUITest {
             exitCalls: 0
         }
         confirmation := ReentrantProfileDeleteConfirmationDriver(
-            (*) => gui.CloseProfileSelector(selector),
+            (*) => editor.CloseProfileSelector(selector),
             selector
         )
-        gui.confirmationDriver := confirmation
+        editor.confirmationDriver := confirmation
 
         try {
             try DirDelete(tempRoot, true)
@@ -760,9 +760,9 @@ class KeybindGUITest {
             ProfileManager.defaultProfile := ""
             ProfileManager.SaveProfile("A", ProfileManager.profiles["A"])
             ProfileManager.SaveProfile("B", ProfileManager.profiles["B"])
-            gui.RegisterProfileSelector(selector)
+            editor.RegisterProfileSelector(selector)
 
-            result := gui.DeleteProfile("B", selector)
+            result := editor.DeleteProfile("B", selector)
             bStillExists := ProfileManager.profiles.Has("B")
         } finally {
             ProfileManager.profiles := originalProfiles
@@ -778,31 +778,31 @@ class KeybindGUITest {
         Assert.False(confirmation.closeResult)
         Assert.False(bStillExists)
         Assert.Equal(1, selector.destroyCalls)
-        Assert.Equal(0, gui.mainWindowCalls)
-        Assert.Equal(1, gui.selectorCalls)
+        Assert.Equal(0, editor.mainWindowCalls)
+        Assert.Equal(1, editor.selectorCalls)
     }
 
     TestTrayExitUsesTheSameClinicalAndCaptureGate() {
         originalClinicalActive := PACSCommands.clinicalCommandActive
         originalClinicalName := PACSCommands.activeClinicalCommand
-        gui := {base: KeybindGUI.Prototype, notifications: []}
-        gui.notificationDriver := ArrayNotificationDriver(gui.notifications)
+        editor := {base: KeybindGUI.Prototype, notifications: []}
+        editor.notificationDriver := ArrayNotificationDriver(editor.notifications)
 
         try {
             PACSCommands.clinicalCommandActive := true
             PACSCommands.activeClinicalCommand := "Paste Wet Read"
-            clinicalResult := gui.HandleProcessExit("Menu", 0)
+            clinicalResult := editor.HandleProcessExit("Menu", 0)
 
             PACSCommands.clinicalCommandActive := false
             PACSCommands.activeClinicalCommand := ""
             KeybindGUI.captureTransactionActive := true
-            captureResult := gui.HandleProcessExit("Menu", 0)
+            captureResult := editor.HandleProcessExit("Menu", 0)
 
             KeybindGUI.captureTransactionActive := false
-            cleanResult := gui.HandleProcessExit("Menu", 0)
+            cleanResult := editor.HandleProcessExit("Menu", 0)
             authorized := KeybindGUI.shutdownAuthorized
         } finally {
-            gui.CancelShutdown()
+            editor.CancelShutdown()
             PACSCommands.clinicalCommandActive := originalClinicalActive
             PACSCommands.activeClinicalCommand := originalClinicalName
             KeybindGUI.captureTransactionActive := false
@@ -812,7 +812,7 @@ class KeybindGUITest {
         Assert.Equal(1, captureResult)
         Assert.Equal(0, cleanResult)
         Assert.True(authorized)
-        Assert.Equal(2, gui.notifications.Length)
+        Assert.Equal(2, editor.notifications.Length)
     }
 
     TestStaleRealCaptureRestoresCurrentProfileNotSnapshot() {
@@ -824,20 +824,20 @@ class KeybindGUITest {
         profile.scopes["Sign Report"] := "Any"
         listView := RemovableListView("Sign Report", "Ctrl + F13", "Any window")
         prompt := FakeProfileDialog("Test")
-        gui := {base: CaptureMutationGuardGUI.Prototype}
-        gui.notifications := []
+        editor := {base: CaptureMutationGuardGUI.Prototype}
+        editor.notifications := []
 
         try {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
             HotkeyManager.activeHotkeys := Map()
-            Assert.True(gui.CaptureFunctionDialogState(
+            Assert.True(editor.CaptureFunctionDialogState(
                 prompt,
                 "Sign Report",
                 listView,
                 1
             ))
-            Assert.True(gui.BeginListening("Sign Report", listView, prompt))
+            Assert.True(editor.BeginListening("Sign Report", listView, prompt))
             hook := KeybindGUI.activeInputHook
 
             ; Simulate a later committed mutation despite the UI gate. Stale capture
@@ -845,12 +845,12 @@ class KeybindGUITest {
             profile.binds.Delete("Sign Report")
             profile.scopes.Delete("Sign Report")
             listView.Delete(1)
-            result := gui.OnInputEnd("Sign Report", listView, prompt, hook)
+            result := editor.OnInputEnd("Sign Report", listView, prompt, hook)
 
             runtimeAbsent := !HotkeyManager.activeHotkeys.Has("Sign Report")
             profileAbsent := !profile.binds.Has("Sign Report")
         } finally {
-            try gui.StopListening()
+            try editor.StopListening()
             KeybindGUI.captureRuntimeProfile := 0
             KeybindGUI.isListening := false
             KeybindGUI.activeInputHook := 0
@@ -874,28 +874,28 @@ class KeybindGUITest {
         profile.scopes["Sign Report"] := "Any"
         listView := RemovableListView("Sign Report", "Ctrl + F13", "Any window")
         prompt := FakeProfileDialog("Test")
-        gui := {base: StaleBeforeSuspensionGUI.Prototype}
-        gui.gui := FakeCaptureOwnerGui()
-        gui.notifications := []
-        gui.restoreCalls := 0
-        gui.onAcquired := (*) => (profile.binds["Sign Report"] := "^F14")
+        editor := {base: StaleBeforeSuspensionGUI.Prototype}
+        editor.gui := FakeCaptureOwnerGui()
+        editor.notifications := []
+        editor.restoreCalls := 0
+        editor.onAcquired := (*) => (profile.binds["Sign Report"] := "^F14")
 
         try {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
             HotkeyManager.activeHotkeys := Map("Sign Report", {hotkey: "^F13"})
-            Assert.True(gui.CaptureFunctionDialogState(
+            Assert.True(editor.CaptureFunctionDialogState(
                 prompt,
                 "Sign Report",
                 listView,
                 1
             ))
 
-            result := gui.BeginListening("Sign Report", listView, prompt)
+            result := editor.BeginListening("Sign Report", listView, prompt)
 
             captureActive := KeybindGUI.captureTransactionActive
             captureOwner := KeybindGUI.captureOwnerGui
-            ownerDisabled := gui.gui.disabled
+            ownerDisabled := editor.gui.disabled
             runtimeStillTracked := HotkeyManager.activeHotkeys.Has("Sign Report")
         } finally {
             KeybindGUI.captureRuntimeProfile := 0
@@ -912,7 +912,7 @@ class KeybindGUITest {
         Assert.False(captureActive)
         Assert.False(IsObject(captureOwner))
         Assert.False(ownerDisabled)
-        Assert.Equal(0, gui.restoreCalls)
+        Assert.Equal(0, editor.restoreCalls)
         Assert.True(runtimeStillTracked)
         Assert.True(prompt.destroyed)
     }
@@ -926,27 +926,27 @@ class KeybindGUITest {
         profile.scopes["Sign Report"] := "Any"
         listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
         prompt := FakeProfileDialog("Test")
-        gui := {base: CapturePublicationOrderGUI.Prototype, events: []}
+        editor := {base: CapturePublicationOrderGUI.Prototype, events: []}
 
         try {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
             HotkeyManager.activeHotkeys := Map()
-            Assert.True(gui.CaptureFunctionDialogState(
+            Assert.True(editor.CaptureFunctionDialogState(
                 prompt,
                 "Sign Report",
                 listView,
                 1
             ))
-            Assert.True(gui.BeginListening("Sign Report", listView, prompt))
-            result := gui.OnInputEnd(
+            Assert.True(editor.BeginListening("Sign Report", listView, prompt))
+            result := editor.OnInputEnd(
                 "Sign Report",
                 listView,
                 prompt,
                 KeybindGUI.activeInputHook
             )
         } finally {
-            try gui.StopListening()
+            try editor.StopListening()
             KeybindGUI.captureRuntimeProfile := 0
             KeybindGUI.isListening := false
             KeybindGUI.activeInputHook := 0
@@ -956,9 +956,9 @@ class KeybindGUITest {
         }
 
         Assert.True(result)
-        Assert.Equal(2, gui.events.Length)
-        Assert.Equal("dirty", gui.events[1])
-        Assert.Equal("release", gui.events[2])
+        Assert.Equal(2, editor.events.Length)
+        Assert.Equal("dirty", editor.events[1])
+        Assert.Equal("release", editor.events[2])
     }
 
     TestCancelCaptureWarnsWhenPriorRuntimeCannotBeRestored() {
@@ -976,7 +976,7 @@ class KeybindGUITest {
         listView := FunctionalListView("Sign Report", "Unassigned", "Any window")
         prompt := FakeProfileDialog("Test")
         notifications := CapturingNotificationDriver()
-        gui := {
+        editor := {
             base: CaptureCancelRestoreFailingKeybindGUI.Prototype,
             restoreCalls: 0,
             notificationDriver: notifications
@@ -992,14 +992,14 @@ class KeybindGUITest {
             KeybindGUI.listeningControl := ""
             KeybindGUI.activeInputHook := 0
 
-            Assert.True(gui.CaptureFunctionDialogState(
+            Assert.True(editor.CaptureFunctionDialogState(
                 prompt,
                 "Sign Report",
                 listView,
                 1
             ))
-            Assert.True(gui.BeginListening("Sign Report", listView, prompt))
-            result := gui.CancelKeybindPrompt(prompt)
+            Assert.True(editor.BeginListening("Sign Report", listView, prompt))
+            result := editor.CancelKeybindPrompt(prompt)
             capturedListening := KeybindGUI.isListening
         } finally {
             ProfileManager.profiles := originalProfiles
@@ -1015,7 +1015,7 @@ class KeybindGUITest {
         Assert.False(result)
         Assert.False(capturedListening)
         Assert.True(prompt.destroyed)
-        Assert.Equal(1, gui.restoreCalls)
+        Assert.Equal(1, editor.restoreCalls)
         Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
         Assert.True(InStr(notifications.message, "simulated cancel restore failure") > 0)
     }
@@ -1032,7 +1032,7 @@ class KeybindGUITest {
         prompt := FakeProfileDialog("Test")
         notifications := CapturingNotificationDriver()
         hook := FailingCaptureHook("F13")
-        gui := {
+        editor := {
             base: StopFailureCancelGUI.Prototype,
             restoreCalls: 0,
             notificationDriver: notifications
@@ -1047,7 +1047,7 @@ class KeybindGUITest {
             KeybindGUI.captureRuntimeProfile := ProfileManager.CloneProfile(profile)
             KeybindGUI.captureTransactionActive := true
 
-            result := gui.CancelKeybindPrompt(prompt)
+            result := editor.CancelKeybindPrompt(prompt)
             hookRetained := KeybindGUI.activeInputHook = hook
             listeningRetained := KeybindGUI.isListening
             transactionRetained := KeybindGUI.captureTransactionActive
@@ -1066,7 +1066,7 @@ class KeybindGUITest {
         Assert.True(listeningRetained)
         Assert.True(transactionRetained)
         Assert.False(prompt.destroyed)
-        Assert.Equal(0, gui.restoreCalls)
+        Assert.Equal(0, editor.restoreCalls)
         Assert.True(InStr(notifications.message, "restart PACS Assistant") > 0)
     }
 
@@ -1079,7 +1079,7 @@ class KeybindGUITest {
         profile.scopes["Sign Report"] := "Any"
         listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
         prompt := FakeProfileDialog("Test")
-        gui := {
+        editor := {
             base: OnEndStopFailureGUI.Prototype,
             notifications: [],
             restoreCalls: 0
@@ -1090,15 +1090,15 @@ class KeybindGUITest {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
             HotkeyManager.activeHotkeys := Map()
-            Assert.True(gui.CaptureFunctionDialogState(
+            Assert.True(editor.CaptureFunctionDialogState(
                 prompt,
                 "Sign Report",
                 listView,
                 1
             ))
-            Assert.True(gui.BeginListening("Sign Report", listView, prompt))
+            Assert.True(editor.BeginListening("Sign Report", listView, prompt))
             hook := KeybindGUI.activeInputHook
-            try gui.OnInputEnd("Sign Report", listView, prompt, hook)
+            try editor.OnInputEnd("Sign Report", listView, prompt, hook)
             catch
                 threw := true
 
@@ -1123,9 +1123,9 @@ class KeybindGUITest {
         Assert.True(capturedTransaction)
         Assert.Equal("^F13", capturedBind)
         Assert.False(prompt.destroyed)
-        Assert.Equal(0, gui.restoreCalls)
-        Assert.Equal(1, gui.notifications.Length)
-        Assert.True(InStr(gui.notifications[1].message, "restart PACS Assistant") > 0)
+        Assert.Equal(0, editor.restoreCalls)
+        Assert.Equal(1, editor.notifications.Length)
+        Assert.True(InStr(editor.notifications[1].message, "restart PACS Assistant") > 0)
     }
 
     TestModifierRestartFailureWarnsWhenPriorRuntimeCannotBeRestored() {
@@ -1143,7 +1143,7 @@ class KeybindGUITest {
         listView := FunctionalListView("Sign Report", "Unassigned", "Any window")
         prompt := FakeProfileDialog("Test")
         notifications := CapturingNotificationDriver()
-        gui := {
+        editor := {
             base: ModifierRestartRestoreFailingKeybindGUI.Prototype,
             startCalls: 0,
             restoreCalls: 0,
@@ -1160,15 +1160,15 @@ class KeybindGUITest {
             KeybindGUI.isListening := false
             KeybindGUI.listeningControl := ""
             KeybindGUI.activeInputHook := 0
-            Assert.True(gui.CaptureFunctionDialogState(
+            Assert.True(editor.CaptureFunctionDialogState(
                 prompt,
                 "Sign Report",
                 listView,
                 1
             ))
-            Assert.True(gui.BeginListening("Sign Report", listView, prompt))
+            Assert.True(editor.BeginListening("Sign Report", listView, prompt))
 
-            try gui.OnInputEnd(
+            try editor.OnInputEnd(
                 "Sign Report",
                 listView,
                 prompt,
@@ -1191,8 +1191,8 @@ class KeybindGUITest {
         Assert.True(threw)
         Assert.False(capturedListening)
         Assert.True(prompt.destroyed)
-        Assert.Equal(2, gui.startCalls)
-        Assert.Equal(1, gui.restoreCalls)
+        Assert.Equal(2, editor.startCalls)
+        Assert.Equal(1, editor.restoreCalls)
         Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
         Assert.True(InStr(notifications.message, "simulated modifier restore failure") > 0)
     }
@@ -1403,14 +1403,14 @@ class KeybindGUITest {
         listView.rows.Push(["Draft Report", "Ctrl + F14", "PowerScribe"])
         dialog := FakeProfileDialog("Test")
         notifications := CapturingNotificationDriver()
-        gui := {base: StaleScopeTrackingKeybindGUI.Prototype}
-        gui.restoreCalls := 0
-        gui.notificationDriver := notifications
+        editor := {base: StaleScopeTrackingKeybindGUI.Prototype}
+        editor.restoreCalls := 0
+        editor.notificationDriver := notifications
 
         try {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
-            Assert.True(gui.CaptureFunctionDialogState(
+            Assert.True(editor.CaptureFunctionDialogState(
                 dialog,
                 "Sign Report",
                 listView,
@@ -1420,7 +1420,7 @@ class KeybindGUITest {
             profile.scopes.Delete("Sign Report")
             listView.rows.RemoveAt(1)
 
-            result := gui.ApplyScope(
+            result := editor.ApplyScope(
                 "Sign Report",
                 true,
                 false,
@@ -1442,7 +1442,7 @@ class KeybindGUITest {
         Assert.Equal("Draft Report", remainingName)
         Assert.Equal("PowerScribe", remainingScope)
         Assert.True(destroyed)
-        Assert.Equal(0, gui.restoreCalls)
+        Assert.Equal(0, editor.restoreCalls)
     }
 
     TestFailedModalitySavePreservesLiveProfile() {
@@ -1603,7 +1603,7 @@ class KeybindGUITest {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
         profile := ProfileManager.NewProfile()
-        gui := {
+        editor := {
             base: DirtyPersistentOperationGUI.Prototype,
             dialogCalls: 0,
             profileLeaveDriver: FixedProfileLeaveDriver("Cancel")
@@ -1612,9 +1612,9 @@ class KeybindGUITest {
         try {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
-            gui.MarkProfileDirty("Test")
-            result := gui.ShowModalityAttendingsDialog()
-            dirty := gui.IsProfileDirty("Test")
+            editor.MarkProfileDirty("Test")
+            result := editor.ShowModalityAttendingsDialog()
+            dirty := editor.IsProfileDirty("Test")
         } finally {
             ProfileManager.profiles := originalProfiles
             ProfileManager.currentProfile := originalCurrent
@@ -1622,7 +1622,7 @@ class KeybindGUITest {
 
         Assert.False(result)
         Assert.True(dirty)
-        Assert.Equal(0, gui.dialogCalls)
+        Assert.Equal(0, editor.dialogCalls)
     }
 
     TestPreexistingDirtyProfileBlocksCustomDeletion() {
@@ -1638,8 +1638,8 @@ class KeybindGUITest {
         profile.binds["Custom: Keep"] := ""
         profile.scopes["Custom: Keep"] := "Any"
         selector := FakeProfileDialog("Test")
-        gui := {base: DirtyPersistentOperationGUI.Prototype, dialogCalls: 0}
-        gui.confirmationDriver := AlwaysConfirmDriver()
+        editor := {base: DirtyPersistentOperationGUI.Prototype, dialogCalls: 0}
+        editor.confirmationDriver := AlwaysConfirmDriver()
 
         try {
             try DirDelete(tempRoot, true)
@@ -1651,14 +1651,14 @@ class KeybindGUITest {
             ProfileManager.SaveProfile("Test", profile)
 
             profile.scopes["Sign Report"] := "PACS"
-            gui.MarkProfileDirty("Test")
-            result := gui.DeleteCustomFunction("Custom: Keep", selector)
+            editor.MarkProfileDirty("Test")
+            result := editor.DeleteCustomFunction("Custom: Keep", selector)
             stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath("Test"))
             storedScope := stored.scopes["Sign Report"]
             storedCustom := stored.customFuncs.Has("Custom: Keep")
             memoryScope := profile.scopes["Sign Report"]
             memoryCustom := profile.customFuncs.Has("Custom: Keep")
-            dirty := gui.IsProfileDirty("Test")
+            dirty := editor.IsProfileDirty("Test")
         } finally {
             ProfileManager.profiles := originalProfiles
             ProfileManager.currentProfile := originalCurrent
@@ -1677,7 +1677,7 @@ class KeybindGUITest {
     }
 
     TestDiscardBeforeAddFunctionRequiresFreshMainWindowControl() {
-        gui := {
+        editor := {
             base: DirtyAddFunctionTestGUI.Prototype,
             dirty: true,
             resolveCalls: 0,
@@ -1685,12 +1685,12 @@ class KeybindGUITest {
             notices: 0
         }
 
-        result := gui.ShowAddFunctionDialog({destroyed: true})
+        result := editor.ShowAddFunctionDialog({destroyed: true})
 
         Assert.False(result)
-        Assert.Equal(1, gui.resolveCalls)
-        Assert.Equal(0, gui.dialogCalls)
-        Assert.Equal(1, gui.notices)
+        Assert.Equal(1, editor.resolveCalls)
+        Assert.Equal(0, editor.dialogCalls)
+        Assert.Equal(1, editor.notices)
     }
 
     TestStaleRenameDialogCannotRenameAnotherProfile() {
@@ -1736,16 +1736,16 @@ class KeybindGUITest {
         originalCurrent := ProfileManager.currentProfile
         profile := ProfileManager.NewProfile()
         dialog := FakeProfileDialog("Old")
-        gui := {base: RenameRuntimeTrackingKeybindGUI.Prototype}
-        gui.createCalls := 0
-        gui.applyCalls := 0
+        editor := {base: RenameRuntimeTrackingKeybindGUI.Prototype}
+        editor.createCalls := 0
+        editor.applyCalls := 0
 
         try {
             ProfileManager.profiles := Map("Old", profile)
             ProfileManager.currentProfile := "Old"
-            Assert.True(gui.CaptureRenameDialogState(dialog, "Old"))
+            Assert.True(editor.CaptureRenameDialogState(dialog, "Old"))
             dialog.Destroy()
-            result := gui.RenameProfile("Old", "New", dialog)
+            result := editor.RenameProfile("Old", "New", dialog)
             keptOld := ProfileManager.profiles.Has("Old")
         } finally {
             ProfileManager.profiles := originalProfiles
@@ -1754,7 +1754,7 @@ class KeybindGUITest {
 
         Assert.False(result)
         Assert.True(keptOld)
-        Assert.Equal(0, gui.createCalls)
+        Assert.Equal(0, editor.createCalls)
     }
 
     TestRenameDialogCannotMutateSameNameReplacement() {
@@ -1765,18 +1765,18 @@ class KeybindGUITest {
         replacement := ProfileManager.NewProfile()
         replacement.modalityAttendings["Marker"] := "replacement"
         dialog := FakeProfileDialog("Old")
-        gui := {base: RenameRuntimeTrackingKeybindGUI.Prototype}
-        gui.createCalls := 0
-        gui.applyCalls := 0
+        editor := {base: RenameRuntimeTrackingKeybindGUI.Prototype}
+        editor.createCalls := 0
+        editor.applyCalls := 0
 
         try {
             ProfileManager.profileRevisions := Map("Old", 1)
             ProfileManager.profiles := Map("Old", originalProfile)
             ProfileManager.currentProfile := "Old"
-            Assert.True(gui.CaptureRenameDialogState(dialog, "Old"))
+            Assert.True(editor.CaptureRenameDialogState(dialog, "Old"))
             ProfileManager.profiles["Old"] := replacement
             ProfileManager.profileRevisions["Old"] := 2
-            result := gui.RenameProfile("Old", "New", dialog)
+            result := editor.RenameProfile("Old", "New", dialog)
             keptReplacement := ProfileManager.profiles.Has("Old")
                 && ProfileManager.profiles["Old"] = replacement
         } finally {
@@ -1787,14 +1787,14 @@ class KeybindGUITest {
 
         Assert.False(result)
         Assert.True(keptReplacement)
-        Assert.Equal(0, gui.createCalls)
+        Assert.Equal(0, editor.createCalls)
     }
 
     TestRenamePromptHonorsDirtyCancel() {
         originalProfiles := ProfileManager.profiles
         originalCurrent := ProfileManager.currentProfile
         profile := ProfileManager.NewProfile()
-        gui := {
+        editor := {
             base: DirtyRenameTestGUI.Prototype,
             dialogCreateCalls: 0,
             profileLeaveDriver: FixedProfileLeaveDriver("Cancel")
@@ -1803,16 +1803,16 @@ class KeybindGUITest {
         try {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
-            gui.MarkProfileDirty("Test")
-            result := gui.PromptRenameProfile("Test")
+            editor.MarkProfileDirty("Test")
+            result := editor.PromptRenameProfile("Test")
         } finally {
             ProfileManager.profiles := originalProfiles
             ProfileManager.currentProfile := originalCurrent
         }
 
         Assert.False(result)
-        Assert.True(gui.IsProfileDirty("Test"))
-        Assert.Equal(0, gui.dialogCreateCalls)
+        Assert.True(editor.IsProfileDirty("Test"))
+        Assert.Equal(0, editor.dialogCreateCalls)
     }
 
     TestCaseOnlyRenamePersistsResolvedDirtyChanges() {
@@ -1825,14 +1825,14 @@ class KeybindGUITest {
         profile.binds["Sign Report"] := ""
         profile.scopes["Sign Report"] := "Any"
         dialog := FakeProfileDialog("Night")
-        gui := {
+        editor := {
             base: DirtyRenameTestGUI.Prototype,
             createCalls: 0,
             applyCalls: 0,
             dialogCreateCalls: 0,
             profileLeaveDriver: FixedProfileLeaveDriver("Yes")
         }
-        gui.gui := FakeProfileDialog()
+        editor.gui := FakeProfileDialog()
 
         try {
             try DirDelete(tempRoot, true)
@@ -1843,11 +1843,11 @@ class KeybindGUITest {
             ProfileManager.currentProfile := "Night"
             ProfileManager.SaveProfile("Night", profile)
             profile.scopes["Sign Report"] := "PACS"
-            gui.MarkProfileDirty("Night")
+            editor.MarkProfileDirty("Night")
 
-            Assert.True(gui.ResolveDirtyProfileBeforeLeaving())
-            Assert.True(gui.CaptureRenameDialogState(dialog, "Night"))
-            Assert.True(gui.RenameProfile("Night", "night", dialog))
+            Assert.True(editor.ResolveDirtyProfileBeforeLeaving())
+            Assert.True(editor.CaptureRenameDialogState(dialog, "Night"))
+            Assert.True(editor.RenameProfile("Night", "night", dialog))
             reloaded := ProfileManager.LoadProfile(ProfileManager.ProfilePath("night"))
             persistedScope := reloaded.scopes["Sign Report"]
         } finally {
@@ -1859,8 +1859,8 @@ class KeybindGUITest {
         }
 
         Assert.Equal("PACS", persistedScope)
-        Assert.False(gui.IsProfileDirty("Night"))
-        Assert.False(gui.IsProfileDirty("night"))
+        Assert.False(editor.IsProfileDirty("Night"))
+        Assert.False(editor.IsProfileDirty("night"))
     }
 
     TestSaveChoiceRejectsProfileChangedDuringDirtyPrompt() {
@@ -1875,7 +1875,7 @@ class KeybindGUITest {
         replacement := ProfileManager.NewProfile()
         replacement.binds["Draft Report"] := "^F14"
         replacement.scopes["Draft Report"] := "Any"
-        gui := {
+        editor := {
             base: DirtyLeaveTestGUI.Prototype,
             profileLeaveDriver: CallbackProfileLeaveDriver(
                 "Yes",
@@ -1890,11 +1890,11 @@ class KeybindGUITest {
             ProfileManager.profiles := Map("Prompted", prompted, "Replacement", replacement)
             ProfileManager.currentProfile := "Prompted"
             ProfileManager.SaveProfile("Prompted", prompted)
-            gui.MarkProfileDirty("Prompted")
+            editor.MarkProfileDirty("Prompted")
 
-            result := gui.ResolveDirtyProfileBeforeLeaving()
+            result := editor.ResolveDirtyProfileBeforeLeaving()
             replacementWasSaved := FileExist(ProfileManager.ProfilePath("Replacement")) != ""
-            promptedRemainsDirty := gui.IsProfileDirty("Prompted")
+            promptedRemainsDirty := editor.IsProfileDirty("Prompted")
         } finally {
             ProfileManager.profiles := originalProfiles
             ProfileManager.currentProfile := originalCurrent
@@ -1910,10 +1910,10 @@ class KeybindGUITest {
 
     TestDiscardBeforeRenameRestoresRuntimeAndMainView() {
         state := this.PrepareDiscardRenameState("pacs_discard_rename_cancel_")
-        gui := state.gui
+        editor := state.gui
 
         try {
-            resolved := gui.ResolveDirtyProfileBeforeLeaving(true)
+            resolved := editor.ResolveDirtyProfileBeforeLeaving(true)
             memoryBind := ProfileManager.profiles["Night"].binds["Sign Report"]
             memoryScope := ProfileManager.profiles["Night"].scopes["Sign Report"]
             runtimeBind := HotkeyManager.activeHotkeys["Sign Report"].hotkey
@@ -1927,22 +1927,22 @@ class KeybindGUITest {
         Assert.Equal("Any", memoryScope)
         Assert.Equal("^F13", runtimeBind)
         Assert.Equal("Any", runtimeScope)
-        Assert.Equal("^F13", gui.visibleBind)
-        Assert.Equal("Any", gui.visibleScope)
-        Assert.Equal(1, gui.createCalls)
-        Assert.False(gui.lastCreateAppliedBinds)
-        Assert.False(gui.IsProfileDirty("Night"))
+        Assert.Equal("^F13", editor.visibleBind)
+        Assert.Equal("Any", editor.visibleScope)
+        Assert.Equal(1, editor.createCalls)
+        Assert.False(editor.lastCreateAppliedBinds)
+        Assert.False(editor.IsProfileDirty("Night"))
     }
 
     TestDiscardBeforeCaseRenameKeepsStoredRuntime() {
         state := this.PrepareDiscardRenameState("pacs_discard_case_rename_")
-        gui := state.gui
+        editor := state.gui
         dialog := FakeProfileDialog("Night")
 
         try {
-            Assert.True(gui.ResolveDirtyProfileBeforeLeaving(true))
-            Assert.True(gui.CaptureRenameDialogState(dialog, "Night"))
-            renamed := gui.RenameProfile("Night", "night", dialog)
+            Assert.True(editor.ResolveDirtyProfileBeforeLeaving(true))
+            Assert.True(editor.CaptureRenameDialogState(dialog, "Night"))
+            renamed := editor.RenameProfile("Night", "night", dialog)
             reloaded := ProfileManager.LoadProfile(ProfileManager.ProfilePath("night"))
             persistedBind := reloaded.binds["Sign Report"]
             persistedScope := reloaded.scopes["Sign Report"]
@@ -1957,10 +1957,10 @@ class KeybindGUITest {
         Assert.Equal("Any", persistedScope)
         Assert.Equal("^F13", runtimeBind)
         Assert.Equal("Any", runtimeScope)
-        Assert.Equal("^F13", gui.visibleBind)
-        Assert.Equal("Any", gui.visibleScope)
-        Assert.False(gui.IsProfileDirty("Night"))
-        Assert.False(gui.IsProfileDirty("night"))
+        Assert.Equal("^F13", editor.visibleBind)
+        Assert.Equal("Any", editor.visibleScope)
+        Assert.False(editor.IsProfileDirty("Night"))
+        Assert.False(editor.IsProfileDirty("night"))
     }
 
     TestDefaultProfileSelectionRequiresExactRenderedName() {
@@ -1978,10 +1978,10 @@ class KeybindGUITest {
         tempRoot := TestTempPath("pacs-rename-runtime")
         profile := ProfileManager.NewProfile()
         dialog := FakeProfileDialog("Old")
-        gui := {base: RenameRuntimeTrackingKeybindGUI.Prototype}
-        gui.gui := FakeProfileDialog()
-        gui.createCalls := 0
-        gui.applyCalls := 0
+        editor := {base: RenameRuntimeTrackingKeybindGUI.Prototype}
+        editor.gui := FakeProfileDialog()
+        editor.createCalls := 0
+        editor.applyCalls := 0
 
         try {
             try DirDelete(tempRoot, true)
@@ -1992,9 +1992,9 @@ class KeybindGUITest {
             ProfileManager.profiles := Map("Old", profile)
             ProfileManager.currentProfile := "Old"
             ProfileManager.SaveProfile("Old", profile)
-            Assert.True(gui.CaptureRenameDialogState(dialog, "Old"))
+            Assert.True(editor.CaptureRenameDialogState(dialog, "Old"))
 
-            result := gui.RenameProfile("Old", "New", dialog)
+            result := editor.RenameProfile("Old", "New", dialog)
         } finally {
             ProfileManager.profiles := originalProfiles
             ProfileManager.currentProfile := originalCurrent
@@ -2005,21 +2005,21 @@ class KeybindGUITest {
         }
 
         Assert.True(result)
-        Assert.Equal(1, gui.createCalls)
-        Assert.Equal(0, gui.applyCalls)
+        Assert.Equal(1, editor.createCalls)
+        Assert.Equal(0, editor.applyCalls)
     }
 
     TestCreateProfileSurfacesStorageRecovery() {
         originalRecovery := ProfileManager.recoveryRequired
         originalLastError := ProfileManager.lastError
         notifications := CapturingNotificationDriver()
-        gui := {base: ProfileSelectorTransactionGUI.Prototype, notificationDriver: notifications}
+        editor := {base: ProfileSelectorTransactionGUI.Prototype, notificationDriver: notifications}
         dialog := FakeProfileDialog()
 
         try {
             ProfileManager.recoveryRequired := true
             ProfileManager.lastError := "simulated profile storage uncertainty"
-            result := gui.CreateProfile("New Profile", dialog)
+            result := editor.CreateProfile("New Profile", dialog)
         } finally {
             ProfileManager.recoveryRequired := originalRecovery
             ProfileManager.lastError := originalLastError
@@ -2039,7 +2039,7 @@ class KeybindGUITest {
         profile.scopes["Sign Report"] := "Any"
         listView := FunctionalListView("Sign Report", "Unassigned", "Any window")
         dialog := FakeProfileDialog("Test")
-        gui := {
+        editor := {
             base: DirtyLeaveTestGUI.Prototype,
             prepareCalls: 0,
             selectorCalls: 0,
@@ -2050,10 +2050,10 @@ class KeybindGUITest {
         try {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
-            Assert.True(gui.CaptureFunctionDialogState(dialog, "Sign Report", listView, 1))
-            Assert.True(gui.ApplyScope("Sign Report", true, false, listView, 1, dialog))
-            switchResult := gui.OpenProfileSelector()
-            dirty := gui.IsProfileDirty("Test")
+            Assert.True(editor.CaptureFunctionDialogState(dialog, "Sign Report", listView, 1))
+            Assert.True(editor.ApplyScope("Sign Report", true, false, listView, 1, dialog))
+            switchResult := editor.OpenProfileSelector()
+            dirty := editor.IsProfileDirty("Test")
         } finally {
             ProfileManager.profiles := originalProfiles
             ProfileManager.currentProfile := originalCurrent
@@ -2061,8 +2061,8 @@ class KeybindGUITest {
 
         Assert.False(switchResult)
         Assert.True(dirty)
-        Assert.Equal(0, gui.prepareCalls)
-        Assert.Equal(0, gui.selectorCalls)
+        Assert.Equal(0, editor.prepareCalls)
+        Assert.Equal(0, editor.selectorCalls)
     }
 
     TestClosingSavesDirtyProfileBeforeExit() {
@@ -2074,7 +2074,7 @@ class KeybindGUITest {
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := ""
         profile.scopes["Sign Report"] := "Any"
-        gui := {
+        editor := {
             base: DirtyLeaveTestGUI.Prototype,
             prepareCalls: 0,
             selectorCalls: 0,
@@ -2091,12 +2091,12 @@ class KeybindGUITest {
             ProfileManager.currentProfile := "Test"
             ProfileManager.SaveProfile("Test", profile)
             profile.scopes["Sign Report"] := "PACS"
-            gui.MarkProfileDirty("Test")
+            editor.MarkProfileDirty("Test")
 
-            result := gui.CloseMainWindow()
+            result := editor.CloseMainWindow()
             stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath("Test"))
             persistedScope := stored.scopes["Sign Report"]
-            dirty := gui.IsProfileDirty("Test")
+            dirty := editor.IsProfileDirty("Test")
         } finally {
             ProfileManager.profiles := originalProfiles
             ProfileManager.currentProfile := originalCurrent
@@ -2108,7 +2108,7 @@ class KeybindGUITest {
         Assert.True(result)
         Assert.Equal("PACS", persistedScope)
         Assert.False(dirty)
-        Assert.Equal(1, gui.exitCalls)
+        Assert.Equal(1, editor.exitCalls)
     }
 
     TestProfileSwitchCanDiscardDirtyChanges() {
@@ -2120,7 +2120,7 @@ class KeybindGUITest {
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := ""
         profile.scopes["Sign Report"] := "Any"
-        gui := {
+        editor := {
             base: DirtyLeaveTestGUI.Prototype,
             prepareCalls: 0,
             selectorCalls: 0,
@@ -2137,11 +2137,11 @@ class KeybindGUITest {
             ProfileManager.currentProfile := "Test"
             ProfileManager.SaveProfile("Test", profile)
             profile.scopes["Sign Report"] := "PACS"
-            gui.MarkProfileDirty("Test")
+            editor.MarkProfileDirty("Test")
 
-            result := gui.OpenProfileSelector()
+            result := editor.OpenProfileSelector()
             restoredScope := ProfileManager.profiles["Test"].scopes["Sign Report"]
-            dirty := gui.IsProfileDirty("Test")
+            dirty := editor.IsProfileDirty("Test")
         } finally {
             ProfileManager.profiles := originalProfiles
             ProfileManager.currentProfile := originalCurrent
@@ -2153,8 +2153,8 @@ class KeybindGUITest {
         Assert.True(result)
         Assert.Equal("Any", restoredScope)
         Assert.False(dirty)
-        Assert.Equal(1, gui.prepareCalls)
-        Assert.Equal(1, gui.selectorCalls)
+        Assert.Equal(1, editor.prepareCalls)
+        Assert.Equal(1, editor.selectorCalls)
     }
 
     TestFailedCustomDeletePreservesLiveProfile() {
@@ -2313,14 +2313,14 @@ class KeybindGUITest {
         profile.binds["Draft Report"] := "^F24"
         profile.scopes["Draft Report"] := "Any"
         listView := RemovableListView("Sign Report", "Ctrl + F23", "Any window")
-        gui := {base: PassiveRuntimeKeybindGUI.Prototype}
-        gui.applyCalls := 0
-        gui.confirmationDriver := RemoveRaceConfirmationDriver(profile, listView)
+        editor := {base: PassiveRuntimeKeybindGUI.Prototype}
+        editor.applyCalls := 0
+        editor.confirmationDriver := RemoveRaceConfirmationDriver(profile, listView)
 
         try {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
-            result := gui.RemoveFunction(listView)
+            result := editor.RemoveFunction(listView)
             liveProfile := ProfileManager.profiles["Test"]
             keptSign := liveProfile.binds.Has("Sign Report")
                 && liveProfile.binds["Sign Report"] == "^F22"
@@ -2337,7 +2337,7 @@ class KeybindGUITest {
         Assert.True(keptDraft)
         Assert.Equal("Draft Report", rowOne)
         Assert.Equal("Sign Report", rowTwo)
-        Assert.Equal(0, gui.applyCalls)
+        Assert.Equal(0, editor.applyCalls)
     }
 
     TestStaleCustomDeleteCannotDeleteRecreatedCommand() {
@@ -2350,9 +2350,9 @@ class KeybindGUITest {
         profile.scopes["Custom: Keep"] := "Any"
         profile.customFuncs["Custom: Keep"] := {keys: "OLD", window: ""}
         dialog := FakeProfileDialog("Test")
-        gui := {base: PassiveRuntimeKeybindGUI.Prototype, gui: ""}
-        gui.applyCalls := 0
-        gui.confirmationDriver := RecreateCustomConfirmationDriver(profile)
+        editor := {base: PassiveRuntimeKeybindGUI.Prototype, gui: ""}
+        editor.applyCalls := 0
+        editor.confirmationDriver := RecreateCustomConfirmationDriver(profile)
         threw := false
 
         try {
@@ -2361,7 +2361,7 @@ class KeybindGUITest {
             ProfileManager.profilesPath := tempRoot
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
-            try result := gui.DeleteCustomFunction("Custom: Keep", dialog)
+            try result := editor.DeleteCustomFunction("Custom: Keep", dialog)
             catch {
                 threw := true
                 result := false
@@ -2381,7 +2381,7 @@ class KeybindGUITest {
         Assert.False(result)
         Assert.False(threw)
         Assert.True(keptRecreated)
-        Assert.Equal(0, gui.applyCalls)
+        Assert.Equal(0, editor.applyCalls)
     }
 
     TestCustomDeleteRejectsConcurrentUnrelatedDirtyEdit() {
@@ -2396,9 +2396,9 @@ class KeybindGUITest {
         profile.binds["Sign Report"] := "^F12"
         profile.scopes["Sign Report"] := "Any"
         dialog := FakeProfileDialog("Test")
-        gui := {base: PassiveRuntimeKeybindGUI.Prototype, gui: ""}
-        gui.applyCalls := 0
-        gui.confirmationDriver := DirtyOtherBindConfirmationDriver(gui, profile)
+        editor := {base: PassiveRuntimeKeybindGUI.Prototype, gui: ""}
+        editor.applyCalls := 0
+        editor.confirmationDriver := DirtyOtherBindConfirmationDriver(editor, profile)
 
         try {
             try DirDelete(tempRoot, true)
@@ -2408,12 +2408,12 @@ class KeybindGUITest {
             ProfileManager.currentProfile := "Test"
             ProfileManager.SaveProfile("Test", profile)
 
-            result := gui.DeleteCustomFunction("Custom: Keep", dialog)
+            result := editor.DeleteCustomFunction("Custom: Keep", dialog)
             stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath("Test"))
             liveKept := profile.customFuncs.Has("Custom: Keep")
             storedKept := stored.customFuncs.Has("Custom: Keep")
             storedScope := stored.scopes["Sign Report"]
-            dirtyKept := gui.IsProfileDirty("Test")
+            dirtyKept := editor.IsProfileDirty("Test")
         } finally {
             ProfileManager.profiles := originalProfiles
             ProfileManager.currentProfile := originalCurrent
@@ -2426,7 +2426,7 @@ class KeybindGUITest {
         Assert.True(storedKept)
         Assert.Equal("Any", storedScope)
         Assert.True(dirtyKept)
-        Assert.Equal(0, gui.applyCalls)
+        Assert.Equal(0, editor.applyCalls)
     }
 
     TestRowDeleteAndRuntimeRestoreFailureRequiresRestartWarning() {
@@ -2437,15 +2437,15 @@ class KeybindGUITest {
         profile.scopes["Sign Report"] := "Any"
         listView := ThrowingDeleteListView("Sign Report", "Ctrl + F23", "Any window")
         notifications := CapturingNotificationDriver()
-        gui := {base: FailedRestoreKeybindGUI.Prototype}
-        gui.applyCalls := 0
-        gui.confirmationDriver := AlwaysConfirmDriver()
-        gui.notificationDriver := notifications
+        editor := {base: FailedRestoreKeybindGUI.Prototype}
+        editor.applyCalls := 0
+        editor.confirmationDriver := AlwaysConfirmDriver()
+        editor.notificationDriver := notifications
 
         try {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
-            result := gui.RemoveFunction(listView)
+            result := editor.RemoveFunction(listView)
             keptBind := ProfileManager.profiles["Test"].binds.Has("Sign Report")
         } finally {
             ProfileManager.profiles := originalProfiles
@@ -2471,20 +2471,20 @@ class KeybindGUITest {
         prompt := FakeProfileDialog("Test")
         hook := FakeCaptureHook("F24")
         notifications := CapturingNotificationDriver()
-        gui := {base: RollbackFailingKeybindGUI.Prototype}
-        gui.applyCalls := 0
-        gui.restoreCalls := 0
-        gui.notificationDriver := notifications
+        editor := {base: RollbackFailingKeybindGUI.Prototype}
+        editor.applyCalls := 0
+        editor.restoreCalls := 0
+        editor.notificationDriver := notifications
 
         try {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
-            Assert.True(gui.CaptureFunctionDialogState(prompt, "Sign Report", listView, 1))
+            Assert.True(editor.CaptureFunctionDialogState(prompt, "Sign Report", listView, 1))
             KeybindGUI.isListening := true
             KeybindGUI.listeningControl := listView
             KeybindGUI.activeInputHook := hook
 
-            result := gui.OnInputEnd("Sign Report", listView, prompt, hook)
+            result := editor.OnInputEnd("Sign Report", listView, prompt, hook)
             keptBind := profile.binds["Sign Report"]
             keptRow := listView.GetText(1, 2)
         } finally {
@@ -2501,7 +2501,7 @@ class KeybindGUITest {
         Assert.False(result)
         Assert.Equal("^F23", keptBind)
         Assert.Equal("Ctrl + F23", keptRow)
-        Assert.Equal(1, gui.restoreCalls)
+        Assert.Equal(1, editor.restoreCalls)
         Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
         Assert.True(InStr(notifications.message, "simulated restore failure") > 0)
     }
@@ -2515,16 +2515,16 @@ class KeybindGUITest {
         listView := FunctionalListView("Sign Report", "Ctrl + F23", "Any window")
         dialog := FakeProfileDialog("Test")
         notifications := CapturingNotificationDriver()
-        gui := {base: RollbackFailingKeybindGUI.Prototype}
-        gui.applyCalls := 0
-        gui.restoreCalls := 0
-        gui.notificationDriver := notifications
+        editor := {base: RollbackFailingKeybindGUI.Prototype}
+        editor.applyCalls := 0
+        editor.restoreCalls := 0
+        editor.notificationDriver := notifications
 
         try {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
-            Assert.True(gui.CaptureFunctionDialogState(dialog, "Sign Report", listView, 1))
-            result := gui.ApplyScope("Sign Report", true, false, listView, 1, dialog)
+            Assert.True(editor.CaptureFunctionDialogState(dialog, "Sign Report", listView, 1))
+            result := editor.ApplyScope("Sign Report", true, false, listView, 1, dialog)
             keptScope := profile.scopes["Sign Report"]
             keptRow := listView.GetText(1, 3)
         } finally {
@@ -2535,7 +2535,7 @@ class KeybindGUITest {
         Assert.False(result)
         Assert.Equal("Any", keptScope)
         Assert.Equal("Any window", keptRow)
-        Assert.Equal(1, gui.restoreCalls)
+        Assert.Equal(1, editor.restoreCalls)
         Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
         Assert.True(InStr(notifications.message, "simulated restore failure") > 0)
     }
@@ -2550,7 +2550,7 @@ class KeybindGUITest {
         profile.binds["Sign Report"] := "^F13"
         profile.scopes["Sign Report"] := "Any"
         notifications := CapturingNotificationDriver()
-        gui := {
+        editor := {
             base: SaveRuntimeFailingKeybindGUI.Prototype,
             applyCalls: 0,
             restoreCalls: 0,
@@ -2565,7 +2565,7 @@ class KeybindGUITest {
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
 
-            result := gui.SaveCurrentProfile()
+            result := editor.SaveCurrentProfile()
             stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath("Test"))
             storedBind := stored.binds["Sign Report"]
         } finally {
@@ -2578,8 +2578,8 @@ class KeybindGUITest {
 
         Assert.False(result)
         Assert.Equal("^F13", storedBind)
-        Assert.Equal(1, gui.applyCalls)
-        Assert.Equal(1, gui.restoreCalls)
+        Assert.Equal(1, editor.applyCalls)
+        Assert.Equal(1, editor.restoreCalls)
         Assert.True(InStr(notifications.message, "profile was saved") > 0)
         Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
         Assert.True(InStr(notifications.message, "simulated saved-profile restore failure") > 0)
@@ -2595,7 +2595,7 @@ class KeybindGUITest {
         profile.binds["Sign Report"] := "^F13"
         profile.scopes["Sign Report"] := "Any"
         notifications := CapturingNotificationDriver()
-        gui := {
+        editor := {
             base: ConcurrentSaveMutationGUI.Prototype,
             applyCalls: 0,
             restoreCalls: 0,
@@ -2610,13 +2610,13 @@ class KeybindGUITest {
             ProfileManager.profileRevisions := Map("Test", 0)
             ProfileManager.profiles := Map("Test", profile)
             ProfileManager.currentProfile := "Test"
-            gui.MarkProfileDirty("Test")
+            editor.MarkProfileDirty("Test")
 
-            result := gui.SaveCurrentProfile()
+            result := editor.SaveCurrentProfile()
             stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath("Test"))
             storedHasConcurrent := stored.modalityAttendings.Has("Concurrent")
             memoryValue := profile.modalityAttendings["Concurrent"]
-            dirty := gui.IsProfileDirty("Test")
+            dirty := editor.IsProfileDirty("Test")
             transactionReleased := !KeybindGUI.profileMutationTransactionActive
         } finally {
             ProfileManager.profiles := originalProfiles
@@ -2630,9 +2630,9 @@ class KeybindGUITest {
         Assert.False(storedHasConcurrent)
         Assert.Equal("New Attending", memoryValue)
         Assert.True(dirty)
-        Assert.Equal(1, gui.applyCalls)
-        Assert.Equal(1, gui.restoreCalls)
-        Assert.Equal("New Attending", gui.restoredAttending)
+        Assert.Equal(1, editor.applyCalls)
+        Assert.Equal(1, editor.restoreCalls)
+        Assert.Equal("New Attending", editor.restoredAttending)
         Assert.True(transactionReleased)
         Assert.True(InStr(notifications.message, "newer edits remain unsaved") > 0)
     }
@@ -2642,8 +2642,8 @@ class KeybindGUITest {
         originalNotifier := PACSCommands.busyNotifier
         notifications := []
         callbackCalls := 0
-        gui := {base: InterruptingProfileApplyGUI.Prototype}
-        gui.callback := (*) => callbackCalls++
+        editor := {base: InterruptingProfileApplyGUI.Prototype}
+        editor.callback := (*) => callbackCalls++
         PACSCommands.commandAvailabilityProbe := (*) =>
             !KeybindGUI.profileMutationTransactionActive
             && !KeybindGUI.captureTransactionActive
@@ -2652,11 +2652,11 @@ class KeybindGUITest {
         PACSCommands.busyNotifier := (text, title, options) => notifications.Push(text)
 
         try {
-            Assert.True(gui.BeginProfileMutationTransaction("test profile apply"))
-            Assert.True(gui.ApplyProfileBinds(ProfileManager.NewProfile(), false))
-            result := gui.commandResult
+            Assert.True(editor.BeginProfileMutationTransaction("test profile apply"))
+            Assert.True(editor.ApplyProfileBinds(ProfileManager.NewProfile(), false))
+            result := editor.commandResult
         } finally {
-            gui.EndProfileMutationTransaction()
+            editor.EndProfileMutationTransaction()
             PACSCommands.commandAvailabilityProbe := originalProbe
             PACSCommands.busyNotifier := originalNotifier
         }
@@ -2676,7 +2676,7 @@ class KeybindGUITest {
         oldProfile := ProfileManager.NewProfile()
         otherProfile := ProfileManager.NewProfile()
         selector := FakeProfileDialog()
-        gui := {base: ProfileDeleteTestGUI.Prototype}
+        editor := {base: ProfileDeleteTestGUI.Prototype}
 
         try {
             try DirDelete(tempRoot, true)
@@ -2688,10 +2688,10 @@ class KeybindGUITest {
             ProfileManager.defaultProfile := ""
             ProfileManager.SaveProfile("A", oldProfile)
             ProfileManager.SaveProfile("B", otherProfile)
-            gui.confirmationDriver := RecreateProfileConfirmationDriver("A")
-            gui.RegisterProfileSelector(selector)
+            editor.confirmationDriver := RecreateProfileConfirmationDriver("A")
+            editor.RegisterProfileSelector(selector)
 
-            result := gui.DeleteProfile("A", selector)
+            result := editor.DeleteProfile("A", selector)
             keptReplacement := ProfileManager.profiles.Has("A")
                 && ProfileManager.profiles["A"].modalityAttendings.Has("Marker")
                 && ProfileManager.profiles["A"].modalityAttendings["Marker"] == "replacement"
@@ -2759,15 +2759,15 @@ class KeybindGUITest {
         HotkeyManager.activeHotkeys := Map(
             "Sign Report", {hotkey: "^F14", scope: "PACS"}
         )
-        gui := {base: DiscardRenameTrackingGUI.Prototype}
-        gui.gui := FakeProfileDialog()
-        gui.createCalls := 0
-        gui.lastCreateAppliedBinds := true
-        gui.visibleBind := "^F14"
-        gui.visibleScope := "PACS"
-        gui.MarkProfileDirty("Night")
-        gui.profileLeaveDriver := FixedProfileLeaveDriver("No")
-        state.gui := gui
+        editor := {base: DiscardRenameTrackingGUI.Prototype}
+        editor.gui := FakeProfileDialog()
+        editor.createCalls := 0
+        editor.lastCreateAppliedBinds := true
+        editor.visibleBind := "^F14"
+        editor.visibleScope := "PACS"
+        editor.MarkProfileDirty("Night")
+        editor.profileLeaveDriver := FixedProfileLeaveDriver("No")
+        state.gui := editor
         return state
     }
 
@@ -3081,8 +3081,8 @@ class StaleScopeTrackingKeybindGUI extends KeybindGUI {
 }
 
 class RenameRuntimeTrackingKeybindGUI extends KeybindGUI {
-    GuiIsLive(gui) {
-        return !HasProp(gui, "destroyed") || !gui.destroyed
+    GuiIsLive(targetGui) {
+        return !HasProp(targetGui, "destroyed") || !targetGui.destroyed
     }
 
     CreateMainGUI(applyBinds := true) {
@@ -3124,8 +3124,8 @@ class DirtyLeaveTestGUI extends KeybindGUI {
 }
 
 class DirtyRenameTestGUI extends DirtyLeaveTestGUI {
-    GuiIsLive(gui) {
-        return !HasProp(gui, "destroyed") || !gui.destroyed
+    GuiIsLive(targetGui) {
+        return !HasProp(targetGui, "destroyed") || !targetGui.destroyed
     }
 
     NewProfileDialog(*) {
@@ -3141,8 +3141,8 @@ class DirtyRenameTestGUI extends DirtyLeaveTestGUI {
 }
 
 class DiscardRenameTrackingGUI extends KeybindGUI {
-    GuiIsLive(gui) {
-        return IsObject(gui) && (!HasProp(gui, "destroyed") || !gui.destroyed)
+    GuiIsLive(targetGui) {
+        return IsObject(targetGui) && (!HasProp(targetGui, "destroyed") || !targetGui.destroyed)
     }
 
     HasMainWindow() {
@@ -3228,8 +3228,8 @@ class CallbackProfileLeaveDriver extends FixedProfileLeaveDriver {
 }
 
 class ProfileDeleteTestGUI extends KeybindGUI {
-    GuiIsLive(gui) {
-        return IsObject(gui) && (!HasProp(gui, "destroyed") || !gui.destroyed)
+    GuiIsLive(targetGui) {
+        return IsObject(targetGui) && (!HasProp(targetGui, "destroyed") || !targetGui.destroyed)
     }
 
     ShowProfileSelector() {
@@ -3269,8 +3269,8 @@ class RecreateCustomConfirmationDriver extends AlwaysConfirmDriver {
 }
 
 class DirtyOtherBindConfirmationDriver extends AlwaysConfirmDriver {
-    __New(gui, profile) {
-        this.gui := gui
+    __New(editor, profile) {
+        this.gui := editor
         this.profile := profile
     }
 
@@ -3415,8 +3415,8 @@ class ReentrantDefaultProfileStorageDriver {
 }
 
 class ProfileSelectorTransactionGUI extends KeybindGUI {
-    GuiIsLive(gui) {
-        return IsObject(gui) && (!HasProp(gui, "destroyed") || !gui.destroyed)
+    GuiIsLive(targetGui) {
+        return IsObject(targetGui) && (!HasProp(targetGui, "destroyed") || !targetGui.destroyed)
     }
 
     HasMainWindow() {

@@ -4,7 +4,7 @@
 #Include TestRunner.ahk
 
 class PACSCommandsTest {
-    static Tests := [
+    static tests := [
         "TestBuiltInCommandsExist",
         "TestCreateCustomKeybindStoresConfig",
         "TestModalityClassification",
@@ -37,13 +37,13 @@ class PACSCommandsTest {
     }
     
     TestCreateCustomKeybindStoresConfig() {
-        func := PACSCommands.CreateCustomKeybind("^c")
-        Assert.Equal("^c", func.keys)
-        Assert.Equal("", func.window)
-        
-        func2 := PACSCommands.CreateCustomKeybind("^v", "TargetWindow")
-        Assert.Equal("^v", func2.keys)
-        Assert.Equal("TargetWindow", func2.window)
+        callback := PACSCommands.CreateCustomKeybind("^c")
+        Assert.Equal("^c", callback.keys)
+        Assert.Equal("", callback.window)
+
+        targetedCallback := PACSCommands.CreateCustomKeybind("^v", "TargetWindow")
+        Assert.Equal("^v", targetedCallback.keys)
+        Assert.Equal("TargetWindow", targetedCallback.window)
     }
 
     TestModalityClassification() {

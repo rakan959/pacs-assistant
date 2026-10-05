@@ -10,7 +10,7 @@
 #Include TestRunner.ahk
 
 class PACSMonitorTest {
-    static Tests := [
+    static tests := [
         "TestHasAccession",
         "TestProcessRowsFindsNewStudies",
         "TestProcessRowsPreservesLongModalityPrefix",
@@ -576,8 +576,8 @@ class FakePACSTimerDriver {
 }
 
 class FakePACSTargetElement {
-    __New(type, processId, name := "", automationId := "", invoke := false, windowId := 100) {
-        this.Type := type
+    __New(elementType, processId, name := "", automationId := "", invoke := false, windowId := 100) {
+        this.Type := elementType
         this.ProcessId := processId
         this.WinId := windowId
         this.Name := name

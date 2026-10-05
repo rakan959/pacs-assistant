@@ -84,9 +84,10 @@ Assert-Matches $workflow '(?m)^\s*AUTOHOTKEY_SOURCE_SHA256:\s*765ada5ae0a543f470
 Assert-Matches $workflow '(?m)^\s*AHK2EXE_VERSION:\s*1\.1\.37\.02a2\s*$' 'CI must pin Ahk2Exe v1.1.37.02a2.'
 Assert-Matches $workflow '(?m)^\s*AHK2EXE_SHA256:\s*c29b8c3a5124850d79fc9e66e2ca79677c377d7f31631ad3022ba159c5d9e3be\s*$' 'CI must verify the official Ahk2Exe v1.1.37.02a2 ZIP digest.'
 Assert-Matches $workflow '(?m)^\s*pull_request:\s*$' 'Pull requests must run the non-release build and validation job.'
-if ([regex]::Matches($workflow, '(?m)^\s*timeout-minutes:\s*\d+\s*$').Count -ne 2) {
+if ([regex]::Matches($workflow, '(?m)^\s{4}timeout-minutes:\s*\d+\s*$').Count -ne 2) {
     $failures.Add('Both CI jobs must define bounded timeout-minutes values.')
 }
+Assert-Matches $workflow '(?m)^\s*- name: Run unit tests\s*\r?\n\s+timeout-minutes:\s*\d+\s*$' 'The unit-test step must have its own timeout so a blocked harness fails fast.'
 Assert-Matches $workflow '(?m)^\s*contents:\s*read\s*$' 'The default workflow token permission must be contents: read.'
 Assert-Matches $workflow '(?ms)^\s{2}release:\s.*?^\s{4}permissions:\s*\r?\n\s{6}contents:\s*write\s*$' 'Only the release job may request contents: write.'
 if ([regex]::Matches($workflow, '(?m)^\s*contents:\s*write\s*$').Count -ne 1) {
@@ -296,7 +297,7 @@ Assert-Matches $main 'OnExit\(\(exitReason, exitCode\) => kbGUI\.HandleProcessEx
 Assert-Matches $main 'UpdateChecker\.shutdownCoordinator\s*:=\s*kbGUI' 'Self-update must use the same shutdown coordinator as normal exit.'
 Assert-Matches $main '(?s)PACSCommands\.commandAvailabilityProbe\s*:=.*?KeybindGUI\.uiPresentationTransactionActive' 'Clinical commands must reject an activating-dialog presentation transaction.'
 Assert-NotMatches $guiSmoke '\{\s*base:\s*KeybindGUI\.Prototype' 'The GUI smoke test must construct a real KeybindGUI instance so instance-property initialization is exercised.'
-Assert-Matches $guiSmoke '(?s)try\s+exitCode\s*:=\s*Main\(\).*?catch as err\s*\{.*?ExitApp\(exitCode\)' 'The GUI smoke test must convert fatal harness errors into a nonzero process exit.'
+Assert-Matches $guiSmoke '(?s)ExitApp\(RunSmoke\(\)\).*?RunSmoke\(\)\s*\{.*?try\s+exitCode\s*:=\s*Main\(\).*?catch Any as err\s*\{.*?return exitCode' 'The GUI smoke test must convert fatal harness errors into a nonzero process exit.'
 Assert-Matches $main 'Settings\.dialogAcquire\s*:=\s*ObjBindMethod\(KeybindGUI,\s*"TryBeginUiPresentation"\)' 'Settings presentation must acquire the shared UI transaction.'
 Assert-Matches $main 'Settings\.dialogRelease\s*:=\s*ObjBindMethod\(KeybindGUI,\s*"EndUiPresentation"\)' 'Settings presentation must release the shared UI transaction.'
 Assert-Matches $main 'UpdateChecker\.dialogAcquire\s*:=\s*ObjBindMethod\(KeybindGUI,\s*"TryBeginUiPresentation"\)' 'Update presentation must acquire the shared UI transaction.'

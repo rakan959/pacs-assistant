@@ -3,7 +3,7 @@
 #Include TestRunner.ahk
 
 class JsonParserTest {
-    static Tests := [
+    static tests := [
         "TestParsesNestedValuesAcrossWhitespace",
         "TestParsesNumberForms",
         "TestHandlesEscapesAndUnicode",

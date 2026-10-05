@@ -211,13 +211,13 @@ class KeybindGUI {
         return this.GuiIsLive(this.gui)
     }
 
-    GuiIsLive(gui) {
-        if !IsObject(gui)
+    GuiIsLive(targetGui) {
+        if !IsObject(targetGui)
             return false
         ; WinExist follows DetectHiddenWindows and therefore reports a newly built,
         ; not-yet-shown Gui as absent. IsWindow proves the actual HWND lifetime for
         ; both pre-show validation and stale callback rejection after Destroy().
-        try return gui.Hwnd > 0 && DllCall("IsWindow", "Ptr", gui.Hwnd)
+        try return targetGui.Hwnd > 0 && DllCall("IsWindow", "Ptr", targetGui.Hwnd)
         return false
     }
 

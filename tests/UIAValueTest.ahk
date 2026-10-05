@@ -41,7 +41,7 @@ class FakeElement {
 }
 
 class UIAValueTest {
-    static Tests := [
+    static tests := [
         "TestReadPrefersValueProperty",
         "TestReadFallsBackToLegacyValue",
         "TestReadReturnsBlankWhenNothingExposed",

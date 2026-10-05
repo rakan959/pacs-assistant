@@ -3,7 +3,7 @@
 #Include TestRunner.ahk
 
 class AppStorageTest {
-    static Tests := [
+    static tests := [
         "TestInstalledDataMigrationPreservesLegacyAndDoesNotOverwriteDestination",
         "TestCompletedMigrationDoesNotResurrectDeletedProfile",
         "TestPartialMigrationRetriesBeforeWritingMarker",

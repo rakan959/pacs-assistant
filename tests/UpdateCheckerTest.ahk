@@ -9,7 +9,7 @@
 #Include TestRunner.ahk
 
 class UpdateCheckerTest {
-    static Tests := [
+    static tests := [
         "TestVersionParsing",
         "TestVersionComparison",
         "TestVersionPrecedenceTable",
@@ -637,6 +637,9 @@ class UpdateCheckerTest {
         result := ReadOnlyInstallUpdateChecker.PerformUpdate(ValidUpdateInfo(), {})
 
         Assert.False(result)
+        ; The dialog proves the writability gate refused, not an earlier eligibility exit.
+        Assert.Equal(1, TestRunner.dialogs.Length)
+        Assert.Equal("Update Requires a Writable App Folder", TestRunner.dialogs[1].title)
         Assert.Equal(0, coordinator.beginCalls)
         Assert.Equal(0, coordinator.cancelCalls)
         Assert.Equal(0, coordinator.completeCalls)
@@ -648,7 +651,9 @@ class UpdateCheckerTest {
         ThrowingUpdaterPathChecker.shutdownCoordinator := coordinator
         ThrowingUpdaterPathChecker.clinicalActivityProbe := (*) => false
 
-        result := ThrowingUpdaterPathChecker.PerformUpdate(ValidUpdateInfo(), {})
+        try result := ThrowingUpdaterPathChecker.PerformUpdate(ValidUpdateInfo(), {})
+        ; The failure path re-arms the 30-second artifact cleanup on the subclass.
+        finally ThrowingUpdaterPathChecker.CancelUpdateArtifactCleanup()
 
         Assert.False(result)
         Assert.Equal(1, coordinator.beginCalls)

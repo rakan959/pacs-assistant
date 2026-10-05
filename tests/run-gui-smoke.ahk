@@ -1,6 +1,8 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Off
-#Warn All, Off
+#ErrorStdOut
+#Warn All, StdOut
+FileEncoding "UTF-8"
 
 ; Smoke test for the windows PACS Assistant builds. Syntax checking cannot catch a
 ; bad control reference or a broken layout, so this actually constructs each window,
@@ -10,6 +12,8 @@
 ;   "C:\Program Files\AutoHotkey\v2\AutoHotkey.exe" tests\run-gui-smoke.ahk
 
 #Include ../KeybindGUI.ahk
+#Include HarnessErrors.ahk
+OnError(OnError_StdErr)
 
 global testsRun := 0
 global testsFailed := 0
@@ -265,10 +269,16 @@ AssertScope(listView, funcName, expected) {
 }
 
 OnExit(Cleanup)
-exitCode := 1
-try exitCode := Main()
-catch as err {
-    Out("FATAL -- " err.Message " (" err.File ":" err.Line ")")
+ExitApp(RunSmoke())
+
+; Converts a fatal harness error into a nonzero exit. Keeping the catch inside a
+; function keeps `err` local, so it cannot shadow every production `catch as err`.
+RunSmoke() {
     exitCode := 1
+    try exitCode := Main()
+    catch Any as err {
+        Out("FATAL -- " ErrorText.Describe(err))
+        exitCode := 1
+    }
+    return exitCode
 }
-ExitApp(exitCode)
