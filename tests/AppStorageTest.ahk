@@ -149,9 +149,11 @@ class AppStorageTest {
         first := AppStorage.UniqueSiblingPath(target, "case-rename")
         Assert.True(first ~= "^\Q" target "\E\.case-rename-" DllCall("GetCurrentProcessId") "-\d+$", first)
 
-        FileAppend("taken", first)
+        ; Occupy the very next candidate, so only the existence check moves past it.
+        taken := target ".case-rename-" DllCall("GetCurrentProcessId") "-" (AppStorage.siblingSequence + 1)
+        FileAppend("taken", taken)
         second := AppStorage.UniqueSiblingPath(target, "case-rename")
-        Assert.NotEqual(first, second)
+        Assert.NotEqual(taken, second)
         Assert.False(FileExist(second))
     }
 }
