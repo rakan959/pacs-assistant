@@ -33,6 +33,8 @@ class MicrophoneManagerTest {
         "ActiveClinicalLeaseSkipsBackgroundMicrophoneCheck",
         "RecycledWindowHandleWithNewProcessStartsANewLoginSession",
         "MonitoringStartsOnlyWithSwapEnabledAndANamedMicrophone",
+        "ApplyNowSelectsTheConfiguredMicrophone",
+        "LoginCheckSelectsOnceAndStaysQuiet",
         "ApplyNowNamesEachFailureAndKeepsTheResolutionError",
         "UnconfirmedSelectionNamesTheTimeoutNotTheName",
         "AmbiguousNameReasonReachesBothNotices"
@@ -60,6 +62,37 @@ class MicrophoneManagerTest {
                 FileDelete(Settings.settingsFile)
             Settings.settingsFile := originalSettingsFile
         }
+    }
+
+    ApplyNowSelectsTheConfiguredMicrophone() {
+        fixture := MicrophoneFixture(["Internal Microphone", "PowerMic III"])
+        MicrophoneManager.sessionDriver := fixture.driver
+        originalName := Settings.Get("MicrophoneName")
+        try {
+            SetTestSetting("MicrophoneName", "PowerMic III")
+            Assert.True(MicrophoneManager.ApplyNow())
+        } finally SetTestSetting("MicrophoneName", originalName)
+
+        Assert.Equal(0, TestRunner.dialogs.Length)
+        Assert.Equal(0, fixture.items[1].selectCalls)
+        Assert.Equal(1, fixture.items[2].selectCalls)
+    }
+
+    ; One verified selection per login window; later polls of the same window
+    ; neither select again nor notify.
+    LoginCheckSelectsOnceAndStaysQuiet() {
+        fixture := MicrophoneFixture(["PowerMic III"])
+        MicrophoneManager.sessionDriver := fixture.driver
+        originalName := Settings.Get("MicrophoneName")
+        try {
+            SetTestSetting("MicrophoneName", "PowerMic III")
+            MicrophoneManager.CheckForLogin()
+            MicrophoneManager.CheckForLogin()
+        } finally SetTestSetting("MicrophoneName", originalName)
+
+        Assert.Equal(MicrophoneManager.maxAttempts, MicrophoneManager.attempts)
+        Assert.Equal(1, fixture.items[1].selectCalls)
+        Assert.Equal(0, this.notifications.Length)
     }
 
     ApplyNowNamesEachFailureAndKeepsTheResolutionError() {

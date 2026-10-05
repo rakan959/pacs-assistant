@@ -20,6 +20,7 @@ class ClinicalAutomationTest {
         "PacsSeriesCommandsUseExactHwndTarget",
         "BuiltInClinicalCommandUsesConfirmedTarget",
         "WindowToggleRevalidatesUniqueSessionBeforeMutation",
+        "WindowToggleMinimizesAVisibleWindowAndRestoresAMinimizedOne",
         "NativePowerScribeCaptureRejectsImpostorAndDuplicate",
         "NativePowerScribeLivenessRequiresExactIdentity",
         "TargetedCustomCommandUsesConfirmedTarget",
@@ -35,6 +36,7 @@ class ClinicalAutomationTest {
         "WindowCloseCarriesAndRevalidatesCapturedSession",
         "WindowCloseRecheckRejectsNewDuplicate",
         "AmbiguousSharedHostWindowsAreNotClosed",
+        "WindowStopSucceedsWhenTheExactWindowCloses",
         "RestartTargetPreflightPreventsPartialShutdown",
         "RestartStopsAfterRuntimeTargetFailure",
         "RestartRejectsBareProcessTermination",
@@ -43,6 +45,7 @@ class ClinicalAutomationTest {
         "RestartAbortsForUnverifiedPowerScribeProcess",
         "RestartAbortsWhenAnotherPowerScribeProcessSurvivesGracefulClose",
         "RestartPreparationFailureHasNoClinicalSideEffects",
+        "RestartSucceedsWhenEveryStepIsVerified",
         "RestartPreparationRejectsAmbiguousTargets",
         "RestartPreparationCapturesHiddenTrustedVueProcesses",
         "RestartAbortsWhenTargetReappearsBeforeLaunch",
@@ -53,6 +56,7 @@ class ClinicalAutomationTest {
         "RestartRequiresExpectedVueWindowAfterLaunch",
         "RestartLaunchProofRequiresANewStableVueSession",
         "GracefulCloseTimesOutAcross32BitTickWrap",
+        "GracefulCloseSucceedsWhenTheProcessExits",
         "GracefulCloseRequiresCapturedProcessIdentity",
         "GracefulCloseRejectsSameProcessWrongTitleBeforeRequest",
         "GracefulCloseRejectsDuplicateExactWindowBeforeRequest",
@@ -66,6 +70,7 @@ class ClinicalAutomationTest {
         "ReportSelectionUsesOnlyReportShapedText",
         "ReportSelectionRejectsMultipleReportCandidates",
         "ReportSelectionRejectsUnrelatedFallbackText",
+        "ReportCaptureReadsTheOneCurrentReport",
         "ReportCaptureFailsClosedOnEnumerationError",
         "ReportCaptureFailsClosedOnUnreadableSibling",
         "ReportCaptureFailsClosedOnUnsupportedSibling",
@@ -239,6 +244,26 @@ class ClinicalAutomationTest {
         Assert.False(result)
         Assert.Equal(0, driver.minimizeCalls)
         Assert.Equal(0, driver.activateCalls)
+    }
+
+    WindowToggleMinimizesAVisibleWindowAndRestoresAMinimizedOne() {
+        spec := AppControl.ExactWindowSpec("PowerScribe 360 | Reporting", "Nuance.PowerScribe360.exe")
+        driver := ToggleRaceWindowDriver([{
+            hwnd: 501,
+            title: spec.title,
+            exe: spec.exe,
+            pid: 42
+        }])
+        AppControl.windowDriver := driver
+
+        Assert.True(AppControl.ToggleExactWindow(spec))
+        Assert.Equal(1, driver.minimizeCalls)
+        Assert.Equal(0, driver.activateCalls)
+
+        driver.minMax := -1
+        Assert.True(AppControl.ToggleExactWindow(spec))
+        Assert.Equal(1, driver.minimizeCalls)
+        Assert.Equal(1, driver.activateCalls)
     }
 
     NativePowerScribeCaptureRejectsImpostorAndDuplicate() {
@@ -488,6 +513,24 @@ class ClinicalAutomationTest {
         Assert.Equal(1, driver.listCalls)
     }
 
+    WindowStopSucceedsWhenTheExactWindowCloses() {
+        driver := SharedHostWindowLifecycleDriver()
+        driver.windows := [31337]
+        AppControl.lifecycleDriver := driver
+        AppControl.windowDriver := driver
+
+        result := AppControl.StopTarget(
+            AppControl.ExplorerPortalWindowSpec(),
+            "window"
+        )
+
+        Assert.True(result.found)
+        Assert.True(result.stopped)
+        Assert.Equal("", result.error)
+        Assert.Equal(1, driver.closeCalls)
+        Assert.Equal(0, driver.windows.Length)
+    }
+
     AmbiguousSharedHostWindowsAreNotClosed() {
         driver := SharedHostWindowLifecycleDriver()
         AppControl.lifecycleDriver := driver
@@ -621,6 +664,23 @@ class ClinicalAutomationTest {
         Assert.Equal(1, driver.closeCalls)
         Assert.Equal(0, driver.stopCalls)
         Assert.Equal(0, driver.launchCalls)
+    }
+
+    RestartSucceedsWhenEveryStepIsVerified() {
+        driver := FakePacsRestartDriver([{
+            hwnd: 601,
+            target: "ahk_id 601",
+            processId: 77
+        }], 0, true)
+        driver.stopResult := {anyStopped: true, failedTargets: []}
+
+        Assert.True(RestartPACS(driver))
+        Assert.Equal(1, driver.closeCalls)
+        Assert.Equal(1, driver.stopCalls)
+        Assert.Equal(1, driver.verifyCalls)
+        Assert.Equal(1, driver.launchCalls)
+        Assert.Equal(1, driver.waitForLaunchCalls)
+        Assert.Equal(0, TestRunner.dialogs.Length)
     }
 
     RestartPreparationFailureHasNoClinicalSideEffects() {
@@ -802,6 +862,13 @@ class ClinicalAutomationTest {
             [{hwnd: 901, pid: 61}]
         ])
         Assert.True(native.WaitForLaunch(350))
+    }
+
+    GracefulCloseSucceedsWhenTheProcessExits() {
+        driver := FakeGracefulCloseDriver(1000, 77, true)
+
+        Assert.True(CloseWithSavePrompt(this.PowerScribeSession(), 300, driver))
+        Assert.Equal(1, driver.closeRequests)
     }
 
     GracefulCloseTimesOutAcross32BitTickWrap() {
@@ -1003,6 +1070,17 @@ class ClinicalAutomationTest {
         Assert.Equal(fallbackReport, PowerScribe.SelectReportText([], fallbackReport))
     }
 
+    ReportCaptureReadsTheOneCurrentReport() {
+        report := "EXAMINATION: CT CHEST`nFINDINGS: Current report."
+        driver := FakePowerScribeSessionDriver(, report)
+        PowerScribe.sessionDriver := driver
+
+        capture := PowerScribe.CaptureReport()
+
+        Assert.Equal(report, capture.text)
+        Assert.True(capture.session == driver.session)
+    }
+
     ReportCaptureFailsClosedOnEnumerationError() {
         session := {hwnd: 800, target: "ahk_id 800", processId: 42}
         PowerScribe.sessionDriver := FixedReportRootSessionDriver(
@@ -1124,6 +1202,7 @@ class ToggleRaceWindowDriver extends FakeExactWindowDriver {
     __New(windows) {
         super.__New(windows)
         this.addDuplicateOnStateRead := false
+        this.minMax := 0
         this.minimizeCalls := 0
         this.activateCalls := 0
     }
@@ -1138,7 +1217,7 @@ class ToggleRaceWindowDriver extends FakeExactWindowDriver {
                 pid: 77
             })
         }
-        return 0
+        return this.minMax
     }
 
     Minimize(*) {
@@ -1285,10 +1364,10 @@ class ExactGateGracefulCloseDriver extends FakeGracefulCloseDriver {
 }
 
 class FakeGracefulCloseDriver {
-    __New(now, processId, sessionValid := true) {
+    __New(now, processId, exitsAfterClose := false) {
         this.now := now
         this.processId := processId
-        this.sessionValid := sessionValid
+        this.exitsAfterClose := exitsAfterClose
         this.closeRequests := 0
         this.pauseCalls := 0
     }
@@ -1302,7 +1381,7 @@ class FakeGracefulCloseDriver {
     }
 
     IsExpectedSession(*) {
-        return this.sessionValid
+        return true
     }
 
     RequestClose(*) {
@@ -1310,7 +1389,7 @@ class FakeGracefulCloseDriver {
     }
 
     ProcessExists(*) {
-        return true
+        return !(this.exitsAfterClose && this.closeRequests > 0)
     }
 
     NowMilliseconds() {
