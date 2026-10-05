@@ -630,7 +630,7 @@ class WetReadTest {
             (*) => (captureCalls++, {text: "", session: 0}),
             (*) => true,
             (*) => true,
-            RecordWetReadNotification.Bind(notifications)
+            RecordNotification.Bind(notifications)
         )
 
         Assert.False(result)
@@ -648,7 +648,7 @@ class WetReadTest {
     ; routing outcome (an attending PowerScribe cannot select) is not logged.
     UnexpectedWorkflowFaultsAreLoggedWithTheirStack() {
         notifications := []
-        notify := RecordWetReadNotification.Bind(notifications)
+        notify := RecordNotification.Bind(notifications)
         session := {stickyHwnd: 1}
         capturedLog := LogCapture()
         try {
@@ -693,7 +693,7 @@ class WetReadTest {
             (*) => (captureCalls++, {text: "", session: 0}),
             (*) => true,
             (*) => true,
-            RecordWetReadNotification.Bind(notifications)
+            RecordNotification.Bind(notifications)
         )
         catch Any
             escaped := true
@@ -724,7 +724,7 @@ class WetReadTest {
             ObjBindMethod(FakeEarlyWetReadExit, "Throw", "simulated report failure"),
             (*) => routeCalls++,
             (*) => (pasteCalls++, true),
-            RecordWetReadNotification.Bind(notifications)
+            RecordNotification.Bind(notifications)
         )
         catch Any
             escaped := true
@@ -774,10 +774,6 @@ class FakeEarlyWetReadExit {
     static Throw(message) {
         throw Error(message)
     }
-}
-
-RecordWetReadNotification(notifications, text, title, options) {
-    notifications.Push({text: text, title: title, options: options})
 }
 
 class FakeWetReadDriver {

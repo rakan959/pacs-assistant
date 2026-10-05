@@ -74,16 +74,8 @@ class UpdateCheckerTest {
         UpdateChecker.updateCheckEligibleProbe := (*) => true
         this.updateNotifications := []
         this.manualNotifications := []
-        UpdateChecker.updateAvailableNotifier := (text, title, options) => this.updateNotifications.Push({
-            text: text,
-            title: title,
-            options: options
-        })
-        UpdateChecker.manualResultNotifier := (text, title, options) => this.manualNotifications.Push({
-            text: text,
-            title: title,
-            options: options
-        })
+        UpdateChecker.updateAvailableNotifier := RecordNotification.Bind(this.updateNotifications)
+        UpdateChecker.manualResultNotifier := RecordNotification.Bind(this.manualNotifications)
         UpdateChecker.dialogAcquire := (*) => true
         UpdateChecker.dialogRelease := (*) => 0
         UpdateChecker.pendingUpdateInfo := 0

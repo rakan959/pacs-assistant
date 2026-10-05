@@ -10,6 +10,12 @@ TestTempPath(prefix, extension := "") {
         . sequence extension
 }
 
+; A notifier double that records each call in notifications, for example
+; PACSMonitor.notifier := RecordNotification.Bind(list).
+RecordNotification(notifications, text, title, options := "") {
+    notifications.Push({text: text, title: title, options: options})
+}
+
 class TestRunner {
     static tests := []
     static successes := 0

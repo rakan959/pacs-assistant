@@ -46,6 +46,11 @@ class PACSMonitorTest {
         "TestCompactDateRecognitionHonorsCalendarRules"
     ]
 
+    ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
+    static helpers := [
+        "PortalSession"
+    ]
+
     Setup() {
         this.originalSettings := Settings.settingsFile
         this.originalNotifier := PACSMonitor.notifier
@@ -69,11 +74,7 @@ class PACSMonitorTest {
         PACSMonitor.scanFailureNotified := false
         PACSMonitor.lastError := ""
         this.notifications := []
-        PACSMonitor.notifier := (text, title, options) => this.notifications.Push({
-            text: text,
-            title: title,
-            options: options
-        })
+        PACSMonitor.notifier := RecordNotification.Bind(this.notifications)
         PACSMonitor.approvedRefreshAutomationIds := [
             "refreshButton",
             "refreshPrimary",
@@ -255,13 +256,7 @@ class PACSMonitorTest {
     }
 
     TestDuplicateRefreshAppearingBeforeClickDoesNotInvoke() {
-        session := {
-            hwnd: 100,
-            target: "ahk_id 100",
-            processId: 42,
-            title: "Explorer Portal",
-            exe: "msedge.exe"
-        }
+        session := this.PortalSession()
         saved := FakePACSActionButton(42, 100, "Refresh", "refreshPrimary")
         duplicate := FakePACSActionButton(42, 100, "Refresh panel", "refreshSecondary")
         root := ChangingPACSRefreshRoot(
@@ -281,13 +276,7 @@ class PACSMonitorTest {
     }
 
     TestPortalActivationBeforeClickDoesNotInvokeRefresh() {
-        session := {
-            hwnd: 100,
-            target: "ahk_id 100",
-            processId: 42,
-            title: "Explorer Portal",
-            exe: "msedge.exe"
-        }
+        session := this.PortalSession()
         button := FakePACSActionButton(42, 100, "Refresh", "refreshPrimary")
         studyList := FakePACSStudyList(
             42,
@@ -334,13 +323,7 @@ class PACSMonitorTest {
     TestRefreshWaitDoesNotHoldClinicalLease() {
         originalClinicalActive := PACSCommands.clinicalCommandActive
         originalClinicalName := PACSCommands.activeClinicalCommand
-        session := {
-            hwnd: 100,
-            target: "ahk_id 100",
-            processId: 42,
-            title: "Explorer Portal",
-            exe: "msedge.exe"
-        }
+        session := this.PortalSession()
         button := FakePACSActionButton(42, 100, "Refresh", "refreshPrimary")
         studyList := FakePACSStudyList(
             42,
@@ -373,13 +356,7 @@ class PACSMonitorTest {
     }
 
     TestRefreshAndScanUseOneCapturedPortalSession() {
-        session := {
-            hwnd: 100,
-            target: "ahk_id 100",
-            processId: 42,
-            title: "Explorer Portal",
-            exe: "msedge.exe"
-        }
+        session := this.PortalSession()
         button := FakePACSActionButton(42, 100, "Refresh", "refreshPrimary")
         studyList := FakePACSStudyList(
             42,
@@ -519,13 +496,7 @@ class PACSMonitorTest {
     ; failure episode.
     TestUnapprovedRefreshIsReportedOnceAsUnavailable() {
         PACSMonitor.approvedRefreshAutomationIds := []
-        session := {
-            hwnd: 100,
-            target: "ahk_id 100",
-            processId: 42,
-            title: "Explorer Portal",
-            exe: "msedge.exe"
-        }
+        session := this.PortalSession()
         capturedLog := LogCapture()
         try {
             loop PACSMonitor.refreshFailureThreshold + 2 {
@@ -561,13 +532,7 @@ class PACSMonitorTest {
             leases.Push(name),
             {status: "acquired", busyCommand: ""}
         )
-        session := {
-            hwnd: 100,
-            target: "ahk_id 100",
-            processId: 42,
-            title: "Explorer Portal",
-            exe: "msedge.exe"
-        }
+        session := this.PortalSession()
         driver := PinnedPortalMonitorDriver(
             session,
             FakePACSActionButton(42, 100, "Refresh", "refreshPrimary"),
@@ -626,6 +591,17 @@ class PACSMonitorTest {
             "notifications could not be delivered"
         )
         Assert.False(PACSMonitor.HasAccession("12345678"))
+    }
+
+    ; The one exact Explorer Portal window the fake drivers pin.
+    PortalSession() {
+        return {
+            hwnd: 100,
+            target: "ahk_id 100",
+            processId: 42,
+            title: "Explorer Portal",
+            exe: "msedge.exe"
+        }
     }
 
     Teardown() {

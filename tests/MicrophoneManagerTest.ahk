@@ -162,11 +162,7 @@ class MicrophoneManagerTest {
         this.originalAutomationAcquire := MicrophoneManager.automationAcquire
         this.originalAutomationRelease := MicrophoneManager.automationRelease
         this.notifications := []
-        MicrophoneManager.notifier := (text, title, options) => this.notifications.Push({
-            text: text,
-            title: title,
-            options: options
-        })
+        MicrophoneManager.notifier := RecordNotification.Bind(this.notifications)
         MicrophoneManager.attempts := 0
         MicrophoneManager.failureNotified := false
         MicrophoneManager.lastError := ""

@@ -131,11 +131,7 @@ class PACSCommandsTest {
     TestEpicToggleFailsClosedWithoutCapturedIdentity() {
         originalNotifier := PACSCommands.unavailableNotifier
         notifications := []
-        PACSCommands.unavailableNotifier := (text, title, options) => notifications.Push({
-            text: text,
-            title: title,
-            options: options
-        })
+        PACSCommands.unavailableNotifier := RecordNotification.Bind(notifications)
         try result := PACSCommands.ToggleEpicWindow()
         finally PACSCommands.unavailableNotifier := originalNotifier
 

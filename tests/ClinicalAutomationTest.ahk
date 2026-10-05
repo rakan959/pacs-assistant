@@ -120,11 +120,7 @@ class ClinicalAutomationTest {
         ProfileManager.currentProfile := ""
         PACSCommands.clinicalCommandActive := false
         PACSCommands.activeClinicalCommand := ""
-        PACSCommands.busyNotifier := (text, title, options) => this.busyNotifications.Push({
-            text: text,
-            title: title,
-            options: options
-        })
+        PACSCommands.busyNotifier := RecordNotification.Bind(this.busyNotifications)
         PACSCommands.commandAvailabilityProbe := (*) => true
     }
 
