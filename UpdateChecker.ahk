@@ -727,17 +727,22 @@ class UpdateChecker {
 
     ; Saves the update dialog's choices at the settings revision it was opened at.
     ; The dialog stays open when Update Now does not start, so a successful save
-    ; moves it to the revision that save wrote.
+    ; moves it to the revision that save wrote. A dialog whose settings changed
+    ; underneath can never save; once it has said so it closes, and Check for
+    ; Updates reopens it from the pending update.
     static SaveDialogChoices(updateGui, autoUpdate, skipBetaVersions, skippedVersion?) {
-        if !this.TrySaveUpdatePreferences(
+        if this.TrySaveUpdatePreferences(
             updateGui.settingsRevision,
             autoUpdate,
             skipBetaVersions,
             skippedVersion?
-        )
-            return false
-        updateGui.settingsRevision := Settings.revision
-        return true
+        ) {
+            updateGui.settingsRevision := Settings.revision
+            return true
+        }
+        if (updateGui.settingsRevision != Settings.revision)
+            this.CloseUpdateDialog(updateGui)
+        return false
     }
 
     ; Defers the automatic notice for remindLaterMs. The version counts as not yet

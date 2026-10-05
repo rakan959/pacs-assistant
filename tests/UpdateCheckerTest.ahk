@@ -35,6 +35,7 @@ class UpdateCheckerTest {
         "TestManualCompletionDefersDialogDuringClinicalCommand",
         "TestUpdateDialogRequiresPresentationLease",
         "TestFailedUpdateNowLeavesTheDialogButtonsUsable",
+        "TestStaleUpdateDialogClosesAfterItsConflictNotice",
         "TestSettingsChangeCancelsInFlightAutomaticCheck",
         "TestClinicalCommandBlocksUpdateExit",
         "TestReadOnlyInstallDirectoryBlocksUpdateBeforeShutdown",
@@ -580,6 +581,28 @@ class UpdateCheckerTest {
         Assert.Equal(1, UpdateChecker.shutdownCoordinator.beginCalls)
         Assert.True(UpdateChecker.lastRemindTime > 0)
         Assert.Equal(0, UpdateChecker.updateDialog)
+    }
+
+    ; A dialog whose settings changed underneath cannot save; after saying so once it
+    ; closes, and Check for Updates reopens it from the pending update.
+    TestStaleUpdateDialogClosesAfterItsConflictNotice() {
+        updateGui := UpdateChecker.ShowUpdateDialog(ValidUpdateInfo())
+        Assert.True(IsObject(updateGui))
+        try {
+            SetTestSetting("AutoUpdate", false)
+            ClickDialogButton(updateGui, "Remind Me Later")
+            stillOpen := UpdateChecker.UpdateDialogIsLive()
+        } finally {
+            if UpdateChecker.UpdateDialogIsLive()
+                UpdateChecker.CloseUpdateDialog(updateGui)
+        }
+
+        conflicts := 0
+        for dialog in TestRunner.dialogs
+            conflicts += dialog.title = "Settings Changed"
+        Assert.Equal(1, conflicts)
+        Assert.False(stillOpen)
+        Assert.Equal(0, UpdateChecker.lastRemindTime)
     }
 
     TestSettingsChangeCancelsInFlightAutomaticCheck() {
