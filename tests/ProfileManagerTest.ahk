@@ -45,6 +45,7 @@ class ProfileManagerTest {
         "TestNameDifferingOnlyInCaseNamesTheExistingProfile",
         "TestIniKeyRules",
         "TestSaveRejectsUnsafeIniKeys",
+        "TestFailedSaveLeavesTheSavedFileUnchanged",
         "TestSaveRejectsMalformedCustomCommand",
         "TestSaveRejectsCaseCollidingCustomCommands",
         "TestSaveRejectsCaseCollidingModalities",
@@ -733,6 +734,40 @@ class ProfileManagerTest {
             "unsafe function name"
         )
         Assert.False(FileExist(ProfileManager.profilesPath "\UnsafeKey.ini"))
+    }
+
+    ; The save writes a temporary file and moves it over the profile, so a write
+    ; that fails partway leaves the saved file exactly as it was.
+    TestFailedSaveLeavesTheSavedFileUnchanged() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^s"
+        profile.modalityAttendings["Neuro"] := "Dr Old"
+        ProfileManager.SaveProfile("Night", profile)
+        path := ProfileManager.ProfilePath("Night")
+        savedText := FileRead(path)
+        revision := ProfileManager.GetProfileRevision("Night")
+
+        profile.modalityAttendings["Neuro"] := "Dr New"
+        originalWrite := ProfileManager.GetOwnPropDesc("WriteIniText")
+        ProfileManager.DefineProp("WriteIniText", {call: FailAttendingWrite})
+        try {
+            Assert.Throws(() => ProfileManager.SaveProfile("Night", profile), "simulated attending write failure")
+        } finally ProfileManager.DefineProp("WriteIniText", originalWrite)
+
+        Assert.True(FileRead(path) == savedText, "the saved profile file changed")
+        Assert.Equal(revision, ProfileManager.GetProfileRevision("Night"))
+        Assert.Equal("Dr Old", ProfileManager.LoadProfile(path).modalityAttendings["Neuro"])
+        leftovers := []
+        loop files ProfileManager.profilesPath "\*"
+            if (A_LoopFileName != "Night.ini")
+                leftovers.Push(A_LoopFileName)
+        Assert.Equal(0, leftovers.Length, leftovers.Length ? leftovers[1] : "")
+
+        FailAttendingWrite(this, value, path, section, key) {
+            if (section = "ModalityAttendings")
+                throw Error("simulated attending write failure")
+            originalWrite.Call(this, value, path, section, key)
+        }
     }
 
     TestFailedRenamePreservesOriginalProfile() {
