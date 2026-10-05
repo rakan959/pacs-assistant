@@ -32,6 +32,8 @@ class KeybindGUITest {
         "TestActiveCaptureBlocksSaveAndFunctionRemoval",
         "TestClinicalCommandBlocksProfileMutationAndExit",
         "TestTrayExitUsesTheSameClinicalAndCaptureGate",
+        "TestCaptureThatNeedsARestartDoesNotBlockExit",
+        "TestBindForAMissingCommandIsReportedNotFailed",
         "TestStaleRealCaptureRestoresCurrentProfileNotSnapshot",
         "TestProfileBoundDialogRejectsSameNameReplacement",
         "TestCapturedBindPublishesDirtyStateBeforeReleasingOwner",
@@ -799,6 +801,59 @@ class KeybindGUITest {
         Assert.Equal("", ExclusiveOperations.Active())
     }
 
+    ; A capture that could not be undone keeps its lease against clinical commands,
+    ; and its notice asks for a restart, so exiting must still be possible.
+    TestCaptureThatNeedsARestartDoesNotBlockExit() {
+        editor := {base: KeybindGUI.Prototype, notifications: []}
+        editor.notificationDriver := ArrayNotificationDriver(editor.notifications)
+        PACSCommands.commandAvailabilityProbe := (*) => ExclusiveOperations.Active("clinical") = ""
+
+        try {
+            Assert.True(ExclusiveOperations.TryBegin("capture", "change a keybind"))
+            ExclusiveOperations.captureRestartRequired := true
+            clinical := PACSCommands.AcquireClinicalAutomation("Sign Report")
+            exitResult := editor.HandleProcessExit("Menu", 0)
+        } finally editor.CancelShutdown()
+
+        Assert.Equal("unavailable", clinical.status)
+        Assert.Equal(0, exitResult)
+        Assert.Equal(0, editor.notifications.Length)
+
+        ; A capture later released normally no longer needs the restart.
+        editor.ReleaseCaptureTransaction()
+        Assert.False(ExclusiveOperations.captureRestartRequired)
+    }
+
+    ; A bind for a command this version does not have is left out of the runtime
+    ; and reported once, so it cannot fail the apply, or every later restore and
+    ; save, which would leave a capture holding its lease.
+    TestBindForAMissingCommandIsReportedNotFailed() {
+        notifications := []
+        editor := {base: KeybindGUI.Prototype, gui: ""}
+        editor.notificationDriver := ArrayNotificationDriver(notifications)
+        HotkeyManager.hotkeyFunctions := Map("Sign Report", (*) => 0)
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.binds["Retired Command"] := "^F14"
+        profile.binds["Unbound Retired Command"] := ""
+
+        capturedLog := LogCapture()
+        try {
+            shownResult := editor.ApplyProfileBinds(profile, true)
+            quietResult := editor.ApplyProfileBinds(profile, false)
+            logged := capturedLog.Count("were not registered: Retired Command")
+        } finally capturedLog.Restore()
+
+        Assert.True(shownResult)
+        Assert.True(quietResult)
+        Assert.True(HotkeyManager.activeHotkeys.Has("Sign Report"))
+        Assert.False(HotkeyManager.activeHotkeys.Has("Retired Command"))
+        Assert.Equal(1, notifications.Length)
+        Assert.Equal("Keybinds Not Registered", notifications[1].title)
+        Assert.True(InStr(notifications[1].message, "not registered: Retired Command. "), notifications[1].message)
+        Assert.Equal(1, logged)
+    }
+
     TestTrayExitUsesTheSameClinicalAndCaptureGate() {
         editor := {base: KeybindGUI.Prototype, notifications: []}
         editor.notificationDriver := ArrayNotificationDriver(editor.notifications)
@@ -974,6 +1029,9 @@ class KeybindGUITest {
 
         Assert.False(result)
         Assert.False(capturedListening)
+        ; The lease stays against clinical commands, marked as awaiting a restart.
+        Assert.True(ExclusiveOperations.captureActive)
+        Assert.True(ExclusiveOperations.captureRestartRequired)
         Assert.True(prompt.destroyed)
         Assert.Equal(1, editor.restoreCalls)
         Assert.True(InStr(notifications.message, "Restart PACS Assistant") > 0)
@@ -1007,6 +1065,7 @@ class KeybindGUITest {
         Assert.True(hookRetained)
         Assert.True(listeningRetained)
         Assert.True(transactionRetained)
+        Assert.True(ExclusiveOperations.captureRestartRequired)
         Assert.False(prompt.destroyed)
         Assert.Equal(0, editor.restoreCalls)
         Assert.True(InStr(notifications.message, "restart PACS Assistant") > 0)
@@ -1238,23 +1297,25 @@ class KeybindGUITest {
 
     TestRejectedScopeChangeRestoresPriorScope() {
         profile := ProfileManager.NewProfile()
-        profile.binds["Missing Action"] := "^F14"
-        profile.scopes["Missing Action"] := "Any"
-        listView := FunctionalListView("Missing Action", "Ctrl + F14", "Any window")
+        profile.binds["Sign Report"] := "^F14"
+        profile.scopes["Sign Report"] := "Any"
+        listView := FunctionalListView("Sign Report", "Ctrl + F14", "Any window")
         dialog := FakeProfileDialog()
 
         ProfileManager.profiles := Map("Test", profile)
         ProfileManager.currentProfile := "Test"
-        HotkeyManager.hotkeyFunctions := Map()
+        HotkeyManager.hotkeyFunctions := Map("Sign Report", (*) => 0)
+        ; The scoped candidate fails to register; the restore that follows succeeds.
+        HotkeyManager.hotkeyDriver.failEnableCounts["^F14"] := 1
         Assert.True(this.gui.CaptureFunctionDialogState(
             dialog,
-            "Missing Action",
+            "Sign Report",
             listView,
             1
         ))
 
-        this.gui.ApplyScope("Missing Action", true, false, listView, 1, dialog)
-        capturedScope := profile.scopes["Missing Action"]
+        this.gui.ApplyScope("Sign Report", true, false, listView, 1, dialog)
+        capturedScope := profile.scopes["Sign Report"]
         capturedListScope := listView.GetText(1, 3)
         capturedDestroyed := dialog.destroyed
 
@@ -1852,10 +1913,10 @@ class KeybindGUITest {
     TestCancelledCandidateNoticeWaitsForTheLeaseAndIsLogged() {
         notifications := LeaseObservingNotificationDriver()
         editor := {base: KeybindGUI.Prototype, gui: "", notificationDriver: notifications}
-        HotkeyManager.hotkeyFunctions := Map()
+        HotkeyManager.hotkeyFunctions := Map("Sign Report", (*) => 0)
         candidate := ProfileManager.NewProfile()
-        candidate.binds["Unknown Command"] := "^F13"
-        candidate.scopes["Unknown Command"] := "Any"
+        candidate.binds["Sign Report"] := "^F13"
+        candidate.scopes["Sign Report"] := "Nowhere"
 
         capturedLog := LogCapture()
         try {
@@ -1863,7 +1924,7 @@ class KeybindGUITest {
             Assert.False(editor.ApplyProfileCandidate(candidate, ProfileManager.NewProfile(), "function removal"))
             shownUnderLease := notifications.calls.Length
             editor.EndProfileMutationTransaction()
-            logged := capturedLog.Count("Keybinds failed to register: Unknown Command (")
+            logged := capturedLog.Count("Keybinds failed to register: Sign Report (")
         } finally capturedLog.Restore()
 
         Assert.Equal(0, shownUnderLease)
@@ -1871,7 +1932,7 @@ class KeybindGUITest {
         Assert.False(notifications.calls[1].leaseHeld)
         Assert.True(InStr(notifications.calls[1].message, "function removal was not applied"), notifications.calls[1].message)
         ; Names the bind that failed, not only the last registration's reason.
-        Assert.True(InStr(notifications.calls[1].message, "Unknown Command (no command is defined for it)"), notifications.calls[1].message)
+        Assert.True(InStr(notifications.calls[1].message, "Sign Report (the hotkey scope is unknown)"), notifications.calls[1].message)
         Assert.Equal(1, logged)
     }
 

@@ -23,6 +23,11 @@ class ExclusiveOperations {
         "shutdown"
     ]
     static captureActive := false
+    ; Set when a capture could not be undone (its hook would not stop, or the prior
+    ; shortcuts could not be restored). Its lease stays held so no clinical command
+    ; runs on shortcuts that could not be verified, and its notice asks for a
+    ; restart, which that lease must not refuse.
+    static captureRestartRequired := false
     static profileMutationActive := false
     static profileMutationAction := ""
     static uiPresentationActive := false
@@ -62,10 +67,19 @@ class ExclusiveOperations {
         throw ValueError("Unknown exclusive operation kind: " kind)
     }
 
-    ; Profile saves during shutdown resolve dirty state on the way out, so the
-    ; shutdown lease is the one exclusion they may ignore.
+    ; The leases shutdown itself may proceed past (see captureRestartRequired).
+    static RestartExemption() {
+        return this.captureRestartRequired ? ["capture"] : []
+    }
+
+    ; Profile saves during shutdown resolve dirty state on the way out, so they may
+    ; ignore the shutdown lease, and whatever shutdown itself may proceed past.
     static ShutdownExemption(allowDuringShutdown) {
-        return allowDuringShutdown ? ["shutdown"] : []
+        if !allowDuringShutdown
+            return []
+        exemption := this.RestartExemption()
+        exemption.Push("shutdown")
+        return exemption
     }
 
     /**

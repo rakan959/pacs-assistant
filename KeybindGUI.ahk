@@ -128,12 +128,13 @@ class KeybindGUI {
     }
 
     BeginShutdown(action) {
-        if !this.ProfileMutationAllowed(action)
+        exemption := ExclusiveOperations.RestartExemption()
+        if !this.OperationAllowed(action, exemption)
             return false
 
-        if !ExclusiveOperations.TryBegin("shutdown", action) {
+        if !ExclusiveOperations.TryBegin("shutdown", action, exemption*) {
             ; Another operation won the race since the check above; report it.
-            this.ProfileMutationAllowed(action)
+            this.OperationAllowed(action, exemption)
             return false
         }
 
@@ -962,6 +963,8 @@ class KeybindGUI {
             } catch as err {
                 ; Preserve the live hook and listening state so callers cannot tear
                 ; down its profile/dialog while it may still capture the next key.
+                ; Only a restart ends it now.
+                ExclusiveOperations.captureRestartRequired := true
                 AppLog.Write("Key capture could not be stopped: " ErrorText.Describe(err))
                 throw Error("Input capture could not be stopped: " err.Message)
             }
@@ -1270,13 +1273,25 @@ class KeybindGUI {
     /**
      * Registers every bind of a profile. On failure, failureText lists each bind that
      * failed with its reason, as "Name (reason); Name (reason)".
+     *
+     * A bind for a command this version does not have (a renamed or retired
+     * built-in, or a hand-edited name) can never register. It stays in the profile
+     * but is left out of the runtime, and is reported when showErrors is set, so it
+     * cannot fail every later apply, restore and save.
      */
     ApplyProfileBinds(currentProfile, showErrors := true, &failureText := "") {
         failureText := ""
         HotkeyManager.DisableAllHotkeys()
         failed := []
+        unavailable := ""
 
         for funcName, bind in currentProfile.binds {
+            if (!currentProfile.customFuncs.Has(funcName)
+                && !HotkeyManager.hotkeyFunctions.Has(funcName)) {
+                if (bind != "")
+                    unavailable .= (unavailable = "" ? "" : ", ") funcName
+                continue
+            }
             scope := currentProfile.scopes.Has(funcName) ? currentProfile.scopes[funcName] : "Any"
             try {
                 if (currentProfile.customFuncs.Has(funcName)) {
@@ -1295,6 +1310,15 @@ class KeybindGUI {
             }
         }
 
+        if (showErrors && unavailable != "") {
+            AppLog.Write("Keybinds for commands this version does not have were not registered: " unavailable)
+            this.NotifyUser(
+                "These keybinds are for commands this version of PACS Assistant does not have, so they were not registered: "
+                    . unavailable ". Remove them from the profile.",
+                "Keybinds Not Registered",
+                "Icon!"
+            )
+        }
         if !failed.Length
             return true
         ; Logged on every failed apply, including the silent ones a restore or a
@@ -1369,7 +1393,13 @@ class KeybindGUI {
     }
 
     ProfileMutationAllowed(action, allowDuringShutdown := false) {
-        active := ExclusiveOperations.Active(ExclusiveOperations.ShutdownExemption(allowDuringShutdown)*)
+        return this.OperationAllowed(action, ExclusiveOperations.ShutdownExemption(allowDuringShutdown))
+    }
+
+    ; Whether no exclusive operation outside exemption is active; if one is, says
+    ; which in a non-modal notice.
+    OperationAllowed(action, exemption) {
+        active := ExclusiveOperations.Active(exemption*)
         switch active, true {
             case "":
                 return true
@@ -1442,6 +1472,7 @@ class KeybindGUI {
             if IsObject(ownerGui)
                 try ownerGui.Opt("-Disabled")
             KeybindGUI.captureOwnerGui := 0
+            ExclusiveOperations.captureRestartRequired := false
             ; This is the terminal publication step: callbacks can enter only after
             ; the owner/UI/runtime/dirty state has already been finalized.
             ExclusiveOperations.End("capture")
@@ -1499,6 +1530,8 @@ class KeybindGUI {
         try dialog.Destroy()
         if restored
             this.ReleaseCaptureTransaction()
+        else
+            ExclusiveOperations.captureRestartRequired := true
         return false
     }
 
@@ -1518,13 +1551,18 @@ class KeybindGUI {
         originalProfile := IsObject(KeybindGUI.captureRuntimeProfile)
             ? KeybindGUI.captureRuntimeProfile
             : fallbackProfile
-        try return this.RestoreRuntimeAndNotify(
-            originalProfile,
-            message,
-            title,
-            notifyOnSuccess
-        )
-        finally KeybindGUI.captureRuntimeProfile := 0
+        try {
+            restored := this.RestoreRuntimeAndNotify(
+                originalProfile,
+                message,
+                title,
+                notifyOnSuccess
+            )
+        } finally KeybindGUI.captureRuntimeProfile := 0
+        ; The caller keeps the capture lease; the notice asked for a restart.
+        if !restored
+            ExclusiveOperations.captureRestartRequired := true
+        return restored
     }
 
     CaptureFunctionRemovalState(listView) {

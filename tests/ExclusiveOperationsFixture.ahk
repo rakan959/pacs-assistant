@@ -10,6 +10,7 @@ class ExclusiveOperationsFixture {
         [PACSCommands, "clinicalCommandActive", false],
         [PACSCommands, "activeClinicalCommand", ""],
         [ExclusiveOperations, "captureActive", false],
+        [ExclusiveOperations, "captureRestartRequired", false],
         [ExclusiveOperations, "profileMutationActive", false],
         [ExclusiveOperations, "profileMutationAction", ""],
         [Settings, "writeTransactionActive", false],
