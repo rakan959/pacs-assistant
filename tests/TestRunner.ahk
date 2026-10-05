@@ -166,29 +166,43 @@ class TestRunner {
     }
 }
 
+; A failed assertion is reported at the test line that made it (Error's -1 frame),
+; not inside this class.
 class Assert {
     static Equal(expected, actual, message := "") {
         if !this.ExactlyEqual(expected, actual)
-            throw Error(message ? message : Format("Expected '{1}' but got '{2}'", expected, actual))
+            throw Error(message ? message : Format(
+                "Expected '{1}' but got '{2}'",
+                this.Show(expected),
+                this.Show(actual)
+            ), -1)
     }
 
     static NotEqual(expected, actual, message := "") {
         if this.ExactlyEqual(expected, actual)
-            throw Error(message ? message : Format("Expected value different from '{1}'", expected))
+            throw Error(message ? message : Format(
+                "Expected value different from '{1}'",
+                this.Show(expected)
+            ), -1)
     }
 
     static ExactlyEqual(expected, actual) {
         return Type(expected) == Type(actual) && expected == actual
     }
 
+    ; Format cannot render an object, so name its type instead.
+    static Show(value) {
+        return IsObject(value) ? "<" Type(value) ">" : value
+    }
+
     static True(value, message := "") {
         if (!value)
-            throw Error(message ? message : "Expected true but got false")
+            throw Error(message ? message : "Expected true but got false", -1)
     }
 
     static False(value, message := "") {
         if (value)
-            throw Error(message ? message : "Expected false but got true")
+            throw Error(message ? message : "Expected false but got true", -1)
     }
 
     static Throws(callback, expectedError := "", message := "") {
@@ -199,11 +213,15 @@ class Assert {
         } catch Any as err {
             threw := true
             if (expectedError && !InStr(ErrorText.Message(err), expectedError))
-                throw Error(message ? message : Format("Expected error containing '{1}' but got '{2}'", expectedError, ErrorText.Message(err)))
+                throw Error(message ? message : Format(
+                    "Expected error containing '{1}' but got '{2}'",
+                    expectedError,
+                    ErrorText.Message(err)
+                ), -1)
         }
 
         if !threw
-            throw Error(message ? message : "Expected function to throw an error")
+            throw Error(message ? message : "Expected function to throw an error", -1)
     }
 }
 

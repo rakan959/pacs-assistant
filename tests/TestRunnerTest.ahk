@@ -5,6 +5,7 @@ class TestRunnerTest {
         "ThrowsRejectsAFunctionThatReturnsNormally",
         "EqualRejectsCaseOnlyAndTypeOnlyDifferences",
         "NotEqualAcceptsCaseOnlyAndTypeOnlyDifferences",
+        "FailedAssertionNamesTheTestLineAndShowsObjects",
         "TemporaryPathsAreUniqueAndProcessScoped",
         "StorageIsIsolatedFromTheScriptFolder",
         "SetupFailureIsCountedAndDoesNotStopTheClass",
@@ -47,6 +48,30 @@ class TestRunnerTest {
 
         Assert.True(caseDifferenceRejected, "Assert.Equal must compare string case exactly")
         Assert.True(typeDifferenceRejected, "Assert.Equal must reject values of different types")
+    }
+
+    FailedAssertionNamesTheTestLineAndShowsObjects() {
+        failures := []
+        lines := []
+        lines.Push(A_LineNumber + 1)
+        try Assert.Equal(0, {})
+        catch Error as err
+            failures.Push(err)
+        lines.Push(A_LineNumber + 1)
+        try Assert.True(false)
+        catch Error as err
+            failures.Push(err)
+        lines.Push(A_LineNumber + 1)
+        try Assert.Throws(() => 0)
+        catch Error as err
+            failures.Push(err)
+
+        Assert.Equal(3, failures.Length)
+        Assert.Equal("Expected '0' but got '<Object>'", failures[1].Message)
+        for failure in failures {
+            Assert.Equal(A_LineFile, failure.File)
+            Assert.Equal(lines[A_Index], failure.Line)
+        }
     }
 
     NotEqualAcceptsCaseOnlyAndTypeOnlyDifferences() {
