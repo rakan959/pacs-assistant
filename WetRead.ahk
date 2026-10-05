@@ -31,12 +31,21 @@ class NativeStickyNoteWindowDriver {
             return 0
 
         hwnd := matches[1].hwnd
+        return this.ActivateWindow(hwnd) ? hwnd : 0
+    }
+
+    ; Activates one exact HWND and waits up to two seconds for it to become active.
+    ActivateWindow(hwnd) {
         try {
             WinActivate("ahk_id " hwnd)
-            return WinWaitActive("ahk_id " hwnd, , 2) = hwnd ? hwnd : 0
+            return WinWaitActive("ahk_id " hwnd, , 2) = hwnd
         } catch {
-            return 0
+            return false
         }
+    }
+
+    GetTitle(hwnd) {
+        return WinGetTitle("ahk_id " hwnd)
     }
 
     FindExactPacsWindows(target) {
@@ -97,7 +106,7 @@ class NativeStickyNoteWindowDriver {
                 hwnd := WinActive("A")
                 if (hwnd > 0
                     && WinGetPID("ahk_id " hwnd) = processId
-                    && WinGetTitle("ahk_id " hwnd) == "Sticky Notes")
+                    && this.GetTitle(hwnd) == "Sticky Notes")
                     return hwnd
             }
             Sleep(25)
@@ -137,7 +146,7 @@ class NativeStickyNoteWindowDriver {
         matches := []
         for hwnd in windows {
             try {
-                if (WinGetTitle("ahk_id " hwnd) == "Sticky Notes")
+                if (this.GetTitle(hwnd) == "Sticky Notes")
                     matches.Push(hwnd)
             } catch {
                 return 0
@@ -169,13 +178,8 @@ class NativeStickyNoteWindowDriver {
     ActivateSticky(session) {
         if !this.IsExpectedStickySession(session)
             return false
-        try {
-            WinActivate("ahk_id " session.stickyHwnd)
-            if (WinWaitActive("ahk_id " session.stickyHwnd, , 2) != session.stickyHwnd)
-                return false
-        } catch {
+        if !this.ActivateWindow(session.stickyHwnd)
             return false
-        }
         return this.IsExpectedStickySession(session)
     }
 }
@@ -772,10 +776,8 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
         return
     }
 
-    ; Optionally normalize line endings to CRLF for sticky note field
-    if (Settings.Get("AutoConvertWetReadLineEndings")) {
-        clipText := RegExReplace(clipText, "(\r)?\n", "`r`n")
-    }
+    if Settings.Get("AutoConvertWetReadLineEndings")
+        clipText := ConvertWetReadLineEndings(clipText)
 
     result := WetReadPasteEngine.Paste(
         noteField,
@@ -784,24 +786,61 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
         wetReadDriver
     )
 
+    failure := WetReadPasteFailureDialog(result, pasteMode)
+    if failure
+        MsgBox(failure.text, failure.title, "Icon!")
+    return
+}
+
+; Sticky Notes expects CRLF; a bare LF from the clipboard renders as one long line.
+ConvertWetReadLineEndings(text) {
+    return RegExReplace(text, "\r?\n", "`r`n")
+}
+
+/**
+ * The dialog that explains a finished paste transaction.
+ * @param result WetReadPasteEngine.Paste result
+ * @param pasteMode "uia" or "control", named in the unsupported-method message
+ * @returns {text, title}, or 0 when the paste succeeded
+ */
+WetReadPasteFailureDialog(result, pasteMode) {
     if result.unsupported {
         method := pasteMode = "uia" ? "UIA Value" : "ControlSetText"
-        MsgBox("This Sticky Notes field does not expose a verified target for the " method " method. Run the wet read again and choose another paste method.", "Paste Method Unavailable", "Icon!")
-    } else if !result.success {
-        if (result.reason = "value-changed") {
-            MsgBox("The Sticky Notes value changed while PACS Assistant was verifying the wet read. No retry or rollback was attempted, so a newer edit was not overwritten. Keep the window open and verify the note manually.", "Sticky Note Changed", "Icon!")
-        } else if (result.reason = "precondition-changed") {
-            MsgBox("Sticky Notes changed before PACS Assistant wrote anything. No paste or rollback was attempted, so the newer note was not overwritten. Keep the window open and verify it manually.", "Sticky Note Changed", "Icon!")
-        } else if (result.reason = "read" || result.reason = "precondition-read") {
-            MsgBox("PACS Assistant could not verify the current Sticky Notes value, so no paste or rollback was attempted. Keep the window open and verify it manually.", "Sticky Note Not Verified", "Icon!")
-        } else if !result.restored {
-            MsgBox("The wet read failed and PACS Assistant could not restore the previous sticky note. Keep the window open and verify the note manually.", "Sticky Note Restore Failed", "Icon!")
-        } else {
-            MsgBox("The wet read was not pasted. The sticky note still matches its original value; verify it before closing the window.", "Paste Failed", "Icon!")
+        return {
+            text: "This Sticky Notes field does not expose a verified target for the " method " method. Run the wet read again and choose another paste method.",
+            title: "Paste Method Unavailable"
         }
     }
-
-    return
+    if result.success
+        return 0
+    if (result.reason = "value-changed") {
+        return {
+            text: "The Sticky Notes value changed while PACS Assistant was verifying the wet read. No retry or rollback was attempted, so a newer edit was not overwritten. Keep the window open and verify the note manually.",
+            title: "Sticky Note Changed"
+        }
+    }
+    if (result.reason = "precondition-changed") {
+        return {
+            text: "Sticky Notes changed before PACS Assistant wrote anything. No paste or rollback was attempted, so the newer note was not overwritten. Keep the window open and verify it manually.",
+            title: "Sticky Note Changed"
+        }
+    }
+    if (result.reason = "read" || result.reason = "precondition-read") {
+        return {
+            text: "PACS Assistant could not verify the current Sticky Notes value, so no paste or rollback was attempted. Keep the window open and verify it manually.",
+            title: "Sticky Note Not Verified"
+        }
+    }
+    if !result.restored {
+        return {
+            text: "The wet read failed and PACS Assistant could not restore the previous sticky note. Keep the window open and verify the note manually.",
+            title: "Sticky Note Restore Failed"
+        }
+    }
+    return {
+        text: "The wet read was not pasted. The sticky note still matches its original value; verify it before closing the window.",
+        title: "Paste Failed"
+    }
 }
 
 PromptWetReadMode() {

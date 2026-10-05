@@ -32,7 +32,14 @@ class WetReadTest {
         "StickyOpenerRejectsOwnerlessStickyWindow",
         "StickyOpenerPinsNewlyActiveExactWindow",
         "StickyOpenerRejectsTwoNewWindowsAfterInvoke",
-        "StickySessionRejectsANewSiblingAfterCapture",
+        "NativeStickySessionAcceptsTheOneNewOwnedStickyWindow",
+        "NativeStickySessionRejectsANewSiblingStickyWindow",
+        "NativeStickySessionRejectsAWrongOwner",
+        "NativeStickySessionRejectsAReusedPreexistingWindow",
+        "NativeStickySessionRejectsIncompleteSessionsAndFailedEnumeration",
+        "NativeActivateStickyVerifiesIdentityAroundActivation",
+        "PasteFailureDialogNamesEachOutcome",
+        "LineEndingConversionProducesCrlfOnly",
         "StickyDriverUsesExactValidatedWindowHandle",
         "StickyNoteTargetRequiresExpectedTypeProcessAndCapability",
         "StickyNoteTargetMustBeTheUniqueWritableField",
@@ -358,17 +365,103 @@ class WetReadTest {
         Assert.Equal(1, driver.invokeCalls)
     }
 
-    StickySessionRejectsANewSiblingAfterCapture() {
-        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
-        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
-        stickyRoot := FakeStickyTargetRoot(42, [], 200)
-        driver := FakeStickyNoteWindowDriver(pacsRoot, stickyRoot, 200)
-        opener := StickyNoteOpener(driver)
-        session := opener.Open({title: "Vue PACS", exe: "mp.exe"})
+    NativeStickySessionAcceptsTheOneNewOwnedStickyWindow() {
+        driver := PrimitiveStickyNoteWindowDriver.Standard()
 
-        driver.postClickStickyWindows := [200, 201]
+        Assert.True(driver.IsExpectedStickySession(PrimitiveStickyNoteWindowDriver.Session()))
+    }
+
+    NativeStickySessionRejectsANewSiblingStickyWindow() {
+        driver := PrimitiveStickyNoteWindowDriver.Standard()
+        driver.AddWindow(201, "Sticky Notes", 100)
+
+        Assert.False(driver.IsExpectedStickySession(PrimitiveStickyNoteWindowDriver.Session()))
+    }
+
+    NativeStickySessionRejectsAWrongOwner() {
+        driver := PrimitiveStickyNoteWindowDriver.Standard()
+        driver.owners[200] := 999
+
+        Assert.False(driver.IsExpectedStickySession(PrimitiveStickyNoteWindowDriver.Session()))
+    }
+
+    NativeStickySessionRejectsAReusedPreexistingWindow() {
+        driver := PrimitiveStickyNoteWindowDriver.Standard()
+        session := PrimitiveStickyNoteWindowDriver.Session()
+        session.preexistingProcessWindows := [100, 150, 200]
 
         Assert.False(driver.IsExpectedStickySession(session))
+    }
+
+    NativeStickySessionRejectsIncompleteSessionsAndFailedEnumeration() {
+        driver := PrimitiveStickyNoteWindowDriver.Standard()
+        Assert.False(driver.IsExpectedStickySession(0))
+        for propertyName in ["pacsHwnd", "stickyHwnd", "processId", "preexistingProcessWindows"] {
+            session := PrimitiveStickyNoteWindowDriver.Session()
+            session.DeleteProp(propertyName)
+            Assert.False(driver.IsExpectedStickySession(session), "Session without " propertyName " was accepted")
+        }
+
+        driver.processWindows := 0
+        Assert.False(driver.IsExpectedStickySession(PrimitiveStickyNoteWindowDriver.Session()))
+
+        ; A window that disappears while titles are read makes the set unknowable.
+        vanishing := PrimitiveStickyNoteWindowDriver.Standard()
+        vanishing.processWindows.Push(300)
+        Assert.False(vanishing.IsExpectedStickySession(PrimitiveStickyNoteWindowDriver.Session()))
+    }
+
+    NativeActivateStickyVerifiesIdentityAroundActivation() {
+        session := PrimitiveStickyNoteWindowDriver.Session()
+
+        wrongOwner := PrimitiveStickyNoteWindowDriver.Standard()
+        wrongOwner.owners[200] := 999
+        Assert.False(wrongOwner.ActivateSticky(session))
+        Assert.Equal(0, wrongOwner.activated.Length, "An unverified session must not be activated")
+
+        failedActivation := PrimitiveStickyNoteWindowDriver.Standard()
+        failedActivation.activationSucceeds := false
+        Assert.False(failedActivation.ActivateSticky(session))
+
+        siblingOnActivation := PrimitiveStickyNoteWindowDriver.Standard()
+        siblingOnActivation.siblingOnActivation := 201
+        Assert.False(siblingOnActivation.ActivateSticky(session))
+        Assert.Equal(1, siblingOnActivation.activated.Length)
+
+        verified := PrimitiveStickyNoteWindowDriver.Standard()
+        Assert.True(verified.ActivateSticky(session))
+        Assert.Equal(200, verified.activated[1])
+    }
+
+    PasteFailureDialogNamesEachOutcome() {
+        Assert.Equal(0, WetReadPasteFailureDialog({success: true, unsupported: false, restored: false, reason: ""}, "uia"))
+
+        unsupported := WetReadPasteFailureDialog({success: false, unsupported: true, restored: true, reason: "unsupported"}, "uia")
+        Assert.Equal("Paste Method Unavailable", unsupported.title)
+        Assert.True(InStr(unsupported.text, "UIA Value method"), unsupported.text)
+        unsupportedControl := WetReadPasteFailureDialog({success: false, unsupported: true, restored: true, reason: "unsupported"}, "control")
+        Assert.True(InStr(unsupportedControl.text, "ControlSetText method"), unsupportedControl.text)
+
+        expectedTitles := [
+            ["value-changed", false, "Sticky Note Changed"],
+            ["precondition-changed", false, "Sticky Note Changed"],
+            ["read", false, "Sticky Note Not Verified"],
+            ["precondition-read", false, "Sticky Note Not Verified"],
+            ["error", false, "Sticky Note Restore Failed"],
+            ["verification", true, "Paste Failed"]
+        ]
+        for expected in expectedTitles {
+            dialog := WetReadPasteFailureDialog(
+                {success: false, unsupported: false, restored: expected[2], reason: expected[1]},
+                "uia"
+            )
+            Assert.Equal(expected[3], dialog.title, "Wrong dialog for reason '" expected[1] "'")
+        }
+    }
+
+    LineEndingConversionProducesCrlfOnly() {
+        Assert.Equal("a`r`nb`r`nc`rd", ConvertWetReadLineEndings("a`nb`r`nc`rd"))
+        Assert.Equal("", ConvertWetReadLineEndings(""))
     }
 
     StickyDriverUsesExactValidatedWindowHandle() {
@@ -837,22 +930,6 @@ class FakeStickyNoteWindowDriver {
     }
 
 
-    IsExpectedStickySession(session) {
-        windows := this.FindExactStickyWindows(session.processId)
-        delta := StickyNoteOpener.NewWindowDelta(
-            session.preexistingProcessWindows,
-            windows
-        )
-        return IsObject(delta)
-            && delta.Length = 1
-            && delta[1] = session.stickyHwnd
-            && this.stickyOwner = session.pacsHwnd
-    }
-
-    ActivateSticky(session) {
-        return session.stickyHwnd = this.activatedStickyHwnd
-            && this.stickyOwner = session.pacsHwnd
-    }
 }
 
 class FakeWetReadControlDriver {
@@ -874,4 +951,62 @@ class FakeWetReadFocusDriver {
         return this.matches
     }
 
+}
+
+; The real NativeStickyNoteWindowDriver gate over scripted Win32 primitives, so the
+; session identity checks run as shipped. PACS window 100, process 42; window 150 is
+; an unrelated pre-existing process window and 200 is the new Sticky Notes window.
+class PrimitiveStickyNoteWindowDriver extends NativeStickyNoteWindowDriver {
+    __New(processWindows, titles, owners) {
+        this.processWindows := processWindows
+        this.titles := titles
+        this.owners := owners
+        this.activationSucceeds := true
+        this.siblingOnActivation := 0
+        this.activated := []
+    }
+
+    static Standard() {
+        return PrimitiveStickyNoteWindowDriver(
+            [100, 150, 200],
+            Map(100, "Vue PACS", 150, "Toolbar", 200, "Sticky Notes"),
+            Map(200, 100)
+        )
+    }
+
+    static Session() {
+        return {
+            pacsHwnd: 100,
+            stickyHwnd: 200,
+            processId: 42,
+            preexistingProcessWindows: [100, 150]
+        }
+    }
+
+    AddWindow(hwnd, title, owner) {
+        this.processWindows.Push(hwnd)
+        this.titles[hwnd] := title
+        this.owners[hwnd] := owner
+    }
+
+    FindProcessWindows(processId) {
+        return IsObject(this.processWindows) ? this.processWindows.Clone() : 0
+    }
+
+    GetTitle(hwnd) {
+        if !this.titles.Has(hwnd)
+            throw TargetError("Target window not found.")
+        return this.titles[hwnd]
+    }
+
+    GetOwner(hwnd) {
+        return this.owners.Has(hwnd) ? this.owners[hwnd] : 0
+    }
+
+    ActivateWindow(hwnd) {
+        this.activated.Push(hwnd)
+        if this.siblingOnActivation
+            this.AddWindow(this.siblingOnActivation, "Sticky Notes", 100)
+        return this.activationSucceeds
+    }
 }
