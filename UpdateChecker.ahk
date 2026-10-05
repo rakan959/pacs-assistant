@@ -54,7 +54,9 @@ class UpdateChecker {
     static manualResultNotifier := (text, title, options) => TrayTip(text, title, options)
     static dialogAcquire := (*) => true
     static dialogRelease := (*) => 0
-    static updateCheckEligibleProbe := (*) => A_IsCompiled && !AppVersion.isDevBuild
+    ; Only a compiled release build checks for updates: a source run has no
+    ; executable to replace, and a dev build must never replace itself with a release.
+    static updateCheckEligibleProbe := (*) => UpdateChecker.compiledProbe.Call() && !AppVersion.isDevBuild
 
     static Start() {
         this.LoadSkippedVersion()

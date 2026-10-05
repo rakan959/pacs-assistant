@@ -26,6 +26,7 @@ class UpdateCheckerTest {
         "TestSettingsChangeKeepsAnUpdateDeferredByRemindLater",
         "TestSettingsChangeRestartsTimer",
         "TestAutomaticCheckUsesAsyncTransport",
+        "TestOnlyCompiledReleaseBuildsCheckForUpdates",
         "TestSynchronousAsyncFailureIsNotReportedAsStarted",
         "TestRequestWithoutAHandleIsReportedAsNotStarted",
         "TestAutomaticCheckNeverOpensAnActivatingDialog",
@@ -365,6 +366,37 @@ class UpdateCheckerTest {
         Assert.True(UpdateChecker.BeginAutoCheck())
         Assert.Equal(UpdateChecker.newestReleaseUrl, transport.url)
         transport.Resolve({status: 404, body: ""})
+    }
+
+    ; README: development and source builds skip update checks entirely.
+    TestOnlyCompiledReleaseBuildsCheckForUpdates() {
+        UpdateChecker.updateCheckEligibleProbe := this.originalUpdateCheckEligibleProbe
+        transport := FakeAsyncUpdateTransport()
+        UpdateChecker.transport := transport
+        originalDevBuild := AppVersion.isDevBuild
+        cases := [
+            {label: "source run", compiled: false, devBuild: false, eligible: false},
+            {label: "source run of a dev build", compiled: false, devBuild: true, eligible: false},
+            {label: "compiled dev build", compiled: true, devBuild: true, eligible: false},
+            {label: "compiled release build", compiled: true, devBuild: false, eligible: true}
+        ]
+        try {
+            for testCase in cases {
+                UpdateChecker.compiledProbe := testCase.compiled ? (*) => true : (*) => false
+                AppVersion.isDevBuild := testCase.devBuild
+                requests := transport.asyncCalls
+
+                Assert.Equal(testCase.eligible, UpdateChecker.BeginAutoCheck(), testCase.label)
+                if testCase.eligible
+                    transport.Resolve({status: 404, body: ""})
+                Assert.Equal(testCase.eligible, UpdateChecker.BeginManualCheck(), testCase.label)
+                if testCase.eligible
+                    transport.Resolve({status: 404, body: ""})
+                else
+                    Assert.Equal("Development Build", this.manualNotifications[-1].title, testCase.label)
+                Assert.Equal(requests + (testCase.eligible ? 2 : 0), transport.asyncCalls, testCase.label)
+            }
+        } finally AppVersion.isDevBuild := originalDevBuild
     }
 
     ; An offline workstation fails the hourly check every time: one log entry per
