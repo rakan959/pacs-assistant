@@ -87,7 +87,8 @@ class KeybindGUITest {
         "TestDestroyedNewProfileDialogCannotDispatchQueuedActions",
         "TestDestroyedProfileSelectorCannotDispatchQueuedActions",
         "TestSelectWithoutAHighlightedProfileSaysSo",
-        "TestProfileDeletionOwnsSelectorAcrossConfirmation"
+        "TestProfileDeletionRevalidatesTheSelectorAfterConfirmation",
+        "TestConfirmedProfileDeletionDeletesAndRefreshesTheSelector"
     ]
 
     ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
@@ -690,7 +691,10 @@ class KeybindGUITest {
         Assert.Equal(0, confirmation.calls)
     }
 
-    TestProfileDeletionOwnsSelectorAcrossConfirmation() {
+    ; The confirmation holds no lease, so clinical commands and monitoring keep
+    ; running while it is open. The selector is disabled meanwhile; if it is closed
+    ; anyway, the deletion is revalidated and does not happen.
+    TestProfileDeletionRevalidatesTheSelectorAfterConfirmation() {
         this.UseTempProfilesFolder()
         selector := ReentrantSelectorDialog()
         editor := {
@@ -721,13 +725,46 @@ class KeybindGUITest {
         result := editor.DeleteProfile("B", selector)
         bStillExists := ProfileManager.profiles.Has("B")
 
-        Assert.True(result)
+        Assert.False(result)
         Assert.True(confirmation.observedDisabled)
-        Assert.False(confirmation.closeResult)
-        Assert.False(bStillExists)
+        Assert.Equal("", confirmation.observedLease)
+        Assert.True(confirmation.closeResult)
+        Assert.True(bStillExists)
         Assert.Equal(1, selector.destroyCalls)
-        Assert.Equal(0, editor.mainWindowCalls)
+        Assert.Equal(1, editor.mainWindowCalls)
+        Assert.Equal(0, editor.selectorCalls)
+    }
+
+    TestConfirmedProfileDeletionDeletesAndRefreshesTheSelector() {
+        this.UseTempProfilesFolder()
+        selector := ReentrantSelectorDialog()
+        editor := {
+            base: ProfileSelectorTransactionGUI.Prototype,
+            mainWindowCalls: 0,
+            selectorCalls: 0
+        }
+        confirmation := ReentrantProfileDeleteConfirmationDriver((*) => false, selector)
+        editor.confirmationDriver := confirmation
+
+        ProfileManager.profileRevisions := Map()
+        ProfileManager.profiles := Map(
+            "A", ProfileManager.NewProfile(),
+            "B", ProfileManager.NewProfile()
+        )
+        ProfileManager.currentProfile := "A"
+        ProfileManager.defaultProfile := ""
+        ProfileManager.SaveProfile("A", ProfileManager.profiles["A"])
+        ProfileManager.SaveProfile("B", ProfileManager.profiles["B"])
+        editor.RegisterProfileSelector(selector)
+
+        Assert.True(editor.DeleteProfile("B", selector))
+
+        Assert.Equal("", confirmation.observedLease)
+        Assert.False(ProfileManager.profiles.Has("B"))
+        Assert.False(FileExist(ProfileManager.ProfilePath("B")))
+        Assert.Equal(1, selector.destroyCalls)
         Assert.Equal(1, editor.selectorCalls)
+        Assert.Equal("", ExclusiveOperations.Active())
     }
 
     TestTrayExitUsesTheSameClinicalAndCaptureGate() {
@@ -3019,6 +3056,7 @@ class ReentrantProfileDeleteConfirmationDriver {
 
     Confirm(*) {
         this.observedDisabled := this.selector.disabled
+        this.observedLease := ExclusiveOperations.Active()
         this.closeResult := this.callback.Call()
         return true
     }

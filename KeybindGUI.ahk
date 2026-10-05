@@ -637,12 +637,14 @@ class KeybindGUI {
             return false
         }
 
-        if !this.BeginProfileMutationTransaction("delete a profile")
+        ; The confirmation does not hold the profile lease, so a dialog left open does
+        ; not block clinical commands or monitoring. The selector is disabled while it
+        ; is open, and the deletion is revalidated under the lease after the answer.
+        if !this.ProfileMutationAllowed("delete a profile")
             return false
         selectorDisabled := false
+        leaseHeld := false
         try {
-            if !this.RequireCurrentProfileSelector(selectorGui)
-                return false
             try {
                 selectorGui.Opt("+Disabled")
                 selectorDisabled := true
@@ -668,6 +670,9 @@ class KeybindGUI {
                 "Confirm Delete"
             )
                 return false
+            if !this.BeginProfileMutationTransaction("delete a profile")
+                return false
+            leaseHeld := true
             if (!this.RequireCurrentProfileSelector(selectorGui)
                 || !this.ProfileDeletionStateIsCurrent(deletionState)) {
                 this.NotifyUser(
@@ -699,7 +704,8 @@ class KeybindGUI {
         } finally {
             if (selectorDisabled && this.ProfileSelectorIsCurrent(selectorGui))
                 try selectorGui.Opt("-Disabled")
-            this.EndProfileMutationTransaction()
+            if leaseHeld
+                this.EndProfileMutationTransaction()
         }
         return false
     }
