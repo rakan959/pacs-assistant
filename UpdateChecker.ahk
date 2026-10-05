@@ -561,12 +561,14 @@ class UpdateChecker {
 
         start := this.StartCheck(true)
         if !start.started {
-            if start.error
+            if start.error {
+                AppLog.Write("Update check failed: " ErrorText.Describe(start.error))
                 this.manualResultNotifier.Call(
                     "The update check could not start: " ErrorText.Message(start.error),
                     "Update Check Failed",
                     "Icon!"
                 )
+            }
             return false
         }
         try this.updateAvailableNotifier.Call(
@@ -610,6 +612,7 @@ class UpdateChecker {
             }
             this.ShowUpdateDialog(updateInfo)
         } catch as err {
+            AppLog.Write("Update check failed: " ErrorText.Describe(err))
             this.manualResultNotifier.Call(
                 "The update check failed: " err.Message,
                 "Update Check Failed",
@@ -621,6 +624,7 @@ class UpdateChecker {
     static FailManualCheck(slot, err) {
         if !this.ClaimSlot(slot)
             return
+        AppLog.Write("Update check failed: " ErrorText.Describe(err))
         this.manualResultNotifier.Call(
             "The update check failed: " ErrorText.Message(err),
             "Update Check Failed",
@@ -745,6 +749,11 @@ class UpdateChecker {
     ; underneath can never save; once it has said so it closes, and Check for
     ; Updates reopens it from the pending update.
     static SaveDialogChoices(updateGui, autoUpdate, skipBetaVersions, skippedVersion?) {
+        if (!IsSet(skippedVersion)
+            && updateGui.settingsRevision = Settings.revision
+            && !!autoUpdate = !!Settings.Get("AutoUpdate")
+            && !!skipBetaVersions = !!Settings.Get("SkipBetaVersions"))
+            return true
         if this.TrySaveUpdatePreferences(
             updateGui.settingsRevision,
             autoUpdate,

@@ -58,6 +58,8 @@ class UpdateCheckerTest {
         "TestUpdaterUsesPrivateTemporaryScript",
         "TestCleanupDoesNotOwnGenericScript",
         "TestUpdateDialogPreferencesCommitTogether",
+        "TestUnchangedUpdateDialogPreservesSettingsRevision",
+        "TestManualFailuresAreLogged",
         "TestStaleUpdateDialogCannotOverwriteNewerSettings",
         "TestSkippedVersionPersistsAcrossReload"
     ]
@@ -129,6 +131,37 @@ class UpdateCheckerTest {
         Assert.Equal(1, v3.minor)
         Assert.Equal(3, v3.patch)
         Assert.Equal("beta.4", v3.prerelease)
+    }
+
+    TestUnchangedUpdateDialogPreservesSettingsRevision() {
+        settingsGui := Settings.ShowDialog()
+        updateGui := UpdateChecker.ShowUpdateDialog(ValidUpdateInfo())
+        try {
+            revision := Settings.revision
+            Assert.True(UpdateChecker.SaveDialogChoices(updateGui, Settings.Get("AutoUpdate"), Settings.Get("SkipBetaVersions")))
+            Assert.Equal(revision, Settings.revision)
+            ClickDialogButton(settingsGui, "Save")
+            for dialog in TestRunner.dialogs
+                Assert.False(dialog.title = "Settings Changed")
+        } finally {
+            try settingsGui.Destroy()
+            UpdateChecker.CloseUpdateDialog(updateGui)
+        }
+    }
+
+    TestManualFailuresAreLogged() {
+        capturedLog := LogCapture()
+        try {
+            UpdateChecker.transport := NullHandleAsyncTransport()
+            Assert.False(UpdateChecker.BeginManualCheck())
+            transport := FakeAsyncUpdateTransport()
+            UpdateChecker.transport := transport
+            Assert.True(UpdateChecker.BeginManualCheck())
+            transport.onError.Call(Error("test network failure"))
+            Assert.True(UpdateChecker.BeginManualCheck())
+            transport.Resolve({status: 200, body: "invalid JSON"})
+            Assert.Equal(3, capturedLog.Count("Update check failed:"))
+        } finally capturedLog.Restore()
     }
 
     ; Each pair is {older, newer} and is asserted in both directions
