@@ -19,6 +19,7 @@ class ClinicalAutomationTest {
         "SelectorSendStopsWhenTheWindowIsReplacedDuringActivation",
         "ExactSendStopsWhenTheWindowIsReplacedDuringActivation",
         "ExactWindowResolverRejectsSubstringAndDuplicateMatches",
+        "VerifiedUiaRootRequiresTheCapturedWindowAndProcess",
         "PacsSeriesCommandsUseExactHwndTarget",
         "BuiltInClinicalCommandUsesConfirmedTarget",
         "WindowToggleRevalidatesUniqueSessionBeforeMutation",
@@ -214,6 +215,29 @@ class ClinicalAutomationTest {
             for call in driver.calls
                 Assert.False(call.kind = "keys", "keys reached hwnd " moved.hwnd " pid " moved.pid)
         }
+    }
+
+    ; PowerScribe report reading and microphone selection read UIA only through
+    ; this root, so a root from another window or process must not be returned.
+    VerifiedUiaRootRequiresTheCapturedWindowAndProcess() {
+        session := {target: "ahk_id 100", hwnd: 100, processId: 42}
+        cases := [
+            {label: "captured window and process", root: {WinId: 100, ProcessId: 42}, accepted: true},
+            {label: "another process", root: {WinId: 100, ProcessId: 43}, accepted: false},
+            {label: "another window", root: {WinId: 101, ProcessId: 42}, accepted: false},
+            {label: "unreadable identity", root: {}, accepted: false}
+        ]
+        originalLookup := UIA.GetOwnPropDesc("ElementFromHandle")
+        try {
+            for testCase in cases {
+                root := testCase.root
+                UIA.DefineProp("ElementFromHandle", {call: (*) => root})
+                result := AppControl.VerifiedUiaRoot(session)
+                Assert.Equal(testCase.accepted ? ObjPtr(root) : 0, IsObject(result) ? ObjPtr(result) : result, testCase.label)
+            }
+            UIA.DefineProp("ElementFromHandle", {call: ThrowError.Bind("simulated UIA lookup failure")})
+            Assert.Equal(0, AppControl.VerifiedUiaRoot(session), "failed lookup")
+        } finally UIA.DefineProp("ElementFromHandle", originalLookup)
     }
 
     ExactWindowResolverRejectsSubstringAndDuplicateMatches() {

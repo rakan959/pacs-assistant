@@ -43,6 +43,7 @@ class WetReadTest {
         "StickyOpenerRejectsTwoNewWindowsAfterInvoke",
         "NativeStickySessionAcceptsTheOneNewOwnedStickyWindow",
         "NativeStickySessionRejectsANewSiblingStickyWindow",
+        "NativeStickySessionRejectsADifferentNewStickyWindow",
         "NativeStickySessionRejectsAWrongOwner",
         "NativeStickySessionRejectsAReusedPreexistingWindow",
         "NativeStickySessionRejectsIncompleteSessionsAndFailedEnumeration",
@@ -492,6 +493,16 @@ class WetReadTest {
         Assert.False(driver.IsExpectedStickySession(PrimitiveStickyNoteWindowDriver.Session()))
     }
 
+    ; The pinned window was retitled and another new Sticky Notes window opened:
+    ; one new window still matches, but not the pinned one.
+    NativeStickySessionRejectsADifferentNewStickyWindow() {
+        driver := PrimitiveStickyNoteWindowDriver.Standard()
+        driver.titles[200] := "Untitled"
+        driver.AddWindow(201, "Sticky Notes", 100)
+
+        Assert.False(driver.IsExpectedStickySession(PrimitiveStickyNoteWindowDriver.Session()))
+    }
+
     NativeStickySessionRejectsAWrongOwner() {
         driver := PrimitiveStickyNoteWindowDriver.Standard()
         driver.owners[200] := 999
@@ -821,6 +832,15 @@ class WetReadTest {
         Assert.False(PerformWetReadPaste("wet read", "uia", session))
         Assert.Equal(0, session.driver.rootCalls)
         Assert.True(InStr(TestRunner.dialogs[-1].text, "no longer the verified target"), TestRunner.dialogs[-1].text)
+
+        ; The reacquired root belongs to another process, or to another window.
+        session.driver := FakePinnedStickyDriver(true, FakeStickyTargetRoot(43, [], 200))
+        Assert.False(PerformWetReadPaste("wet read", "uia", session))
+        Assert.True(InStr(TestRunner.dialogs[-1].text, "could not be reacquired"), TestRunner.dialogs[-1].text)
+
+        session.driver := FakePinnedStickyDriver(true, FakeStickyTargetRoot(42, [], 201))
+        Assert.False(PerformWetReadPaste("wet read", "uia", session))
+        Assert.True(InStr(TestRunner.dialogs[-1].text, "target changed"), TestRunner.dialogs[-1].text)
 
         button := FakeStickyTargetElement(UIA.Type.Button, 42, true, 200)
         session.driver := FakePinnedStickyDriver(true, LocatingStickyTargetRoot(42, [button], 200, button))
