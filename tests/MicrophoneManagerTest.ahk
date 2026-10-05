@@ -39,6 +39,9 @@ class MicrophoneManagerTest {
         "SettingsChangeArmsAndDisarmsTheLoginCheck",
         "ApplyNowSelectsTheConfiguredMicrophone",
         "LoginCheckSelectsOnceAndStaysQuiet",
+        "UnmatchedNameStopsAfterTheAttemptLimit",
+        "ClosedPowerScribeIsNotAFailure",
+        "UnusablePickerIsAFailureNotALogin",
         "ApplyNowNamesEachFailureAndKeepsTheResolutionError",
         "UnconfirmedSelectionNamesTheTimeoutNotTheName",
         "UnverifiableMicrophoneListIsNotBlamedOnTheName",
@@ -165,6 +168,8 @@ class MicrophoneManagerTest {
     ; neither select again nor notify.
     LoginCheckSelectsOnceAndStaysQuiet() {
         fixture := MicrophoneFixture(["PowerMic III"])
+        fixture.combo.expandCalls := 0
+        fixture.combo.ExpandCollapsePattern := CountingMicrophoneExpandPattern(fixture.combo)
         MicrophoneManager.sessionDriver := fixture.driver
         SetTestSetting("MicrophoneName", "PowerMic III")
 
@@ -173,7 +178,56 @@ class MicrophoneManagerTest {
 
         Assert.Equal(MicrophoneManager.maxAttempts, MicrophoneManager.attempts)
         Assert.Equal(1, fixture.items[1].selectCalls)
+        ; The picker stays on screen until the user logs in; it is not reopened.
+        Assert.Equal(1, fixture.combo.expandCalls)
         Assert.Equal(0, this.notifications.Length)
+    }
+
+    ; Bounded so a mismatched microphone name cannot retry forever.
+    UnmatchedNameStopsAfterTheAttemptLimit() {
+        fixture := MicrophoneFixture(["PowerMic III"])
+        fixture.combo.expandCalls := 0
+        fixture.combo.ExpandCollapsePattern := CountingMicrophoneExpandPattern(fixture.combo)
+        MicrophoneManager.sessionDriver := fixture.driver
+        SetTestSetting("MicrophoneName", "SpeechMike")
+
+        loop MicrophoneManager.maxAttempts + 2
+            MicrophoneManager.CheckForLogin()
+
+        Assert.Equal(MicrophoneManager.maxAttempts, MicrophoneManager.attempts)
+        Assert.Equal(MicrophoneManager.maxAttempts, fixture.combo.expandCalls)
+        Assert.Equal(0, fixture.items[1].selectCalls)
+        Assert.Equal(1, this.notifications.Length)
+    }
+
+    ; PowerScribe not running is the normal state between sessions.
+    ClosedPowerScribeIsNotAFailure() {
+        fixture := MicrophoneFixture(["PowerMic III"])
+        MicrophoneManager.sessionDriver := SequencedMicrophoneSessionDriver(fixture.session, fixture.root, ["absent"])
+        SetTestSetting("MicrophoneName", "PowerMic III")
+
+        loop MicrophoneManager.maxAttempts + 1
+            MicrophoneManager.CheckForLogin()
+
+        Assert.Equal(0, MicrophoneManager.attempts)
+        Assert.Equal(0, this.notifications.Length)
+    }
+
+    ; A picker that is present but unusable is not the logged-in state, where the
+    ; picker is gone.
+    UnusablePickerIsAFailureNotALogin() {
+        fixture := MicrophoneFixture(["PowerMic III"])
+        fixture.combo.IsEnabled := false
+        MicrophoneManager.sessionDriver := fixture.driver
+        SetTestSetting("MicrophoneName", "PowerMic III")
+
+        loop MicrophoneManager.maxAttempts + 1
+            MicrophoneManager.CheckForLogin()
+
+        Assert.Equal(0, fixture.items[1].selectCalls)
+        Assert.Equal(1, this.notifications.Length)
+        Assert.Equal("PowerScribe Microphone Not Changed", this.notifications[1].title)
+        Assert.True(InStr(this.notifications[1].text, "expected identity or capability"), this.notifications[1].text)
     }
 
     ApplyNowNamesEachFailureAndKeepsTheResolutionError() {
