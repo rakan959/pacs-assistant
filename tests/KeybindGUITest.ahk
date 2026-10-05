@@ -1478,7 +1478,6 @@ class KeybindGUITest {
         editor := {
             base: DirtyAddFunctionTestGUI.Prototype,
             gui: {},
-            dirty: true,
             rebuildsWindow: true,
             resolveCalls: 0,
             dialogCalls: 0,
@@ -1498,7 +1497,6 @@ class KeybindGUITest {
         editor := {
             base: DirtyAddFunctionTestGUI.Prototype,
             gui: {},
-            dirty: true,
             rebuildsWindow: false,
             resolveCalls: 0,
             dialogCalls: 0,
@@ -2780,10 +2778,6 @@ class DiscardRenameTrackingGUI extends FakeWindowKeybindGUI {
 }
 
 class DirtyPersistentOperationGUI extends KeybindGUI {
-    HasMainWindow() {
-        return false
-    }
-
     NewProfileDialog(*) {
         this.dialogCalls++
         return FakeProfileDialog(ProfileManager.currentProfile)
@@ -2794,13 +2788,8 @@ class DirtyPersistentOperationGUI extends KeybindGUI {
 }
 
 class DirtyAddFunctionTestGUI extends KeybindGUI {
-    IsProfileDirty(*) {
-        return this.dirty
-    }
-
     ResolveDirtyProfileBeforeLeaving(*) {
         this.resolveCalls++
-        this.dirty := false
         ; Discard rebuilds the main window; Save keeps it.
         if this.rebuildsWindow
             this.gui := {}

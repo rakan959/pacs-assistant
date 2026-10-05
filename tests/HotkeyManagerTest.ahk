@@ -293,8 +293,6 @@ class HotkeyManagerTest {
         Assert.False(HotkeyManager.Unregister("ActionOne"))
         Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
         Assert.True(InStr(HotkeyManager.lastError, "disable") > 0)
-
-        HotkeyManager.activeHotkeys.Delete("ActionOne")
     }
 
     TestDisableAllReportsAndRetainsFailedRegistration() {
@@ -313,11 +311,7 @@ class HotkeyManagerTest {
         )
         Assert.True(HotkeyManager.activeHotkeys.Has("ActionOne"))
         Assert.False(HotkeyManager.activeHotkeys.Has("ActionTwo"))
-
-        HotkeyManager.activeHotkeys.Delete("ActionOne")
     }
-
-
 
     TestInvalidKeyNameIsRejectedAndNotTracked() {
         ; AutoHotkey itself is the key-name authority, so this test registers through

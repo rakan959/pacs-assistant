@@ -38,10 +38,6 @@ class NativeWindowDriver {
         Send(keys)
     }
 
-    Pause(milliseconds) {
-        Sleep(milliseconds)
-    }
-
     ListWindows(selector) {
         return WinGetList(selector)
     }

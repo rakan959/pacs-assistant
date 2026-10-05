@@ -1315,10 +1315,6 @@ class FakeWindowDriver {
     SendKeys(keys) {
         this.calls.Push({kind: "keys", value: keys})
     }
-
-    Pause(milliseconds) {
-        this.calls.Push({kind: "pause", value: milliseconds})
-    }
 }
 
 class FakeExactWindowDriver extends FakeWindowDriver {
@@ -1662,10 +1658,6 @@ class FakeAppLifecycleDriver {
         this.shortcutTarget := ""
     }
 
-    FindProcess(target) {
-        return this.mode = "close-error" ? 0 : 4242
-    }
-
     ListWindowsByExecutable(*) {
         return this.mode = "close-error" ? [31337] : []
     }
@@ -1686,10 +1678,6 @@ class FakeAppLifecycleDriver {
         if (this.mode = "close-error")
             throw Error("close failed")
         return true
-    }
-
-    ProcessExists(pid) {
-        return false
     }
 
     Launch(path) {
@@ -1731,10 +1719,6 @@ class SharedHostWindowLifecycleDriver {
 
     GetProcessId(*) {
         return 4242
-    }
-
-    ProcessExists(*) {
-        return true
     }
 
     CloseWindow(hwnd) {

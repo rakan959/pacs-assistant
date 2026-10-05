@@ -757,8 +757,8 @@ class FakeMicrophoneCombo {
     GetPropertyValue(propertyId) {
         switch propertyId {
             case UIA.Property.ValueValue: return this._value
-            case UIA.Property.IsValuePatternAvailable: return true
-            case UIA.Property.IsLegacyIAccessiblePatternAvailable: return false
+            case UIA.Property.IsValuePatternAvailable: return this.IsValuePatternAvailable
+            case UIA.Property.IsLegacyIAccessiblePatternAvailable: return this.IsLegacyIAccessiblePatternAvailable
         }
         return ""
     }
@@ -793,18 +793,12 @@ class UnreadableMicrophoneCombo {
 class UnsupportedValueMicrophoneCombo extends FakeMicrophoneCombo {
     __New(processId, windowId, automationId) {
         super.__New(processId, windowId, automationId)
+        ; Neither value pattern is available, and the property API returns its
+        ; empty default.
+        this.IsValuePatternAvailable := false
+        this._value := ""
         this.expandCalls := 0
         this.ExpandCollapsePattern := CountingMicrophoneExpandPattern(this)
-    }
-
-    GetPropertyValue(propertyId) {
-        switch propertyId {
-            case UIA.Property.ValueValue: return ""
-            case UIA.Property.IsValuePatternAvailable: return false
-            case UIA.Property.LegacyIAccessibleValue: return ""
-            case UIA.Property.IsLegacyIAccessiblePatternAvailable: return false
-        }
-        return ""
     }
 }
 
@@ -814,11 +808,9 @@ class FakeMicrophoneExpandPattern {
     }
 
     Expand() {
-        this.combo.expanded := true
     }
 
     Collapse() {
-        this.combo.expanded := false
     }
 }
 
@@ -838,17 +830,10 @@ class FakeMicrophoneItem {
         this.AutomationId := ""
         this.IsEnabled := true
         this.IsSelectionItemPatternAvailable := true
-        this.selected := false
         this.selectCalls := 0
         this.updatesComboOnSelect := true
         this.combo := combo
         this.SelectionItemPattern := FakeMicrophoneSelectionPattern(this)
-    }
-
-    GetPropertyValue(propertyId) {
-        if (propertyId = UIA.Property.SelectionItemIsSelected)
-            return this.selected
-        return ""
     }
 }
 
@@ -860,7 +845,6 @@ class InvalidatableMicrophoneItem {
         this.AutomationId := ""
         this.IsEnabled := true
         this.IsSelectionItemPatternAvailable := true
-        this.selected := false
         this.selectCalls := 0
         this.staleSelectCalls := 0
         this.updatesComboOnSelect := true
@@ -875,12 +859,6 @@ class InvalidatableMicrophoneItem {
                 throw Error("microphone item became stale")
             return UIA.Type.ListItem
         }
-    }
-
-    GetPropertyValue(propertyId) {
-        if (propertyId = UIA.Property.SelectionItemIsSelected)
-            return this.selected
-        return ""
     }
 }
 
@@ -908,7 +886,6 @@ class FakeMicrophoneSelectionPattern {
 
     Select() {
         this.item.selectCalls++
-        this.item.selected := true
         if this.item.updatesComboOnSelect
             this.item.combo._value := this.item.Name
     }

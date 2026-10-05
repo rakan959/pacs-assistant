@@ -694,7 +694,6 @@ class FakePACSTargetElement {
         this.AutomationId := automationId
         this.IsInvokePatternAvailable := invoke
         this.IsLegacyIAccessiblePatternAvailable := false
-        this.NativeWindowHandle := 0
     }
 }
 
