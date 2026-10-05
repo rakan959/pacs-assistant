@@ -24,6 +24,9 @@
  * identity for every later UIA and focus check.
  */
 class NativeStickyNoteWindowDriver {
+    ; The title of every Sticky Notes window, new or reused.
+    static stickyTitle := "Sticky Notes"
+
     CaptureActivePacs(target) {
         if !IsObject(target) || !HasProp(target, "title") || !HasProp(target, "exe")
             return 0
@@ -94,7 +97,7 @@ class NativeStickyNoteWindowDriver {
                 hwnd := WinActive("A")
                 if (hwnd > 0
                     && WinGetPID("ahk_id " hwnd) = processId
-                    && this.GetTitle(hwnd) == "Sticky Notes")
+                    && this.GetTitle(hwnd) == NativeStickyNoteWindowDriver.stickyTitle)
                     return hwnd
             }
             Sleep(25)
@@ -134,7 +137,7 @@ class NativeStickyNoteWindowDriver {
         matches := []
         for hwnd in windows {
             try {
-                if (this.GetTitle(hwnd) == "Sticky Notes")
+                if (this.GetTitle(hwnd) == NativeStickyNoteWindowDriver.stickyTitle)
                     matches.Push(hwnd)
             } catch {
                 return 0
@@ -173,6 +176,10 @@ class NativeStickyNoteWindowDriver {
 }
 
 class StickyNoteOpener {
+    ; The Name of the PACS toolbar button that opens a Sticky Notes window. The
+    ; search and the check on each result must use the same value.
+    static stickyButtonName := "scn_sticky_notes"
+
     __New(driver := 0) {
         this.driver := driver ? driver : NativeStickyNoteWindowDriver()
     }
@@ -287,13 +294,13 @@ class StickyNoteOpener {
 
     FindUniqueStickyButton(root) {
         candidates := []
-        try elements := root.FindElements({Name: "scn_sticky_notes"})
+        try elements := root.FindElements({Name: StickyNoteOpener.stickyButtonName})
         catch
             return 0
 
         for element in elements {
             try {
-                if (element.Name == "scn_sticky_notes"
+                if (element.Name == StickyNoteOpener.stickyButtonName
                     && element.Type = UIA.Type.Button
                     && element.IsEnabled
                     && element.ProcessId = root.ProcessId
@@ -332,6 +339,10 @@ class NativeWetReadControlDriver {
  * small interface makes failure behavior deterministic under test.
  */
 class NativeWetReadDriver {
+    ; Positional path to the note field. A locator only: IsExpectedNoteField proves
+    ; what it finds before anything is written.
+    static noteFieldPath := "YY0/"
+
     __New(
         targetTitle,
         targetDriver := NativeWetReadTargetDriver(),
@@ -749,11 +760,11 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
     }
     ; Get note input field
     noteField := ""
-    try noteField := sticky.ElementFromPath("YY0/")
+    try noteField := sticky.ElementFromPath(NativeWetReadDriver.noteFieldPath)
     if (!noteField) {
         ; Try another attempt after slight delay
         Sleep(200)
-        try noteField := sticky.ElementFromPath("YY0/")
+        try noteField := sticky.ElementFromPath(NativeWetReadDriver.noteFieldPath)
     }
     if (!noteField) {
         return StopWetRead("Could not locate the Sticky Notes text field. Nothing was pasted.")
