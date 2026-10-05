@@ -126,17 +126,17 @@ class Assert {
     static ExactlyEqual(expected, actual) {
         return Type(expected) == Type(actual) && expected == actual
     }
-    
+
     static True(value, message := "") {
         if (!value)
             throw Error(message ? message : "Expected true but got false")
     }
-    
+
     static False(value, message := "") {
         if (value)
             throw Error(message ? message : "Expected false but got true")
     }
-    
+
     static Throws(callback, expectedError := "", message := "") {
         ; Track the throw separately: a thrown 0 or "" is falsy but still a throw.
         threw := false

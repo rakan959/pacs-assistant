@@ -59,7 +59,7 @@ class SettingsTest {
         Settings.writeTransactionActive := false
         Settings.SaveAllSettings()
     }
-    
+
     TestDefaultSettingsLoaded() {
         Assert.True(Settings.Get("AutoUpdate"))
         Assert.True(Settings.Get("SkipBetaVersions"))
@@ -75,11 +75,11 @@ class SettingsTest {
         Assert.False(Settings.Get("SwapMicrophoneOnLogin"))
         Assert.Equal("", Settings.Get("MicrophoneName"))
     }
-    
+
     TestSaveAndGetValues() {
         SetTestSetting("RefreshInterval", 45)
         Assert.Equal(45, Settings.Get("RefreshInterval"))
-        
+
         SetTestSetting("AutoUpdate", false)
         Assert.False(Settings.Get("AutoUpdate"))
 
@@ -88,7 +88,7 @@ class SettingsTest {
 
         SetTestSetting("RestrictHotkeysByActiveWindow", false)
         Assert.False(Settings.Get("RestrictHotkeysByActiveWindow"))
-        
+
         SetTestSetting("AlertSound", "Asterisk")
         Assert.Equal("Asterisk", Settings.Get("AlertSound"))
     }
@@ -165,7 +165,7 @@ class SettingsTest {
         Assert.False(dialog.destroyed)
         Assert.Equal(60, Settings.Get("RefreshInterval"))
     }
-    
+
     ; The catalogue is a repository contract. Optional Windows Media files are a
     ; runtime capability and production deliberately falls back when one is absent.
     TestAlertSoundsAreDistinct() {
@@ -254,7 +254,7 @@ class SettingsTest {
         Assert.False(Settings.Get("AutoUpdate"))
         Assert.Equal(45, Settings.Get("RefreshInterval"))
         Assert.Equal("v9.9.9", Settings.Get("SkippedUpdateVersion"))
-        Assert.Equal("keep me", IniRead(Settings.settingsFile, "Extension", "UnknownKey"))
+        Assert.Equal("keep me", IniRead(Settings.settingsFile, "Extension", "UnknownKey", "<missing>"))
     }
 
     TestSavingSettingsNotifiesListeners() {
@@ -424,7 +424,7 @@ class SettingsTest {
         Assert.True(Settings.dialogLogicalWidth * 1.5 <= 1366)
         Assert.True(Settings.dialogLogicalHeight * 1.5 + 60 <= 768)
     }
-    
+
     Teardown() {
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalFile

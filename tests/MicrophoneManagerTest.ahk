@@ -336,7 +336,7 @@ class MicrophoneManagerTest {
         fixture.driver.rootError := "simulated picker lookup failure"
         MicrophoneManager.sessionDriver := fixture.driver
 
-        Loop MicrophoneManager.maxAttempts
+        loop MicrophoneManager.maxAttempts
             MicrophoneManager.CheckForLogin()
 
         Assert.Equal(MicrophoneManager.maxAttempts, MicrophoneManager.attempts)
@@ -388,7 +388,7 @@ class MicrophoneManagerTest {
         )
         MicrophoneManager.sessionDriver := driver
 
-        Loop 4
+        loop 4
             MicrophoneManager.CheckForLogin()
 
         Assert.Equal(MicrophoneManager.maxAttempts, MicrophoneManager.attempts)

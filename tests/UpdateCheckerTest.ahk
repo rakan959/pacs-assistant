@@ -92,7 +92,7 @@ class UpdateCheckerTest {
         UpdateChecker.updateDialog := 0
         UpdateChecker.activeRequest := 0
     }
-    
+
     TestVersionParsing() {
         v1 := UpdateChecker.ParseVersion("v1.9")
         Assert.Equal(1, v1.major)
@@ -386,17 +386,17 @@ class UpdateCheckerTest {
         Assert.Equal("v2.2.0", UpdateChecker.skippedVersion)
         Assert.Equal("v2.2.0", Settings.Get("SkippedUpdateVersion"))
     }
-    
+
     TestAutoCheckTimerRespectsSettings() {
         SetTestSetting("AutoUpdate", true)
         UpdateChecker.StartAutoCheck()
         Assert.True(UpdateChecker.updateTimer != 0)
-        
+
         SetTestSetting("AutoUpdate", false)
         UpdateChecker.StartAutoCheck()
         Assert.Equal(0, UpdateChecker.updateTimer)
     }
-    
+
     TestSettingsChangeRestartsTimer() {
         SetTestSetting("AutoUpdate", true)
         UpdateChecker.StartAutoCheck()
@@ -666,7 +666,7 @@ class UpdateCheckerTest {
         Assert.Equal(0, coordinator.completeCalls)
         Assert.Equal(1, coordinator.cancelCalls)
     }
-    
+
     Teardown() {
         try UpdateChecker.CancelActiveCheck()
         UpdateChecker.StopAutoCheck()

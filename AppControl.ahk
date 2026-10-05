@@ -2,8 +2,8 @@
 ;   + Preamble
 ;   + NativeWindowDriver / NativeAppLifecycleDriver (Win32 window & process primitives)
 ;   + AppControl class (exact-window resolution, targeted key send, graceful close, restart)
-;   + NativeGracefulCloseDriver / NativePacsRestartDriver (clinical close & restart)
-;   + CloseWithSavePrompt, RestartPACS (file-scope workflow entry points)
+;   + NativeGracefulCloseDriver, CloseWithSavePrompt (PowerScribe close with save prompt)
+;   + NativePacsRestartDriver, RestartPACS (verified PACS restart workflow)
 
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
@@ -20,7 +20,8 @@ class NativeWindowDriver {
                 return false
             WinActivate(winTitle)
             return WinWaitActive(winTitle, , timeoutSeconds) != 0
-        } catch {
+        } catch TargetError {
+            ; The window closed between WinExist and activation.
             return false
         }
     }
@@ -93,8 +94,8 @@ class NativeAppLifecycleDriver {
             return false
         hwnd := session.hwnd
         try WinClose(session.target, , 2)
-        catch {
-            return !this.WindowExists(hwnd)
+        catch TargetError {
+            ; Already gone after revalidation; the existence check below decides.
         }
         return !this.WindowExists(hwnd)
     }
@@ -607,7 +608,7 @@ class AppControl {
             ; Only the installed Windows shortcut is a valid launch target. A broad
             ; substring match could treat a similarly named script as PACS and report
             ; a successful restart after launching the wrong entry.
-            Loop Files, directory "\Vue Client (Integrated).lnk", "F" {
+            loop files directory "\Vue Client (Integrated).lnk", "F" {
                 try {
                     target := this.lifecycleDriver.ResolveShortcut(A_LoopFileFullPath)
                     if !this.IsExpectedVueLaunchTarget(target)
@@ -637,7 +638,8 @@ class AppControl {
             this.NormalizePath(right),
             false
         ) = 0
-        return false
+        catch OSError
+            return false
     }
 
     static NormalizePath(path) {

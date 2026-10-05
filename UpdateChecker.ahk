@@ -44,7 +44,7 @@ class UpdateChecker {
     static dialogAcquire := (*) => true
     static dialogRelease := (*) => 0
     static updateCheckEligibleProbe := (*) => A_IsCompiled && !AppVersion.isDevBuild
-    
+
     static Start() {
         this.LoadSkippedVersion()
         this.ScheduleUpdateArtifactCleanup()
@@ -52,17 +52,17 @@ class UpdateChecker {
         if Settings.Get("AutoUpdate")
             this.BeginAutoCheck()
     }
-    
+
     static StartAutoCheck(cancelManualCheck := true) {
         this.StopAutoCheck(cancelManualCheck)
-        
+
         ; Set up new timer if auto-update is enabled
         if Settings.Get("AutoUpdate") {
             this.updateTimer := ObjBindMethod(this, "BeginAutoCheck")
             SetTimer(this.updateTimer, 3600000)  ; Check every hour (3600000 ms)
         }
     }
-    
+
     static StopAutoCheck(cancelManualCheck := true) {
         if this.updateTimer {
             SetTimer(this.updateTimer, 0)
@@ -146,7 +146,7 @@ class UpdateChecker {
             this.activeRequest := 0
         OutputDebug("Update check failed: " ErrorText.Message(err))
     }
-    
+
     static OnSettingsChanged() {
         ; Reconfigure only the automatic schedule. A manual check is a user-visible
         ; operation and must complete (or explicitly report failure), never vanish
@@ -215,7 +215,7 @@ class UpdateChecker {
         }
         return true
     }
-    
+
     ; Leading integer of a version field, 0 if there isn't one
     static ToInt(text) {
         if RegExMatch(text, "^\d+", &m)
@@ -342,7 +342,7 @@ class UpdateChecker {
         result := StrCompare(left, right, true)
         return result < 0 ? -1 : (result > 0 ? 1 : 0)
     }
-    
+
     static ParseReleaseResponse(responseText) {
         document := JsonParser.Parse(responseText)
         if (document is Array) {
@@ -588,7 +588,7 @@ class UpdateChecker {
             "Icon!"
         )
     }
-    
+
     /**
      * Shows the update dialog.
      * @param updateInfo Result of an earlier asynchronous release check. Callers that
@@ -712,7 +712,7 @@ class UpdateChecker {
         try updateGui.Destroy()
         return true
     }
-    
+
     static HashFileSha256(path) {
         algorithm := 0
         hash := 0
@@ -833,7 +833,7 @@ class UpdateChecker {
             peSignature := Buffer(4)
             return executableFile.RawRead(peSignature) = 4
                 && NumGet(peSignature, 0, "UInt") = 0x00004550
-        } catch {
+        } catch OSError {
             return false
         } finally {
             if IsSet(executableFile) && IsObject(executableFile)
@@ -851,8 +851,9 @@ class UpdateChecker {
             return false
         }
 
+        ; FileGetVersion raises OSError for an image without a version resource.
         try fileVersion := this.ParseVersion(FileGetVersion(path))
-        catch {
+        catch OSError {
             return false
         }
         expected := this.ParseVersion(expectedVersion)
@@ -912,7 +913,7 @@ class UpdateChecker {
             FileMove(probePath, movedPath, false)
             FileDelete(movedPath)
             return true
-        } catch {
+        } catch OSError {
             return false
         } finally {
             if IsObject(probeFile)

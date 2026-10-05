@@ -137,14 +137,14 @@ class ProfileManagerTest {
         for name, _ in ProfileManager.profiles
             inMemoryName := name
         diskName := ""
-        Loop Files ProfileManager.profilesPath "\*.ini"
+        loop files ProfileManager.profilesPath "\*.ini"
             diskName := A_LoopFileName
 
         Assert.True(inMemoryName == "night")
         Assert.True(diskName == "night.ini")
         Assert.True(ProfileManager.currentProfile == "night")
         Assert.True(ProfileManager.defaultProfile == "night")
-        Assert.True(IniRead(ProfileManager.configPath, "Settings", "DefaultProfile") == "night")
+        Assert.Equal("night", IniRead(ProfileManager.configPath, "Settings", "DefaultProfile", "<missing>"))
     }
 
     TestLoadCanonicalizesCaseDriftedDefaultProfile() {

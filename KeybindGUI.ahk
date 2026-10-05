@@ -70,13 +70,13 @@ class KeybindGUI {
         ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
         this.gui := Gui(, "PACS Assistant - " ProfileManager.currentProfile)
         this.gui.Add("Text",, "Current Profile: " ProfileManager.currentProfile)
-        
+
         ; Add rename button next to profile name
         this.gui.Add("Button", "x+10 yp-4 w60", "Rename").OnEvent("Click", (*) => this.PromptRenameProfile(ProfileManager.currentProfile))
-        
+
         this.gui.Add("Text", "xm y+20", "Active Keybinds:")
         y := 70
-        
+
         ; Create ListView for keybinds with adjusted column widths (removed Type column)
         lv := this.gui.Add("ListView", "xm y" y " w520 h200", ["Function", "Keybind", "Active In"])
 
@@ -112,7 +112,7 @@ class KeybindGUI {
 
         this.gui.OnEvent("Close", (*) => this.CloseMainWindow())
         this.gui.Show()
-        
+
         if applyBinds
             this.ApplyBinds()
     }
@@ -293,7 +293,7 @@ class KeybindGUI {
         try rowCount := listView.GetCount()
         catch
             return 0
-        Loop rowCount {
+        loop rowCount {
             try rowName := listView.GetText(A_Index, 1)
             catch
                 return 0
@@ -401,7 +401,7 @@ class KeybindGUI {
         ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
         selectorGui := Gui(, "PACS Assistant - Profile Selection")
         selectorGui.Add("Text",, "Select profile:")
-        
+
         ; Add profiles listbox with default profile marked
         profileNames := []
         for name, _ in ProfileManager.profiles {
@@ -409,7 +409,7 @@ class KeybindGUI {
             profileNames.Push(name (name = ProfileManager.defaultProfile ? " *" : ""))
         }
         lb := selectorGui.Add("ListBox", "w200 h150", profileNames)
-        
+
         ; If there's a default profile, select it in the listbox
         defaultIndex := this.DefaultProfileListIndex(
             profileNames,
@@ -417,19 +417,19 @@ class KeybindGUI {
         )
         if defaultIndex
             lb.Choose(defaultIndex)
-        
+
         ; Add buttons
         selectorGui.Add("GroupBox", "w190 h150", "Actions")
-        
+
         selectorGui.Add("Button", "xp+10 yp+20 w170", "Select").OnEvent("Click", (*) => this.SelectProfile(StrReplace(lb.Text, " *"), selectorGui))
         selectorGui.Add("Button", "w170", "Set as Default").OnEvent("Click", (*) => this.SetDefaultProfile(StrReplace(lb.Text, " *"), selectorGui))
         selectorGui.Add("Button", "w170", "Rename").OnEvent("Click", (*) => this.PromptRenameProfile(StrReplace(lb.Text, " *"), selectorGui))
         selectorGui.Add("Button", "w170", "Delete Profile").OnEvent("Click", (*) => this.DeleteProfile(StrReplace(lb.Text, " *"), selectorGui))
         selectorGui.Add("Button", "w170", "New Profile").OnEvent("Click", (*) => this.OpenNewProfilePrompt(selectorGui))
-        
+
         ; Add legend text
         selectorGui.Add("Text", "y+10", "* = Default Profile")
-        
+
         selectorGui.OnEvent("Close", (*) => this.CloseProfileSelector(selectorGui))
         this.RegisterProfileSelector(selectorGui)
         try selectorGui.Show()
@@ -846,13 +846,13 @@ class KeybindGUI {
             return false
 
         key := ih.EndKey
-        
+
         ; Handle Escape to cancel
         if (key = "Escape") {
             this.CancelKeybindPrompt(promptGui)
             return
         }
-        
+
         ; Skip if the key is just a modifier
         if key ~= "^[LR]?(Control|Alt|Shift|Win)$" {
             ; Create and start a new input hook since the old one is ended
@@ -863,9 +863,9 @@ class KeybindGUI {
             }
             return
         }
-        
+
         newBind := this.CapturedHotkey(ih)
-        
+
         currentProfile := ProfileManager.profiles[promptGui.profileName]
         hadBinding := currentProfile.binds.Has(funcName)
         oldBind := hadBinding ? currentProfile.binds[funcName] : ""
@@ -887,9 +887,9 @@ class KeybindGUI {
             ; Update profile
             currentProfile.binds[funcName] := newBind
             bindingChanged := true
-            
+
             ; Find and update the ListView row before destroying the prompt
-            Loop control.GetCount() {
+            loop control.GetCount() {
                 if (control.GetText(A_Index, 1) = funcName) {
                     control.Modify(A_Index,, funcName, this.PrettifyHotkey(newBind))
                     modifiedRow := A_Index
@@ -1730,10 +1730,10 @@ class KeybindGUI {
     PrettifyHotkey(hotkeyStr) {
         if (hotkeyStr = "")
             return "Unassigned"
-            
+
         modifiers := ""
         key := hotkeyStr
-        
+
         ; Extract modifiers in order
         if (InStr(key, "^")) {
             modifiers .= "Ctrl + "
@@ -1751,10 +1751,10 @@ class KeybindGUI {
             modifiers .= "Win + "
             key := StrReplace(key, "#")
         }
-        
+
         ; Capitalize the key
         key := Format("{:U}", key)
-        
+
         return modifiers key
     }
 
@@ -1912,35 +1912,35 @@ class KeybindGUI {
             return false
         }
         selectorGui := this.NewProfileDialog("PACS Assistant - Add Function")
-        
+
         ; Get list of unbound functions, separated by type
         builtInFunctions := []
         customFunctions := []
-        
+
         ; Add built-in functions that aren't bound
         for funcName, _ in PACSCommands.commands {
             if !ProfileManager.profiles[ProfileManager.currentProfile].binds.Has(funcName) {
                 builtInFunctions.Push(funcName)
             }
         }
-        
+
         ; Add ALL custom functions from current profile that aren't bound
         for funcName, _ in ProfileManager.profiles[ProfileManager.currentProfile].customFuncs {
             if !ProfileManager.profiles[ProfileManager.currentProfile].binds.Has(funcName) {
                 customFunctions.Push(funcName)
             }
         }
-        
+
         ; Add custom keybind creation button
         selectorGui.Add("Button", "w200", "Create New Custom Keybind").OnEvent("Click", (*) => (
             selectorGui.Destroy(),
             this.ShowCustomKeybindDialog(listView, selectorGui.profileName)
         ))
-        
+
         ; Add built-in functions section
         selectorGui.Add("Text", "xm y+20", "Built-in Functions:")
         lbBuiltIn := selectorGui.Add("ListBox", "w200 h150", builtInFunctions)
-        
+
         ; Add custom functions section (now always show if there are any custom functions).
         ; lbCustom stays defined either way - the Add Selected handler reads it, and an
         ; unassigned local raised an unset-variable error whenever a profile had no
@@ -1957,7 +1957,7 @@ class KeybindGUI {
         selectorGui.Add("Button", "x+10", "Cancel").OnEvent("Click", (*) => selectorGui.Destroy())
         ; The title-bar X must destroy like Cancel; Close only hides by default.
         selectorGui.OnEvent("Close", (*) => selectorGui.Destroy())
-        
+
         selectorGui.Show()
     }
 
@@ -2100,22 +2100,22 @@ class KeybindGUI {
         customGui := this.NewProfileDialog("PACS Assistant - Configure Custom Keybind", profileName)
         customGui.Add("Text",, "Name for this keybind:")
         nameEdit := customGui.Add("Edit", "w200")
-        
+
         customGui.Add("Text", "y+10", "Keys to send (e.g. {Tab}, ^c, Hello):")
         keysEdit := customGui.Add("Edit", "w200")
-        
+
         customGui.Add("Text", "y+10", "Target window (optional):")
         windowEdit := customGui.Add("Edit", "w200")
-        
+
         customGui.Add("Button", "y+10", "OK").OnEvent("Click", (*) => this.AddCustomKeybind(nameEdit.Value, keysEdit.Value, windowEdit.Value, listView, customGui))
         customGui.Add("Button", "x+10", "Cancel").OnEvent("Click", (*) => customGui.Destroy())
         ; The title-bar X must destroy like Cancel; Close only hides by default.
         customGui.OnEvent("Close", (*) => customGui.Destroy())
-        
+
         ; Add help text
         customGui.Add("Text", "y+20", "Examples:")
         customGui.Add("Text",, "{Tab} = Tab key`n^c = Ctrl+C`nHello = types 'Hello'")
-        
+
         customGui.Show()
     }
 
@@ -2133,7 +2133,7 @@ class KeybindGUI {
             MsgBox("Please enter keys to send.", "Error", "Icon!")
             return
         }
-        
+
         ; Create unique function name
         funcName := "Custom: " name
         if !ProfileManager.IsSafeIniKey(funcName) {
@@ -2182,7 +2182,7 @@ class KeybindGUI {
         } finally this.EndProfileMutationTransaction()
 
         customGui.Destroy()
-        
+
         ; Prompt user to set the keybind
         this.PromptKeybind(funcName, listView, profileName)
     }
@@ -2244,7 +2244,7 @@ class KeybindGUI {
         } finally this.EndProfileMutationTransaction()
 
         selectorGui.Destroy()
-        
+
         ; Prompt user to set the keybind
         this.PromptKeybind(funcName, listView, profileName)
         return true
@@ -2321,7 +2321,7 @@ class KeybindGUI {
             MsgBox("Please select a function to change.", "Error", "Icon!")
             return
         }
-        
+
         funcName := listView.GetText(listView.GetNext(0), 1)
         this.PromptKeybind(funcName, listView)
     }

@@ -31,10 +31,11 @@ class ProfileManager {
     static recoveryRequired := false
 
     static __New() {
-        ; Load default profile setting from config file
-        try {
-            this.defaultProfile := IniRead(this.configPath, "Settings", "DefaultProfile", "")
-        }
+        ; IniRead returns the Default for a missing file or key; an unreadable
+        ; config file leaves no default profile rather than failing startup.
+        try this.defaultProfile := IniRead(this.configPath, "Settings", "DefaultProfile", "")
+        catch OSError
+            this.defaultProfile := ""
     }
 
     ; Single construction point for a profile, so every field is always present
@@ -72,7 +73,7 @@ class ProfileManager {
 
         if DirExist(this.profilesPath) {
             this.RecoverInterruptedCaseRenames()
-            Loop Files this.profilesPath "\*.ini" {
+            loop files this.profilesPath "\*.ini" {
                 ; Remove only the enumerated extension. StrReplace removed embedded
                 ; occurrences too, so reading.ini.room.ini reloaded as reading.room.
                 profileName := SubStr(A_LoopFileName, 1, -4)
@@ -124,7 +125,7 @@ class ProfileManager {
         ; Windows. If the process or workstation stops after the first move, the
         ; bytes still exist but no longer match the normal *.ini discovery pattern.
         ; Recover that original canonical name before loading any profiles.
-        Loop Files this.profilesPath "\*.ini.case-rename-*", "F" {
+        loop files this.profilesPath "\*.ini.case-rename-*", "F" {
             temporaryPath := A_LoopFileFullPath
             if !RegExMatch(
                 A_LoopFileName,
@@ -161,6 +162,8 @@ class ProfileManager {
 
     static LoadProfile(path) {
         profile := this.NewProfile()
+        ; Reading the section list throws OSError for a missing or unreadable file,
+        ; which reports it as a load error rather than an empty profile.
         IniRead(path)
 
         ; Every profile version has written [Functions] Order, including a newly

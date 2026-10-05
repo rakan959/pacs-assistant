@@ -20,6 +20,8 @@ class Settings {
     static maxRefreshIntervalSeconds := 86400
     static dialogLogicalWidth := 400
     static dialogLogicalHeight := 420
+    ; Keys are PascalCase, unlike other map keys (style guide s4), because each one is
+    ; also the persisted settings.ini key name.
     static defaultSettings := Map(
         "AutoUpdate", true,
         "SkipBetaVersions", true,
@@ -142,7 +144,7 @@ class Settings {
         if (Type(value) != "String" || !RegExMatch(value, "^\d+$"))
             return false
         try interval := Integer(value)
-        catch
+        catch TypeError
             return false
         return true
     }
@@ -152,30 +154,28 @@ class Settings {
         fallback := this.defaultSettings.Has(settingName)
             ? this.defaultSettings[settingName]
             : false
-        try {
-            value := IniRead(this.settingsFile, "Settings", settingName, fallback)
-            ; Handle numeric values
-            if (settingName = "RefreshInterval") {
-                if !this.TryParseRefreshInterval(value, &interval)
-                    return fallback
-                return (interval >= this.minRefreshIntervalSeconds
-                    && interval <= this.maxRefreshIntervalSeconds)
-                    ? interval
-                    : fallback
-            }
-            ; Handle boolean values
-            if this.IsBooleanSetting(settingName) {
-                if (value = "1")
-                    return true
-                if (value = "0")
-                    return false
+        ; With a Default, IniRead returns it for a missing file, section or key; only
+        ; an unreadable file raises. Parsing below must not hide its own bugs.
+        try value := IniRead(this.settingsFile, "Settings", settingName, fallback)
+        catch OSError
+            return fallback
+
+        if (settingName = "RefreshInterval") {
+            if !this.TryParseRefreshInterval(value, &interval)
                 return fallback
-            }
-            ; Return string values as is
-            return value
-        } catch {
+            return (interval >= this.minRefreshIntervalSeconds
+                && interval <= this.maxRefreshIntervalSeconds)
+                ? interval
+                : fallback
+        }
+        if this.IsBooleanSetting(settingName) {
+            if (value = "1")
+                return true
+            if (value = "0")
+                return false
             return fallback
         }
+        return value
     }
 
     static WriteSetting(path, settingName, value) {
@@ -239,7 +239,9 @@ class Settings {
             else
                 FileMove(temporaryPath, this.settingsFile, true)
         } finally {
-            try FileDelete(temporaryPath)
+            ; Only a failed write or replace leaves the temporary copy behind.
+            if FileExist(temporaryPath)
+                try FileDelete(temporaryPath)
         }
         this.revision++
         return true
@@ -286,12 +288,12 @@ class Settings {
         }
         return errors
     }
-    
+
     ; Save all settings to their default values
     static SaveAllSettings() {
         this.SaveValues(this.defaultSettings)
     }
-    
+
     ; Show settings dialog
     static ShowDialog() {
         ; The presentation lease excludes every clinical, capture, profile, settings
@@ -369,7 +371,7 @@ class Settings {
             return settingsGui
         } finally this.dialogRelease.Call()
     }
-    
+
     ; Find index of sound in alertSounds array
     static FindSoundIndex(sound) {
         sound := this.NormalizeSoundName(sound)
@@ -451,7 +453,7 @@ class Settings {
         else
             MsgBox("'" selectedSound "' is not available on this machine (missing from " A_WinDir "\Media). Played the default beep instead.", "Sound Unavailable", "Icon!")
     }
-    
+
     ; Save settings from GUI
     static SaveSettings(controls, settingsGui, liveRefreshFailureNotifier?) {
         if (!HasProp(settingsGui, "settingsRevision")

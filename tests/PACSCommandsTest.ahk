@@ -39,7 +39,7 @@ class PACSCommandsTest {
         ; Profiles persist these names, so an unlisted addition must be deliberate.
         Assert.Equal(required.Length, PACSCommands.commands.Count)
     }
-    
+
     TestCreateCustomKeybindStoresConfig() {
         callback := PACSCommands.CreateCustomKeybind("^c")
         Assert.Equal("^c", callback.keys)

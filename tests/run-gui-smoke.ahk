@@ -268,7 +268,7 @@ Main() {
 }
 
 AssertScope(listView, funcName, expected) {
-    Loop listView.GetCount() {
+    loop listView.GetCount() {
         if (listView.GetText(A_Index, 1) = funcName) {
             Assert(listView.GetText(A_Index, 3) = expected, "'" funcName "' shows scope '" expected "'")
             return

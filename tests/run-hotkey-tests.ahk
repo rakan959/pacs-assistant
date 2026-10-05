@@ -61,7 +61,7 @@ PressAliasCombo() {
     firstBefore := aliasFirstFired
     secondBefore := aliasSecondFired
     SendEvent("{Esc down}{F24}{Esc up}")
-    Loop 40 {
+    loop 40 {
         Sleep(25)
         if (aliasFirstFired != firstBefore || aliasSecondFired != secondBefore)
             break
@@ -77,7 +77,7 @@ PressBehaviorCombo() {
     firstBefore := aliasFirstFired
     secondBefore := aliasSecondFired
     SendEvent("{F23 down}{F24}{F23 up}")
-    Loop 40 {
+    loop 40 {
         Sleep(25)
         if (aliasFirstFired != firstBefore || aliasSecondFired != secondBefore)
             break
@@ -95,7 +95,7 @@ Press() {
     SendEvent("^{F13}")
 
     ; Hotkeys run on their own thread; give it a chance before concluding it did not fire
-    Loop 40 {
+    loop 40 {
         Sleep(25)
         if (fired != before)
             break
@@ -128,7 +128,7 @@ Main() {
     AssertEqual(Press(), 1, "a bind re-registered after being disabled fires again")
 
     ; Repeated apply cycles, as happens when editing several keybinds in a row
-    Loop 3 {
+    loop 3 {
         HotkeyManager.DisableAllHotkeys()
         HotkeyManager.Register("Test", "^F13", Bump)
     }

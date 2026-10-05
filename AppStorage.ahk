@@ -43,7 +43,7 @@ class AppStorage {
         this.CopyIfMissing(legacyRoot "\config.ini", root "\config.ini")
         legacyProfiles := legacyRoot "\profiles"
         if DirExist(legacyProfiles) {
-            Loop Files, legacyProfiles "\*.ini", "F"
+            loop files legacyProfiles "\*.ini", "F"
                 this.CopyIfMissing(A_LoopFileFullPath, root "\profiles\" A_LoopFileName)
         }
         this.WriteMigrationMarker(marker)
@@ -70,7 +70,9 @@ class AppStorage {
             FileMove(temporary, destination, false)
             return true
         } finally {
-            try FileDelete(temporary)
+            ; Only a failed copy or move leaves the temporary file behind.
+            if FileExist(temporary)
+                try FileDelete(temporary)
         }
     }
 
@@ -81,7 +83,8 @@ class AppStorage {
             FileAppend("migration-v1`n", temporary, "UTF-8")
             FileMove(temporary, marker, true)
         } finally {
-            try FileDelete(temporary)
+            if FileExist(temporary)
+                try FileDelete(temporary)
         }
     }
 }

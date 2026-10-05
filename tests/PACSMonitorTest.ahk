@@ -40,7 +40,7 @@ class PACSMonitorTest {
         "TestFailedAlertDoesNotConsumeAccession",
         "TestCompactDateRecognitionHonorsCalendarRules"
     ]
-    
+
     Setup() {
         this.originalSettings := Settings.settingsFile
         this.originalNotifier := PACSMonitor.notifier
@@ -52,7 +52,7 @@ class PACSMonitorTest {
         this.tempSettings := TestTempPath("pacs-monitor-settings", ".ini")
         Settings.settingsFile := this.tempSettings
         Settings.SaveAllSettings()
-        
+
         PACSMonitor.driver := CountingPortalResolutionDriver()
         PACSMonitor.timerDriver := FakePACSTimerDriver()
         PACSMonitor.knownAccessions := Map()
@@ -74,7 +74,7 @@ class PACSMonitorTest {
             "refreshSecondary"
         ]
     }
-    
+
     TestCompactDateRecognitionHonorsCalendarRules() {
         for value in ["20240229", "20000229", "19991231", "20250131", "20240430"]
             Assert.True(PACSMonitor.LooksLikeCompactDate(value), value " is a real calendar date")
@@ -87,7 +87,7 @@ class PACSMonitorTest {
         PACSMonitor.MarkAccessionSeen("12345678")
         Assert.True(PACSMonitor.HasAccession("12345678"))
     }
-    
+
     TestProcessRowsFindsNewStudies() {
         studies := PACSMonitor.ProcessRows([
             {name: "CT HEAD WITHOUT CONTRAST 12345678"},
@@ -162,7 +162,7 @@ class PACSMonitorTest {
         Assert.False(PACSMonitor.HasAccession("12345678"))
         Assert.False(PACSMonitor.HasAccession("20260815"))
     }
-    
+
     ; An accession can appear in more than one row of a single refresh. It must be
     ; reported once, not once per row.
     TestRepeatedAccessionAlertsOnce() {
@@ -490,7 +490,7 @@ class PACSMonitorTest {
         Assert.Equal(0, PACSMonitor.refreshTimer)
         Assert.Equal(1, timerDriver.stopCalls)
     }
-    
+
     TestOnSettingsChangedRespectsAutoRefresh() {
         SetTestSetting("AutoRefreshPACS", true)
         PACSMonitor.StartMonitoring()
@@ -545,7 +545,7 @@ class PACSMonitorTest {
         )
         Assert.False(PACSMonitor.HasAccession("12345678"))
     }
-    
+
     Teardown() {
         PACSMonitor.StopMonitoring()
         PACSMonitor.knownAccessions := Map()
