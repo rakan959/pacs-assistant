@@ -32,10 +32,12 @@ class KeybindGUITest {
         "TestActiveCaptureBlocksSaveAndFunctionRemoval",
         "TestClinicalCommandBlocksProfileMutationAndExit",
         "TestTrayExitUsesTheSameClinicalAndCaptureGate",
+        "TestAuthorizedExitIsNotGatedAgain",
         "TestCaptureThatNeedsARestartDoesNotBlockExit",
         "TestBindForAMissingCommandIsReportedNotFailed",
         "TestBindAutoHotkeyRejectsIsReportedNotFailed",
         "TestStaleRealCaptureRestoresCurrentProfileNotSnapshot",
+        "TestStaleCaptureThatCannotRestoreStillAllowsExit",
         "TestProfileBoundDialogRejectsSameNameReplacement",
         "TestCapturedBindPublishesDirtyStateBeforeReleasingOwner",
         "TestCancelCaptureWarnsWhenPriorRuntimeCannotBeRestored",
@@ -930,6 +932,25 @@ class KeybindGUITest {
         Assert.Equal(2, editor.notifications.Length)
     }
 
+    TestAuthorizedExitIsNotGatedAgain() {
+        editor := {base: KeybindGUI.Prototype, notifications: []}
+        editor.notificationDriver := ArrayNotificationDriver(editor.notifications)
+
+        try {
+            began := editor.BeginShutdown("exit PACS Assistant")
+            ; CompleteShutdown authorizes the exit just before ExitApp, which runs
+            ; HandleProcessExit while the shutdown lease is still held.
+            KeybindGUI.shutdownAuthorized := true
+            exitResult := editor.HandleProcessExit("Exit", 0)
+            leaseHeld := ExclusiveOperations.shutdownActive
+        } finally editor.CancelShutdown()
+
+        Assert.True(began)
+        Assert.Equal(0, exitResult)
+        Assert.True(leaseHeld)
+        Assert.Equal(0, editor.notifications.Length)
+    }
+
     TestStaleRealCaptureRestoresCurrentProfileNotSnapshot() {
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := "^F13"
@@ -969,6 +990,48 @@ class KeybindGUITest {
         Assert.True(profileAbsent)
         Assert.True(runtimeAbsent)
         Assert.True(prompt.destroyed)
+    }
+
+    TestStaleCaptureThatCannotRestoreStillAllowsExit() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        listView := RemovableListView("Sign Report", "Ctrl + F13", "Any window")
+        prompt := FakeProfileDialog("Test")
+        editor := {base: StaleRestoreFailingGUI.Prototype, notifications: []}
+
+        try {
+            ProfileManager.profiles := Map("Test", profile)
+            ProfileManager.currentProfile := "Test"
+            HotkeyManager.activeHotkeys := Map()
+            Assert.True(editor.CaptureFunctionDialogState(
+                prompt,
+                "Sign Report",
+                listView,
+                1
+            ))
+            Assert.True(editor.BeginListening("Sign Report", listView, prompt))
+            hook := KeybindGUI.activeInputHook
+
+            listView.Delete(1)
+            result := editor.OnInputEnd("Sign Report", listView, prompt, hook)
+            leaseHeld := ExclusiveOperations.captureActive
+            restartRequired := ExclusiveOperations.captureRestartRequired
+            ; The notice asked for a restart, so exit must not be refused by the
+            ; capture lease the failed restore left held.
+            exitResult := editor.HandleProcessExit("Menu", 0)
+        } finally {
+            try editor.StopListening()
+            editor.CancelShutdown()
+        }
+
+        Assert.False(result)
+        Assert.True(leaseHeld)
+        Assert.True(restartRequired)
+        Assert.Equal(0, exitResult)
+        Assert.True(prompt.destroyed)
+        Assert.True(InStr(editor.notifications[1].message, "Restart PACS Assistant") > 0,
+            editor.notifications[1].message)
     }
 
     TestStaleCaptureBeforeSuspensionReleasesWithoutRuntimeMutation() {
@@ -2812,6 +2875,13 @@ class StopFailureCancelGUI extends KeybindGUI {
     RestoreCapturedRuntimeAndNotify(*) {
         this.restoreCalls++
         return true
+    }
+}
+
+class StaleRestoreFailingGUI extends CaptureMutationGuardGUI {
+    RestoreRuntimeProfile(profile, &failureText) {
+        failureText := "simulated stale restore failure"
+        return false
     }
 }
 
