@@ -32,6 +32,8 @@ class WetReadTest {
         "StickyOpenerRejectsUnreadableCandidateAlongsideValidButton",
         "StickyOpenerRejectsTitleChangeBeforeInvoke",
         "StickyOpenerRejectsDuplicateAppearingBeforeInvoke",
+        "StickyOpenerRejectsPacsFocusLostBeforeRediscovery",
+        "StickyOpenerRejectsPacsFocusLostBeforeInvoke",
         "StickyOpenerRejectsUnactivatedStickyWindow",
         "StickyOpenerRejectsPreexistingReactivatedStickyWindow",
         "NativeProcessDiscoveryIncludesHiddenUntitledWindow",
@@ -54,6 +56,7 @@ class WetReadTest {
         "StickyNoteTargetRejectsUnreadableWritableSibling",
         "NativeDirectWriteRefusesStaleStickyTarget",
         "NativeControlWithoutHandleIsUnsupported",
+        "NativeControlWriteRefusesStaleStickyTarget",
         "NativeControlWriteHasNoFocusSideEffect",
         "NativeForwardVerificationRejectsCaseOnlyDifference",
         "RoutingFailureReportsTheActualCause",
@@ -333,6 +336,29 @@ class WetReadTest {
         pacsRoot := FakeStickyTargetRoot(42, [button], 100)
         driver := FakeStickyNoteWindowDriver(pacsRoot)
         driver.exactPacsWindowCount := 2
+
+        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
+        Assert.Equal(0, driver.invokeCalls)
+    }
+
+    ; Focus is checked before the root is reacquired and again just before the
+    ; click; losing it at either point must refuse the click, even if regained.
+    StickyOpenerRejectsPacsFocusLostBeforeRediscovery() {
+        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
+        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
+        driver := FakeStickyNoteWindowDriver(pacsRoot)
+        driver.activeResults := [false, true]
+
+        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
+        Assert.Equal(0, driver.invokeCalls)
+        Assert.Equal(1, driver.rootCalls)
+    }
+
+    StickyOpenerRejectsPacsFocusLostBeforeInvoke() {
+        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
+        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
+        driver := FakeStickyNoteWindowDriver(pacsRoot)
+        driver.activeResults := [true, false]
 
         Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
         Assert.Equal(0, driver.invokeCalls)
@@ -627,6 +653,18 @@ class WetReadTest {
 
         Assert.False(driver.WriteUIA(field, "new wet read"))
         Assert.Equal(0, field.writeCalls)
+    }
+
+    NativeControlWriteRefusesStaleStickyTarget() {
+        controlDriver := FakeWetReadControlDriver()
+        driver := NativeWetReadDriver(
+            "Sticky Notes",
+            FakeWetReadTargetDriver(false),
+            controlDriver
+        )
+
+        Assert.False(driver.WriteControl({NativeWindowHandle: 555}, "new wet read"))
+        Assert.Equal(0, controlDriver.writes.Length)
     }
 
     NativeControlWithoutHandleIsUnsupported() {
@@ -1124,6 +1162,10 @@ class FakeStickyNoteWindowDriver {
             : []
         this.stickyWindowQueries := 0
         this.stickyOwner := pacsRoot.WinId
+        ; Scripted answers for successive PACS focus checks; once used up, PACS
+        ; stays active.
+        this.activeResults := []
+        this.rootCalls := 0
     }
 
     CaptureActivePacs(*) {
@@ -1131,6 +1173,7 @@ class FakeStickyNoteWindowDriver {
     }
 
     GetRoot(hwnd) {
+        this.rootCalls++
         if (hwnd = this.pacsRoot.WinId)
             return this.pacsRoot
         if (this.stickyRoot && hwnd = this.stickyRoot.WinId)
@@ -1139,6 +1182,8 @@ class FakeStickyNoteWindowDriver {
     }
 
     IsActive(hwnd) {
+        if (this.activeResults.Length && !this.activeResults.RemoveAt(1))
+            return false
         return hwnd = this.pacsRoot.WinId
     }
 
