@@ -7,6 +7,7 @@
 #Include ../WetRead.ahk
 #Include TestRunner.ahk
 #Include LogCapture.ahk
+#Include FakeWindowList.ahk
 
 class WetReadTest {
     static tests := [
@@ -22,6 +23,7 @@ class WetReadTest {
         "UnreadableNoteDoesNotAttemptPaste",
         "UnreadableNativeFieldFailsClosed",
         "StickyRootMustBelongToPacsProcess",
+        "PacsSessionRecheckRequiresTheSameUniqueWindow",
         "StickyOpenerRejectsSameProcessWrongWindowButton",
         "NativeStickyButtonReportsWhetherClickActioned",
         "AttendingFailureMessagesReadAsOneSentence",
@@ -221,6 +223,34 @@ class WetReadTest {
 
         Assert.True(NativeWetReadDriver.IsExpectedStickyRoot(pacsRoot, stickyRoot))
         Assert.False(NativeWetReadDriver.IsExpectedStickyRoot(pacsRoot, unrelatedRoot))
+    }
+
+    ; The PACS window captured before Sticky Notes opens must still be the only
+    ; exact PACS window, under the same HWND and process.
+    PacsSessionRecheckRequiresTheSameUniqueWindow() {
+        target := AppControl.VuePacsWindowSpec()
+        pacs := {hwnd: 100, title: target.title, exe: target.exe, pid: 42}
+        second := {hwnd: 101, title: target.title, exe: target.exe, pid: 42}
+        cases := [
+            {label: "same window", windows: [pacs], hwnd: 100, pid: 42, expected: true},
+            {label: "different HWND", windows: [pacs], hwnd: 101, pid: 42, expected: false},
+            {label: "different process", windows: [pacs], hwnd: 100, pid: 43, expected: false},
+            {label: "second exact window", windows: [pacs, second], hwnd: 100, pid: 42, expected: false},
+            {label: "window gone", windows: [], hwnd: 100, pid: 42, expected: false},
+            {label: "no HWND", windows: [pacs], hwnd: 0, pid: 42, expected: false}
+        ]
+        driver := NativeStickyNoteWindowDriver()
+        originalWindowDriver := AppControl.windowDriver
+        try {
+            for testCase in cases {
+                AppControl.windowDriver := FakeWindowList(testCase.windows)
+                Assert.Equal(
+                    testCase.expected,
+                    !!driver.IsExpectedPacsSession(target, testCase.hwnd, testCase.pid),
+                    testCase.label
+                )
+            }
+        } finally AppControl.windowDriver := originalWindowDriver
     }
 
     StickyOpenerRejectsSameProcessWrongWindowButton() {

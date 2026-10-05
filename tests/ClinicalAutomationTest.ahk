@@ -16,6 +16,8 @@ class ClinicalAutomationTest {
         "ActivationCanSucceedButFocusCheckStopsSend",
         "TargetedSendActivatesBeforeSending",
         "AmbiguousTargetedSendDoesNotActivateOrSend",
+        "SelectorSendStopsWhenTheWindowIsReplacedDuringActivation",
+        "ExactSendStopsWhenTheWindowIsReplacedDuringActivation",
         "ExactWindowResolverRejectsSubstringAndDuplicateMatches",
         "PacsSeriesCommandsUseExactHwndTarget",
         "BuiltInClinicalCommandUsesConfirmedTarget",
@@ -169,6 +171,41 @@ class ClinicalAutomationTest {
         Assert.False(AppControl.SendKeysToWindow("Clinical Window", "^d"))
         Assert.Equal(1, driver.calls.Length)
         Assert.Equal("list", driver.calls[1].kind)
+    }
+
+    ; The selector is resolved again after activation; a different window or process
+    ; now behind it gets no keys.
+    SelectorSendStopsWhenTheWindowIsReplacedDuringActivation() {
+        for replacement in [{hwnd: 502, pid: 42}, {hwnd: 501, pid: 43}] {
+            ; A closure cannot see the loop variable, so it captures a local copy.
+            moved := replacement
+            driver := FakeWindowDriver()
+            driver.onActivate := (activated) => activated.selectorWindows := [moved]
+            AppControl.windowDriver := driver
+
+            Assert.False(AppControl.SendKeysToWindow("Vue PACS Client", "{Right}"))
+            for call in driver.calls
+                Assert.False(call.kind = "keys", "keys reached hwnd " moved.hwnd " pid " moved.pid)
+        }
+    }
+
+    ; The exact window is resolved again after activation; a recreated window or a
+    ; new process with the same title and executable gets no keys.
+    ExactSendStopsWhenTheWindowIsReplacedDuringActivation() {
+        original := {hwnd: 601, title: AppControl.powerScribeReportingTitle, exe: AppControl.powerScribeExecutable, pid: 77}
+        AppControl.windowDriver := FakeExactWindowDriver([original])
+        Assert.True(AppControl.SendKeysToExactWindow(AppControl.PowerScribeWindowSpec(), "{F12}"))
+
+        for replacement in [{hwnd: 602, pid: 77}, {hwnd: 601, pid: 78}] {
+            moved := {hwnd: replacement.hwnd, title: original.title, exe: original.exe, pid: replacement.pid}
+            driver := FakeExactWindowDriver([original])
+            driver.onActivate := (activated) => activated.windows := [moved]
+            AppControl.windowDriver := driver
+
+            Assert.False(AppControl.SendKeysToExactWindow(AppControl.PowerScribeWindowSpec(), "{F12}"))
+            for call in driver.calls
+                Assert.False(call.kind = "keys", "keys reached hwnd " moved.hwnd " pid " moved.pid)
+        }
     }
 
     ExactWindowResolverRejectsSubstringAndDuplicateMatches() {
@@ -1163,6 +1200,8 @@ class FakeWindowDriver {
             ? selectorWindows.Clone()
             : [{hwnd: 501, pid: 42}]
         this.calls := []
+        ; Called with the driver on each activation, to change the windows mid-send.
+        this.onActivate := 0
     }
 
     ListWindows(selector) {
@@ -1184,6 +1223,8 @@ class FakeWindowDriver {
 
     Activate(title, timeoutSeconds) {
         this.calls.Push({kind: "activate", value: title, timeout: timeoutSeconds})
+        if this.onActivate
+            this.onActivate.Call(this)
         return this.activationResult
     }
 
