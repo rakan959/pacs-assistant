@@ -315,16 +315,9 @@ class HotkeyManagerTest {
 }
 
 class FakeHotkeyDriver {
-    __New(failingHotkeys := "") {
-        this.failingHotkeys := Map()
-        if (Type(failingHotkeys) = "String") {
-            if (failingHotkeys != "")
-                this.failingHotkeys[failingHotkeys] := true
-        } else {
-            for hotkeyStr in failingHotkeys
-                this.failingHotkeys[hotkeyStr] := true
-        }
-        this.disabled := []
+    ; failingHotkey: a hotkey whose Off fails, as a native failure would.
+    __New(failingHotkey := "") {
+        this.failingHotkey := failingHotkey
         this.enabled := Map()
     }
 
@@ -333,8 +326,7 @@ class FakeHotkeyDriver {
     }
 
     Disable(hotkeyStr) {
-        this.disabled.Push(hotkeyStr)
-        if this.failingHotkeys.Has(hotkeyStr)
+        if (this.failingHotkey != "" && hotkeyStr == this.failingHotkey)
             throw Error("simulated native Off failure")
     }
 }
