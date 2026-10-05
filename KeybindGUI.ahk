@@ -1204,6 +1204,7 @@ class KeybindGUI {
             try {
                 stored := ProfileManager.LoadProfile(ProfileManager.ProfilePath(profileName))
             } catch as err {
+                AppLog.Write("Saved profile '" profileName "' could not be reloaded to discard changes: " ErrorText.Describe(err))
                 this.NotifyUser(
                     "The saved profile could not be reloaded, so the unsaved changes were retained.`n`n" err.Message,
                     "Discard Failed",
@@ -1234,6 +1235,7 @@ class KeybindGUI {
                     ; Rebuild only the view; re-registering would add another failure edge.
                     this.CreateMainGUI(false)
                 } catch as err {
+                    AppLog.Write("The main window could not be refreshed after a discard: " ErrorText.Describe(err))
                     this.NotifyUser(
                         "The saved profile was restored, but the main window could not be refreshed.`n`n" err.Message,
                         "Profile View Refresh Failed",
@@ -1794,6 +1796,14 @@ class KeybindGUI {
         newName := Trim(newName)
         if (newName = "") {
             MsgBox("Profile name cannot be empty.", "Invalid Profile Name", "Icon!")
+            return false
+        }
+        if !ProfileManager.IsValidProfileName(newName) {
+            MsgBox(
+                "Enter a profile name without file-system characters or reserved Windows device names.",
+                "Invalid Profile Name",
+                "Icon!"
+            )
             return false
         }
 

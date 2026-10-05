@@ -55,6 +55,8 @@ class KeybindGUITest {
         "TestDiscardBeforeAddFunctionRequiresFreshMainWindowControl",
         "TestSaveBeforeAddFunctionOpensTheDialog",
         "TestStaleRenameDialogCannotRenameAnotherProfile",
+        "TestRenameToAnInvalidNameSaysTheNameIsInvalid",
+        "TestFailedDiscardReloadIsReportedAndLogged",
         "TestDestroyedRenameDialogCannotMutateProfile",
         "TestRenameDialogCannotMutateSameNameReplacement",
         "TestRenamePromptHonorsDirtyCancel",
@@ -1597,6 +1599,54 @@ class KeybindGUITest {
         Assert.False(ProfileManager.profiles.Has("Renamed"))
         Assert.True(dialog.destroyed)
         Assert.Equal(0, editor.createCalls)
+    }
+
+    ; An invalid new name is reported as invalid, not as possibly in use, and
+    ; nothing is renamed.
+    TestRenameToAnInvalidNameSaysTheNameIsInvalid() {
+        this.UseTempProfilesFolder()
+        profile := ProfileManager.NewProfile()
+        editor := {base: RenameRuntimeTrackingKeybindGUI.Prototype}
+        editor.createCalls := 0
+        editor.applyCalls := 0
+        editor.gui := FakeProfileDialog()
+        ProfileManager.profiles := Map("Night", profile)
+        ProfileManager.currentProfile := "Night"
+        ProfileManager.SaveProfile("Night", profile)
+
+        for invalidName in ["Night/Call", "CON", "Night."] {
+            dialog := FakeProfileDialog("Night")
+            Assert.True(editor.CaptureRenameDialogState(dialog, "Night"))
+            Assert.False(editor.RenameProfile("Night", invalidName, dialog), invalidName)
+            Assert.Equal("Invalid Profile Name", TestRunner.dialogs[-1].title, invalidName)
+            Assert.True(ProfileManager.profiles.Has("Night"), invalidName)
+        }
+        Assert.Equal(0, editor.createCalls)
+    }
+
+    ; A discard whose saved profile cannot be reloaded keeps the changes, says so,
+    ; and leaves the reason in error.log.
+    TestFailedDiscardReloadIsReportedAndLogged() {
+        this.UseTempProfilesFolder()
+        notifications := []
+        editor := {base: KeybindGUI.Prototype, gui: "", profileLeaveDriver: FixedProfileLeaveDriver("No")}
+        editor.notificationDriver := ArrayNotificationDriver(notifications)
+        ; Never saved, so there is no file to reload.
+        ProfileManager.profiles := Map("Test", ProfileManager.NewProfile())
+        ProfileManager.currentProfile := "Test"
+        editor.MarkProfileDirty("Test")
+
+        capturedLog := LogCapture()
+        try {
+            result := editor.ResolveDirtyProfileBeforeLeaving()
+            logged := capturedLog.Count("Saved profile 'Test' could not be reloaded to discard changes: ")
+        } finally capturedLog.Restore()
+
+        Assert.False(result)
+        Assert.True(editor.IsProfileDirty("Test"))
+        Assert.Equal(1, notifications.Length)
+        Assert.Equal("Discard Failed", notifications[1].title)
+        Assert.Equal(1, logged)
     }
 
     TestDestroyedRenameDialogCannotMutateProfile() {
