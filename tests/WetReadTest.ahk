@@ -90,7 +90,7 @@ class WetReadTest {
         field := PostMutationFailingWetReadElement("existing note", "new wet read")
         driver := NativeWetReadDriver(
             "Sticky Notes",
-            FakeWetReadFocusDriver(true)
+            FakeWetReadTargetDriver(true)
         )
 
         result := WetReadPasteEngine.Paste(
@@ -205,7 +205,7 @@ class WetReadTest {
     UnreadableNativeFieldFailsClosed() {
         driver := NativeWetReadDriver(
             "Sticky Notes",
-            FakeWetReadFocusDriver(true)
+            FakeWetReadTargetDriver(true)
         )
         Assert.Throws(
             () => driver.Read(UnsupportedWetReadElement()),
@@ -547,7 +547,7 @@ class WetReadTest {
         field := FakeWritableWetReadElement()
         driver := NativeWetReadDriver(
             "Sticky Notes",
-            FakeWetReadFocusDriver(false)
+            FakeWetReadTargetDriver(false)
         )
 
         Assert.False(driver.WriteUIA(field, "new wet read"))
@@ -557,7 +557,7 @@ class WetReadTest {
     NativeControlWithoutHandleIsUnsupported() {
         driver := NativeWetReadDriver(
             "Sticky Notes",
-            FakeWetReadFocusDriver(true)
+            FakeWetReadTargetDriver(true)
         )
 
         Assert.False(driver.WriteControl({NativeWindowHandle: 0}, "new wet read"))
@@ -567,7 +567,7 @@ class WetReadTest {
         controlDriver := FakeWetReadControlDriver()
         driver := NativeWetReadDriver(
             "ahk_id 200",
-            FakeWetReadFocusDriver(true),
+            FakeWetReadTargetDriver(true),
             controlDriver
         )
 
@@ -1047,7 +1047,7 @@ class FakeWetReadControlDriver {
     }
 }
 
-class FakeWetReadFocusDriver {
+class FakeWetReadTargetDriver {
     __New(matches) {
         this.matches := matches
     }

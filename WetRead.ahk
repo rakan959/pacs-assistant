@@ -1,7 +1,7 @@
 ; = CONTENTS
 ;   + Preamble
 ;   + NativeStickyNoteWindowDriver / StickyNoteOpener (Sticky Notes discovery & pinning)
-;   + NativeWetReadFocusDriver / NativeWetReadControlDriver / NativeWetReadDriver (UIA note field)
+;   + NativeWetReadTargetDriver / NativeWetReadControlDriver / NativeWetReadDriver (UIA note field)
 ;   + WetReadPasteEngine (direct write and verification; never retries or rolls back)
 ;   + CheckAttending, AttendingFailureMessage, RunPinnedWetReadWorkflow, WetRead,
 ;       PerformWetReadPaste, ConvertWetReadLineEndings, ReportWetReadPasteResult,
@@ -309,7 +309,9 @@ class StickyNoteOpener {
     }
 }
 
-class NativeWetReadFocusDriver {
+; Re-proves, right before a write, that the field is still the note field of the
+; pinned Sticky Notes window.
+class NativeWetReadTargetDriver {
     IsExpectedTarget(targetTitle, field) {
         try root := UIA.ElementFromHandle(targetTitle)
         catch
@@ -331,11 +333,11 @@ class NativeWetReadControlDriver {
 class NativeWetReadDriver {
     __New(
         targetTitle,
-        focusDriver := NativeWetReadFocusDriver(),
+        targetDriver := NativeWetReadTargetDriver(),
         controlDriver := NativeWetReadControlDriver()
     ) {
         this.targetTitle := targetTitle
-        this.focusDriver := focusDriver
+        this.targetDriver := targetDriver
         this.controlDriver := controlDriver
     }
 
@@ -352,14 +354,14 @@ class NativeWetReadDriver {
         }
     }
 
-    static ForRoot(root, focusDriver := 0, controlDriver := 0) {
+    static ForRoot(root, targetDriver := 0, controlDriver := 0) {
         hwnd := 0
         try hwnd := root.WinId
         if (hwnd <= 0)
             throw Error("Sticky Notes window handle could not be verified")
         return NativeWetReadDriver(
             "ahk_id " hwnd,
-            focusDriver ? focusDriver : NativeWetReadFocusDriver(),
+            targetDriver ? targetDriver : NativeWetReadTargetDriver(),
             controlDriver ? controlDriver : NativeWetReadControlDriver()
         )
     }
@@ -430,7 +432,7 @@ class NativeWetReadDriver {
     }
 
     Read(field) {
-        if !this.focusDriver.IsExpectedTarget(this.targetTitle, field)
+        if !this.targetDriver.IsExpectedTarget(this.targetTitle, field)
             throw Error("Sticky Notes value cannot be read safely")
         result := UIAValue.TryRead(field)
         if !result.supported
@@ -439,13 +441,13 @@ class NativeWetReadDriver {
     }
 
     WriteUIA(field, value) {
-        if !this.focusDriver.IsExpectedTarget(this.targetTitle, field)
+        if !this.targetDriver.IsExpectedTarget(this.targetTitle, field)
             return false
         return UIAValue.Write(field, value)
     }
 
     WriteControl(field, value) {
-        if !this.focusDriver.IsExpectedTarget(this.targetTitle, field)
+        if !this.targetDriver.IsExpectedTarget(this.targetTitle, field)
             return false
         hwnd := 0
         try hwnd := field.NativeWindowHandle
