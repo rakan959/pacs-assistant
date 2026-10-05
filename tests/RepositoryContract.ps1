@@ -42,6 +42,10 @@ function Assert-NotMatches {
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $workflow = Get-Content -Raw (Join-Path $repoRoot '.github/workflows/ahk2exe.yml')
+# The workflow without comments, for checks that a trailing "# ..." must not defeat.
+$workflowCode = $workflow -replace '(?m)\s+#.*$', ''
+$jobsSection = [regex]::Match($workflowCode, '(?ms)^jobs:\s*$.*').Value
+$jobs = [regex]::Matches($jobsSection, '(?ms)^  (?<name>[A-Za-z0-9_-]+):\s*$(?<body>.*?)(?=^  [A-Za-z0-9_-]+:\s*$|\z)')
 $gitmodules = Get-Content -Raw (Join-Path $repoRoot '.gitmodules')
 $readme = Get-Content -Raw (Join-Path $repoRoot 'README.md')
 $issueTemplate = Get-Content -Raw (Join-Path $repoRoot '.github/ISSUE_TEMPLATE/bug_report.md')
@@ -100,8 +104,13 @@ Assert-Matches $workflow '(?m)^\s*AUTOHOTKEY_SOURCE_SHA256:\s*765ada5ae0a543f470
 Assert-Matches $workflow '(?m)^\s*AHK2EXE_VERSION:\s*1\.1\.37\.02a2\s*$' 'CI must pin Ahk2Exe v1.1.37.02a2.'
 Assert-Matches $workflow '(?m)^\s*AHK2EXE_SHA256:\s*c29b8c3a5124850d79fc9e66e2ca79677c377d7f31631ad3022ba159c5d9e3be\s*$' 'CI must verify the official Ahk2Exe v1.1.37.02a2 ZIP digest.'
 Assert-Matches $workflow '(?m)^\s*pull_request:\s*$' 'Pull requests must run the non-release build and validation job.'
-if ([regex]::Matches($workflow, '(?m)^\s{4}timeout-minutes:\s*\d+\s*$').Count -ne 2) {
-    $failures.Add('Both CI jobs must define bounded timeout-minutes values.')
+if ($jobs.Count -lt 2) {
+    $failures.Add('The workflow must define its build and release jobs.')
+}
+foreach ($job in $jobs) {
+    if ($job.Groups['body'].Value -notmatch '(?m)^\s{4}timeout-minutes:\s*\d+\s*$') {
+        $failures.Add("CI job '$($job.Groups['name'].Value)' must define a bounded timeout-minutes value.")
+    }
 }
 Assert-Matches $workflow '(?m)^\s*- name: Run unit tests\s*\r?\n\s+timeout-minutes:\s*\d+\s*$' 'The unit-test step must have its own timeout so a blocked harness fails fast.'
 $unitStep = [regex]::Match($workflow, '(?ms)^\s*- name: Run unit tests\s*$.*?(?=^\s*- name:|\z)').Value
@@ -136,17 +145,18 @@ foreach ($ahkSource in $ahkSources) {
     }
 }
 
-Assert-Matches $workflow '(?m)^permissions:\s*\r?\n  contents:\s*read\s*$' 'The top-level workflow token permission must be contents: read.'
-Assert-NotMatches $workflow '(?m)^\s*permissions:\s*(read|write)-all\s*$' 'Workflow token permissions must name each scope, not read-all or write-all.'
-Assert-Matches $workflow '(?ms)^\s{2}release:\s.*?^\s{4}permissions:\s*\r?\n\s{6}contents:\s*write\s*$' 'Only the release job may request contents: write.'
+Assert-Matches $workflowCode '(?m)^permissions:\s*\r?\n  contents:\s*read\s*$' 'The top-level workflow token permission must be contents: read.'
+Assert-NotMatches $workflowCode '(?m)^\s*permissions:[ \t]*\S' 'Workflow token permissions must be block mappings that name each scope, not an inline value such as write-all or { ... }.'
+Assert-NotMatches $workflowCode '\b(?:read|write)-all\b' 'Workflow token permissions must name each scope, not read-all or write-all.'
+Assert-Matches $workflowCode '(?ms)^\s{2}release:\s.*?^\s{4}permissions:\s*\r?\n\s{6}contents:\s*write\s*$' 'Only the release job may request contents: write.'
 # Any scope (contents, actions, id-token, ...) counts: the release job's contents:
 # write is the only write permission in the workflow.
-if ([regex]::Matches($workflow, '(?m)^\s*[a-z-]+:\s*write\s*$').Count -ne 1) {
+if ([regex]::Matches($workflowCode, '(?m)^\s*[a-z-]+:\s*write\s*$').Count -ne 1) {
     $failures.Add('Exactly one write permission, the release job''s contents: write, may appear in the workflow.')
 }
 Assert-Matches $workflow '(?m)^\s*runs-on:\s*windows-2025\s*$' 'The build job must use a versioned Windows runner image.'
 Assert-Matches $workflow '(?m)^\s*runs-on:\s*ubuntu-24\.04\s*$' 'The release job must use a versioned Ubuntu runner image.'
-Assert-NotMatches $workflow '(?m)^\s*runs-on:\s*\S+-latest\s*$' 'Workflow runner labels must not float on -latest.'
+Assert-NotMatches $workflowCode '(?m)^\s*runs-on:\s*\S+-latest\b' 'Workflow runner labels must not float on -latest.'
 Assert-Matches $workflow '(?m)^\s*& tests/RepositoryContract\.ps1\s*$' 'CI must run the repository contract check.'
 # #Warn leaves AutoHotkey's exit code at 0, so both AutoHotkey steps scan the output.
 if ([regex]::Matches($workflow, 'Select-String -LiteralPath \$stdout, \$stderr -SimpleMatch ''==> Warning:'' -Quiet').Count -ne 2) {
@@ -408,9 +418,10 @@ foreach ($fixture in @(
     }
 }
 
-Assert-NotMatches $workflow '(?m)^\s*packages:\s*write\s*$' 'The workflow must not request unused packages: write permission.'
-if ([regex]::Matches($workflow, '(?m)^\s*persist-credentials:\s*false\s*$').Count -ne 2) {
-    $failures.Add('Both checkouts must set persist-credentials: false; the build job runs downloaded tools.')
+$checkoutCount = [regex]::Matches($workflowCode, '(?m)^\s*(?:-\s+)?uses:\s*actions/checkout@').Count
+$credentialsOff = [regex]::Matches($workflowCode, '(?m)^\s*persist-credentials:\s*false\s*$').Count
+if ($checkoutCount -lt 1 -or $credentialsOff -ne $checkoutCount) {
+    $failures.Add('Every checkout must set persist-credentials: false; the build job runs downloaded tools.')
 }
 Assert-NotMatches $workflow '(?i)benmusson/ahk2exe-action|softprops/action-gh-release' 'Build and release must not delegate downloaded binaries or release authority to third-party actions.'
 Assert-NotMatches $workflow 'Ahk2Exe-SetCopyright\s+MIT' 'Executable copyright metadata must not mislabel the GPL-3.0 project as MIT.'
