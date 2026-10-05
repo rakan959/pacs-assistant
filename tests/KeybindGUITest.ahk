@@ -433,7 +433,7 @@ class KeybindGUITest {
     }
 
     TestActiveCaptureBlocksSaveAndFunctionRemoval() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := "^F13"
         profile.scopes["Sign Report"] := "Any"
@@ -691,7 +691,7 @@ class KeybindGUITest {
     }
 
     TestProfileDeletionOwnsSelectorAcrossConfirmation() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         selector := ReentrantSelectorDialog()
         editor := {
             base: ProfileSelectorTransactionGUI.Prototype,
@@ -1263,7 +1263,7 @@ class KeybindGUITest {
     }
 
     TestStaleModalityDialogCannotWriteAnotherProfile() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         profileA := ProfileManager.NewProfile()
         profileA.modalityAttendings["Neuro"] := "A Attending"
         profileB := ProfileManager.NewProfile()
@@ -1286,7 +1286,7 @@ class KeybindGUITest {
     }
 
     TestOlderModalityDialogCannotOverwriteNewerSave() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         profile := ProfileManager.NewProfile()
         profile.modalityAttendings["Neuro"] := "Old Attending"
 
@@ -1315,7 +1315,7 @@ class KeybindGUITest {
     }
 
     TestDirtyKeybindMutationInvalidatesModalityDialog() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := "^F13"
         profile.scopes["Sign Report"] := "Any"
@@ -1370,7 +1370,7 @@ class KeybindGUITest {
     }
 
     TestPreexistingDirtyProfileBlocksCustomDeletion() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := "^F13"
         profile.scopes["Sign Report"] := "Any"
@@ -1444,7 +1444,7 @@ class KeybindGUITest {
     }
 
     TestStaleRenameDialogCannotRenameAnotherProfile() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         profileA := ProfileManager.NewProfile()
         profileB := ProfileManager.NewProfile()
         dialog := FakeProfileDialog("A")
@@ -1528,7 +1528,7 @@ class KeybindGUITest {
     }
 
     TestCaseOnlyRenamePersistsResolvedDirtyChanges() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := ""
         profile.scopes["Sign Report"] := "Any"
@@ -1561,7 +1561,7 @@ class KeybindGUITest {
     }
 
     TestSaveChoiceRejectsProfileChangedDuringDirtyPrompt() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         prompted := ProfileManager.NewProfile()
         prompted.binds["Sign Report"] := "^F13"
         prompted.scopes["Sign Report"] := "Any"
@@ -1645,7 +1645,7 @@ class KeybindGUITest {
     }
 
     TestSuccessfulMainRenameDoesNotReapplyHotkeys() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         profile := ProfileManager.NewProfile()
         dialog := FakeProfileDialog("Old")
         editor := {base: RenameRuntimeTrackingKeybindGUI.Prototype}
@@ -1710,7 +1710,7 @@ class KeybindGUITest {
     }
 
     TestClosingSavesDirtyProfileBeforeExit() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := ""
         profile.scopes["Sign Report"] := "Any"
@@ -1820,7 +1820,7 @@ class KeybindGUITest {
     }
 
     TestProfileSwitchCanDiscardDirtyChanges() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := ""
         profile.scopes["Sign Report"] := "Any"
@@ -1998,7 +1998,7 @@ class KeybindGUITest {
     }
 
     TestStaleCustomDeleteCannotDeleteRecreatedCommand() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         profile := ProfileManager.NewProfile()
         profile.binds["Custom: Keep"] := "^F23"
         profile.scopes["Custom: Keep"] := "Any"
@@ -2029,7 +2029,7 @@ class KeybindGUITest {
     }
 
     TestCustomDeleteRejectsConcurrentUnrelatedDirtyEdit() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         profile := ProfileManager.NewProfile()
         profile.binds["Custom: Keep"] := "^F23"
         profile.scopes["Custom: Keep"] := "Any"
@@ -2141,7 +2141,7 @@ class KeybindGUITest {
     }
 
     TestSavedProfileFailsWhenRuntimeCannotBeVerified() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := "^F13"
         profile.scopes["Sign Report"] := "Any"
@@ -2172,7 +2172,7 @@ class KeybindGUITest {
     }
 
     TestConcurrentMutationDuringSaveRemainsDirtyAndRestoresNewRuntime() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         profile := ProfileManager.NewProfile()
         profile.binds["Sign Report"] := "^F13"
         profile.scopes["Sign Report"] := "Any"
@@ -2233,7 +2233,7 @@ class KeybindGUITest {
     }
 
     TestStaleProfileDeleteCannotDeleteRecreatedProfile() {
-        tempRoot := this.UseTempProfilesFolder()
+        this.UseTempProfilesFolder()
         oldProfile := ProfileManager.NewProfile()
         otherProfile := ProfileManager.NewProfile()
         selector := FakeProfileDialog()
@@ -2373,8 +2373,6 @@ class ThrowingDeleteListView extends RemovableListView {
 }
 
 class PassiveRuntimeKeybindGUI extends KeybindGUI {
-    applyCalls := 0
-
     ApplyProfileCandidate(*) {
         this.applyCalls++
         return true

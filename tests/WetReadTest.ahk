@@ -1029,8 +1029,6 @@ class FakeStickyNoteWindowDriver {
         this.stickyWindowQueries++
         return this.postClickStickyWindows.Clone()
     }
-
-
 }
 
 class FakeWetReadControlDriver {
@@ -1051,7 +1049,6 @@ class FakeWetReadTargetDriver {
     IsExpectedTarget(*) {
         return this.matches
     }
-
 }
 
 ; The real NativeStickyNoteWindowDriver gate over scripted Win32 primitives, so the
