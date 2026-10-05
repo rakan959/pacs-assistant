@@ -127,6 +127,10 @@ jobs:
             if ($process.ExitCode -ne 0) {
               throw "Syntax validation failed for $script (exit $($process.ExitCode))"
             }
+            # A #Warn warning prints to stdout but leaves the exit code at 0.
+            if (Select-String -LiteralPath $stdout, $stderr -SimpleMatch '==> Warning:' -Quiet) {
+              throw "AutoHotkey reported warnings for $script"
+            }
           }
 
       # Its own timeout: a harness that blocks on a desktop dialog must fail fast rather
@@ -146,6 +150,9 @@ jobs:
           if (Test-Path -LiteralPath $stderr) { Get-Content $stderr }
           if ($process.ExitCode -ne 0) {
             throw "Unit tests failed (exit $($process.ExitCode))"
+          }
+          if (Select-String -LiteralPath $stdout, $stderr -SimpleMatch '==> Warning:' -Quiet) {
+            throw "AutoHotkey reported warnings for the unit tests"
           }
 
       - name: Compile

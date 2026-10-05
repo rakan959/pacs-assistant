@@ -148,6 +148,10 @@ Assert-Matches $workflow '(?m)^\s*& tests/RepositoryContract\.ps1\s*$' 'CI must 
 Assert-Matches $workflow '(?m)^\s*& scripts/GenerateVersion\.ps1\b' 'CI must generate Version.ahk through the tested version script.'
 Assert-Matches $workflow '(?m)^\s*licenses/AutoHotkey-v2\.0\.26\.txt\s*$' 'Release artifacts must include the AutoHotkey runtime license.'
 Assert-Matches $workflow 'https://github\.com/AutoHotkey/AutoHotkey/archive/refs/tags/v\$\(\$env:AUTOHOTKEY_VERSION\)\.zip' 'CI must download source from the exact AutoHotkey version tag.'
+# #Warn leaves AutoHotkey's exit code at 0, so both AutoHotkey steps scan the output.
+if ([regex]::Matches($workflow, 'Select-String -LiteralPath \$stdout, \$stderr -SimpleMatch ''==> Warning:'' -Quiet').Count -ne 2) {
+    $failures.Add('Syntax validation and the unit tests must each fail CI on an AutoHotkey warning.')
+}
 Assert-Matches $workflow '(?m)^\s*AutoHotkey-v2\.0\.26-source\.zip\s*$' 'Build artifacts must include the AutoHotkey corresponding-source archive.'
 Assert-Matches $workflow "Join-Path \`$PWD 'release/AutoHotkey-v2\.0\.26-source\.zip'" 'Tagged releases must publish the AutoHotkey corresponding-source archive.'
 Assert-NotMatches $workflow '\$env:RELEASE_TAG\.Contains\(''-''\)' 'Release publication must not classify build-metadata hyphens as prerelease markers.'

@@ -134,7 +134,8 @@ $archive = 'C:\path\to\download.zip'
 ## Tests
 
 All suites exit non-zero on failure. The three AutoHotkey runners use a headless
-preamble (`#ErrorStdOut`, `#Warn All, StdOut`), so warnings print to stdout and an
+preamble (`#ErrorStdOut`, `#Warn All, StdOut`), so warnings print to stdout (CI and the
+helper below fail on any warning, which alone leaves the exit code at 0) and an
 uncaught runtime error is written to stderr and exits with code 10 instead of opening a
 dialog that would block an unattended run. Two exceptions: the GUI smoke runner reports
 an error that escapes its checks as `FATAL` on stdout and exits 1, and the unit runner
@@ -149,10 +150,21 @@ function Invoke-AutoHotkeyChecked {
   param([Parameter(Mandatory)][string[]] $ArgumentList)
 
   # AutoHotkey is a GUI-subsystem executable. Start-Process is required here so
-  # PowerShell waits for completion and observes the suite's real exit code.
-  $process = Start-Process -FilePath $ahk -ArgumentList $ArgumentList -NoNewWindow -Wait -PassThru
-  if ($process.ExitCode -ne 0) {
-    throw "AutoHotkey failed with exit code $($process.ExitCode): $($ArgumentList -join ' ')"
+  # PowerShell waits for completion and observes the suite's real exit code. The
+  # output is captured because a #Warn warning does not change that exit code.
+  $output = New-TemporaryFile
+  try {
+    $process = Start-Process -FilePath $ahk -ArgumentList $ArgumentList -NoNewWindow -Wait -PassThru `
+      -RedirectStandardOutput $output
+    Get-Content -LiteralPath $output
+    if ($process.ExitCode -ne 0) {
+      throw "AutoHotkey failed with exit code $($process.ExitCode): $($ArgumentList -join ' ')"
+    }
+    if (Select-String -LiteralPath $output -SimpleMatch '==> Warning:' -Quiet) {
+      throw "AutoHotkey reported warnings: $($ArgumentList -join ' ')"
+    }
+  } finally {
+    Remove-Item -LiteralPath $output -ErrorAction SilentlyContinue
   }
 }
 
