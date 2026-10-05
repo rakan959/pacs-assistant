@@ -73,6 +73,9 @@ class PACSMonitor {
     static consecutiveRefreshFailures := 0
     static refreshFailureThreshold := 3
     static refreshFailureNotified := false
+    ; With no approved refresh control, refresh is unavailable rather than failing;
+    ; that is said once per run.
+    static refreshUnavailableNoted := false
     static consecutiveScanFailures := 0
     static scanFailureThreshold := 3
     static scanFailureNotified := false
@@ -273,6 +276,8 @@ class PACSMonitor {
 
     static RecordRefreshResult(succeeded) {
         if succeeded {
+            if this.refreshFailureNotified
+                AppLog.Write("PACS auto-refresh is working again")
             this.consecutiveRefreshFailures := 0
             this.refreshFailureNotified := false
             return
@@ -284,11 +289,23 @@ class PACSMonitor {
             ; Logged once per failure episode, with the notice.
             AppLog.Write("PACS auto-refresh is not working: " this.consecutiveRefreshFailures " consecutive refreshes failed")
             this.Notify(
-                "Explorer Portal could not be refreshed safely. Monitoring may be stale; refresh and check the worklist manually until this warning clears.",
+                "Explorer Portal could not be refreshed safely. Monitoring may be stale; refresh and check the worklist manually.",
                 "PACS auto-refresh is not working",
                 "Icon!"
             )
         }
+    }
+
+    static NoteRefreshUnavailable() {
+        if this.refreshUnavailableNoted
+            return
+        this.refreshUnavailableNoted := true
+        AppLog.Write("PACS auto-refresh is unavailable: no Explorer Portal refresh control is approved")
+        this.Notify(
+            "PACS Assistant cannot refresh Explorer Portal yet, so it checks the worklist only as Explorer Portal shows it. Refresh the worklist yourself to see new studies.",
+            "PACS auto-refresh unavailable",
+            "Icon!"
+        )
     }
 
     static Notify(text, title, options := "") {
@@ -382,7 +399,10 @@ class PACSMonitor {
         ; global clinical automation lease. A user command can run during the wait;
         ; the scan phase must then reacquire the lease and revalidate the pinned
         ; session before touching UIA again.
-        this.RecordRefreshResult(refreshed)
+        if (this.approvedRefreshAutomationIds.Length = 0)
+            this.NoteRefreshUnavailable()
+        else
+            this.RecordRefreshResult(refreshed)
         if refreshed {
             try this.driver.WaitForRefresh()
             catch as err {

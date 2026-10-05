@@ -38,6 +38,7 @@ class PACSMonitorTest {
         "TestOnSettingsChangedRespectsAutoRefresh",
         "TestRefreshFailureNotificationUsesTextThenTitle",
         "TestScanFailuresNotifyOnceAndReset",
+        "TestUnapprovedRefreshIsReportedOnceAsUnavailable",
         "TestNewStudyNotificationUsesTextThenTitle",
         "TestFailedAlertDoesNotConsumeAccession",
         "TestCompactDateRecognitionHonorsCalendarRules"
@@ -61,6 +62,7 @@ class PACSMonitorTest {
         PACSMonitor.refreshTimer := 0
         PACSMonitor.consecutiveRefreshFailures := 0
         PACSMonitor.refreshFailureNotified := false
+        PACSMonitor.refreshUnavailableNoted := false
         PACSMonitor.consecutiveScanFailures := 0
         PACSMonitor.scanFailureNotified := false
         PACSMonitor.lastError := ""
@@ -494,16 +496,57 @@ class PACSMonitorTest {
         try {
             loop PACSMonitor.refreshFailureThreshold + 2
                 PACSMonitor.RecordRefreshResult(false)
+            PACSMonitor.RecordRefreshResult(true)
+            PACSMonitor.RecordRefreshResult(true)
         } finally {
             logged := capturedLog.Count("PACS auto-refresh is not working: ")
+            recovered := capturedLog.Count("PACS auto-refresh is working again")
             capturedLog.Restore()
         }
         Assert.Equal(1, logged)
+        Assert.Equal(1, recovered)
 
         Assert.Equal(1, this.notifications.Length)
         Assert.True(InStr(this.notifications[1].text, "Monitoring may be stale") > 0)
         Assert.True(InStr(this.notifications[1].text, "manually") > 0)
         Assert.Equal("PACS auto-refresh is not working", this.notifications[1].title)
+    }
+
+    ; With no approved refresh control nothing can be clicked. That is a property of
+    ; the build, not a failing refresh, so it is said once instead of as a recurring
+    ; failure episode.
+    TestUnapprovedRefreshIsReportedOnceAsUnavailable() {
+        PACSMonitor.approvedRefreshAutomationIds := []
+        session := {
+            hwnd: 100,
+            target: "ahk_id 100",
+            processId: 42,
+            title: "Explorer Portal",
+            exe: "msedge.exe"
+        }
+        capturedLog := LogCapture()
+        try {
+            loop PACSMonitor.refreshFailureThreshold + 2 {
+                PACSMonitor.driver := PinnedPortalMonitorDriver(
+                    session,
+                    FakePACSActionButton(42, 100, "Refresh", "refreshPrimary"),
+                    FakePACSStudyList(42, 100)
+                )
+                PACSMonitor.RefreshAndCheck()
+            }
+            loggedUnavailable := capturedLog.Count("PACS auto-refresh is unavailable")
+            loggedFailures := capturedLog.Count("PACS auto-refresh is not working")
+        } finally capturedLog.Restore()
+
+        titles := []
+        for notification in this.notifications
+            titles.Push(notification.title)
+        Assert.Equal(1, loggedUnavailable)
+        Assert.Equal(0, loggedFailures)
+        Assert.Equal(0, PACSMonitor.consecutiveRefreshFailures)
+        Assert.Equal(1, titles.Length)
+        Assert.Equal("PACS auto-refresh unavailable", titles[1])
+        Assert.True(InStr(this.notifications[1].text, "yourself"), this.notifications[1].text)
     }
 
     TestScanFailuresNotifyOnceAndReset() {
@@ -562,6 +605,7 @@ class PACSMonitorTest {
         PACSMonitor.automationRelease := this.originalAutomationRelease
         PACSMonitor.consecutiveScanFailures := 0
         PACSMonitor.scanFailureNotified := false
+        PACSMonitor.refreshUnavailableNoted := false
         PACSMonitor.lastError := ""
         try FileDelete(Settings.settingsFile)
         Settings.settingsFile := this.originalSettings

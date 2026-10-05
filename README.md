@@ -30,7 +30,8 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
   AutomationId has been approved in the repository.
 - New study detection with tray notifications and optional sounds
 - Alert sounds are backed by distinct files, so the options are audibly different
-- Warns if the refresh button can't be found instead of failing silently
+- Says once per run that Explorer Portal cannot be refreshed while no refresh control is
+  approved, and warns if an approved refresh keeps failing, instead of failing silently
 
 ### Updates
 - Optional auto-check for updates
@@ -83,8 +84,9 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - Assignments are per profile, so a call shift assigned by modality can be its own profile.
 
 ## Settings
-- PACS monitoring interval and refresh-attempt toggle (semantic refresh clicking remains
-  disabled until the exact live control identity is approved)
+- Auto refresh PACS: turns on new-study scanning at the set interval, and the refresh
+  click before each scan (semantic refresh clicking remains disabled until the exact
+  live control identity is approved)
 - Convert clipboard line endings (LF→CRLF) for wet reads
 - PowerScribe: set microphone on login, and the name to match. An exact name is
   preferred; a partial name such as `PowerMic` is accepted only when exactly one
