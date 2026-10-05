@@ -7,6 +7,10 @@
  */
 class JsonParser {
     static nullValue := {isJsonNull: true}
+    ; \G anchors each scan at the current position, so no suffix copy is needed.
+    static plainRunPattern := '\G[^"\\\x00-\x1F]+'
+    static numberPattern := "\G-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?"
+    static whitespacePattern := "\G[ \t\r\n]+"
 
     static Parse(text) {
         parser := JsonParser(text)
@@ -106,16 +110,21 @@ class JsonParser {
         slash := Chr(92)
         quote := Chr(34)
 
-        while (this.position <= this.length) {
+        loop {
+            ; Copy each run of ordinary characters in one step. Character-at-a-time
+            ; appends made long release notes the dominant parse cost.
+            if RegExMatch(this.text, JsonParser.plainRunPattern, &plainRun, this.position) {
+                result .= plainRun[0]
+                this.position += plainRun.Len[0]
+            }
+            if (this.position > this.length)
+                throw ValueError("Unterminated JSON string")
+
             char := this.Take()
             if (char == quote)
                 return result
-            if (Ord(char) < 0x20)
+            if !(char == slash)
                 throw ValueError("Unescaped control character in JSON string", , this.position - 1)
-            if !(char == slash) {
-                result .= char
-                continue
-            }
 
             if (this.position > this.length)
                 throw ValueError("Unterminated JSON escape sequence")
@@ -138,8 +147,6 @@ class JsonParser {
                 throw ValueError("Invalid JSON escape sequence", , this.position - 1)
             }
         }
-
-        throw ValueError("Unterminated JSON string")
     }
 
     ParseUnicodeEscape() {
@@ -170,8 +177,7 @@ class JsonParser {
     }
 
     ParseNumber() {
-        remaining := SubStr(this.text, this.position)
-        if !RegExMatch(remaining, "^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?", &match)
+        if !RegExMatch(this.text, JsonParser.numberPattern, &match, this.position)
             throw ValueError("Expected a JSON value", , this.position)
         token := match[0]
         this.position += StrLen(token)
@@ -179,10 +185,8 @@ class JsonParser {
     }
 
     SkipWhitespace() {
-        while (this.position <= this.length
-            && InStr(" `t`r`n", SubStr(this.text, this.position, 1))) {
-            this.position++
-        }
+        if RegExMatch(this.text, JsonParser.whitespacePattern, &whitespace, this.position)
+            this.position += whitespace.Len[0]
     }
 
     Peek() {

@@ -34,8 +34,6 @@ class UpdateCheckerTest {
         "TestReadOnlyInstallDirectoryBlocksUpdateBeforeShutdown",
         "TestUpdaterPathFailureReleasesShutdownTransaction",
         "TestVersionComesFromAppVersion",
-        "TestJsonParserHandlesEscapesAndUnicode",
-        "TestJsonParserRejectsUppercaseTokensAndEscapes",
         "TestReleaseParserKeepsAssetMetadataTogether",
         "TestReleaseParserAcceptsArrayResponse",
         "TestReleaseParserRejectsOversizedAsset",
@@ -200,32 +198,6 @@ class UpdateCheckerTest {
     ; place and cannot drift from the tag it was built from
     TestVersionComesFromAppVersion() {
         Assert.Equal(AppVersion.current, UpdateChecker.currentVersion)
-    }
-
-    TestJsonParserHandlesEscapesAndUnicode() {
-        parsed := JsonParser.Parse('{"text":"line 1\nquote: \"ok\"; slash: \\n; smile: \u263A; emoji: \uD83D\uDE00"}')
-        Assert.Equal("line 1`nquote: `"ok`"; slash: \n; smile: " Chr(0x263A) "; emoji: " Chr(0x1F600), parsed["text"])
-    }
-
-    TestJsonParserRejectsUppercaseTokensAndEscapes() {
-        invalidCases := [
-            {input: "TRUE", error: "Expected a JSON value"},
-            {input: "False", error: "Expected a JSON value"},
-            {input: "NULL", error: "Expected a JSON value"},
-            {input: '"\N"', error: "Invalid JSON escape sequence"},
-            {input: '"\U263A"', error: "Invalid JSON escape sequence"}
-        ]
-        for invalidCase in invalidCases {
-            Assert.Throws(
-                ObjBindMethod(this, "ParseInvalidJson", invalidCase.input),
-                invalidCase.error,
-                "Invalid JSON was accepted: " invalidCase.input
-            )
-        }
-    }
-
-    ParseInvalidJson(input) {
-        return JsonParser.Parse(input)
     }
 
     TestReleaseParserKeepsAssetMetadataTogether() {

@@ -3,6 +3,7 @@
 #Include TestRunner.ahk
 #Include TestRunnerTest.ahk
 #Include AppStorageTest.ahk
+#Include JsonParserTest.ahk
 #Include UpdateCheckerTest.ahk
 #Include SettingsTest.ahk
 #Include PACSMonitorTest.ahk
@@ -17,6 +18,7 @@
 
 TestRunner.AddTest(TestRunnerTest)
 TestRunner.AddTest(AppStorageTest)
+TestRunner.AddTest(JsonParserTest)
 TestRunner.AddTest(UpdateCheckerTest)
 TestRunner.AddTest(SettingsTest)
 TestRunner.AddTest(PACSMonitorTest)
