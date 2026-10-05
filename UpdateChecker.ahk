@@ -1239,6 +1239,7 @@ class UpdateChecker {
             }
 
             ; Create update dialog with modern styling
+            ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
             updateGui := Gui(, "PACS Assistant - Update Available")
             updateGui.settingsRevision := Settings.revision
             updateGui.SetFont("s10", "Segoe UI")  ; Modern font

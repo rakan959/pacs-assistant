@@ -57,6 +57,7 @@ class KeybindGUI {
     }
 
     CreateMainGUI(applyBinds := true) {
+        ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
         this.gui := Gui(, "PACS Assistant - " ProfileManager.currentProfile)
         this.gui.Add("Text",, "Current Profile: " ProfileManager.currentProfile)
         
@@ -226,6 +227,7 @@ class KeybindGUI {
         if !ownerGui && this.HasMainWindow()
             ownerGui := this.gui
         options := this.GuiIsLive(ownerGui) ? "+Owner" ownerGui.Hwnd : ""
+        ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
         dialog := Gui(options, title)
         dialog.profileName := profileName
         if (profileName != "" && ProfileManager.profiles.Has(profileName)) {
@@ -391,6 +393,7 @@ class KeybindGUI {
             try WinActivate("ahk_id " this.profileSelectorGui.Hwnd)
             return this.profileSelectorGui
         }
+        ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
         selectorGui := Gui(, "PACS Assistant - Profile Selection")
         selectorGui.Add("Text",, "Select profile:")
         
@@ -509,6 +512,7 @@ class KeybindGUI {
     }
 
     PromptNewProfile() {
+        ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
         inputGui := Gui(, "PACS Assistant - Create New Profile")
         inputGui.Add("Text",, "Enter profile name:")
         nameEdit := inputGui.Add("Edit", "w200")

@@ -312,6 +312,7 @@ class Settings {
             return false
         }
         try {
+            ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
             settingsGui := Gui(, "PACS Assistant - Settings")
             settingsGui.settingsRevision := this.revision
             settingsGui.SetFont("s10", "Segoe UI")

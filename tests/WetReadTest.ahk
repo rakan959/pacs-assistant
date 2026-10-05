@@ -855,21 +855,6 @@ class FakeStickyNoteWindowDriver {
     }
 }
 
-class FakeWetReadWindowDriver {
-    __New(active) {
-        this.active := active
-        this.sent := []
-    }
-
-    IsActive(title) {
-        return this.active
-    }
-
-    SendKeys(keys) {
-        this.sent.Push(keys)
-    }
-}
-
 class FakeWetReadControlDriver {
     __New() {
         this.writes := []

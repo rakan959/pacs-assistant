@@ -805,6 +805,7 @@ PerformWetReadPaste(clipText, pasteMode, stickySession) {
 }
 
 PromptWetReadMode() {
+    ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
     modeGui := Gui("+AlwaysOnTop", "Wet Read Paste Mode")
     modeGui.Add("Text",, "Select paste method for this run:")
 
@@ -814,6 +815,9 @@ PromptWetReadMode() {
     modeGui.Add("Button", "w200", "UIA Value pattern").OnEvent("Click", (*) => (choice := "uia", modeGui.Destroy()))
     modeGui.Add("Button", "w200", "ControlSetText").OnEvent("Click", (*) => (choice := "control", modeGui.Destroy()))
     modeGui.Add("Button", "w200", "Cancel").OnEvent("Click", (*) => (choice := "cancel", modeGui.Destroy()))
+    ; The X button must destroy, not merely hide: WinWaitClose returns only on
+    ; destruction, and a hidden Gui object would outlive this function.
+    modeGui.OnEvent("Close", (*) => modeGui.Destroy())
     modeGui.Show()
     WinWaitClose(modeGui.Hwnd)
     return choice
