@@ -18,7 +18,8 @@ class UpdateVerificationTest {
         "DownloadRejectsUntrustedArgumentsBeforeConnecting",
         "MetadataRequestRejectsInvalidConstruction",
         "MetadataRequestTimesOutOnlyPastItsBudget",
-        "MetadataRequestReportsAsyncWinHttpErrors"
+        "MetadataRequestReportsAsyncWinHttpErrors",
+        "CallbackSubscriptionCoversEveryHandledStatus"
     ]
 
     Setup() {
@@ -230,6 +231,12 @@ class UpdateVerificationTest {
         Assert.Equal(12002, request.scheduled[1].params[1].Number)
         Assert.Equal("Fail", request.scheduled[2].method)
         Assert.True(InStr(request.scheduled[2].params[1].Message, "asynchronous request failed"))
+    }
+
+    CallbackSubscriptionCoversEveryHandledStatus() {
+        ; The mask is derived from the named statuses; this pins it to the value the
+        ; request used before the constants were named.
+        Assert.Equal(0x006A0800, WinHttpTextRequest.callbackFlags)
     }
 
     NewMetadataRequest(maximumSize) {
