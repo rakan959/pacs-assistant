@@ -56,6 +56,8 @@ class KeybindGUITest {
         "TestSaveBeforeAddFunctionOpensTheDialog",
         "TestStaleRenameDialogCannotRenameAnotherProfile",
         "TestRenameToAnInvalidNameSaysTheNameIsInvalid",
+        "TestRenameDialogRefusesAProfileEditedSinceItOpened",
+        "TestApplyBindsReleasesTheLeaseItTook",
         "TestFailedDiscardReloadIsReportedAndLogged",
         "TestDestroyedRenameDialogCannotMutateProfile",
         "TestRenameDialogCannotMutateSameNameReplacement",
@@ -1622,6 +1624,51 @@ class KeybindGUITest {
             Assert.True(ProfileManager.profiles.Has("Night"), invalidName)
         }
         Assert.Equal(0, editor.createCalls)
+    }
+
+    ; An edit made in place while the rename dialog was open (capture, Add Function,
+    ; scope) keeps the profile object and revision; renaming would clear that
+    ; unsaved edit, so the dialog is refused instead.
+    TestRenameDialogRefusesAProfileEditedSinceItOpened() {
+        this.UseTempProfilesFolder()
+        profile := ProfileManager.NewProfile()
+        editor := {base: RenameRuntimeTrackingKeybindGUI.Prototype}
+        editor.createCalls := 0
+        editor.applyCalls := 0
+        editor.gui := FakeProfileDialog()
+        ProfileManager.profiles := Map("Night", profile)
+        ProfileManager.currentProfile := "Night"
+        ProfileManager.SaveProfile("Night", profile)
+        dialog := FakeProfileDialog("Night")
+        Assert.True(editor.CaptureRenameDialogState(dialog, "Night"))
+
+        profile.binds["Sign Report"] := "^F13"
+        editor.MarkProfileDirty("Night")
+        result := editor.RenameProfile("Night", "Day", dialog)
+
+        Assert.False(result)
+        Assert.True(ProfileManager.profiles.Has("Night"))
+        Assert.False(ProfileManager.profiles.Has("Day"))
+        Assert.True(editor.IsProfileDirty("Night"))
+    }
+
+    ; With no lease held, as at startup, ApplyBinds takes the profile lease for its
+    ; own work and releases it, so clinical commands can run afterwards.
+    TestApplyBindsReleasesTheLeaseItTook() {
+        editor := {base: KeybindGUI.Prototype, gui: ""}
+        HotkeyManager.hotkeyFunctions := Map("Sign Report", (*) => 0)
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        PACSCommands.commandAvailabilityProbe := (*) => ExclusiveOperations.Active("clinical") = ""
+
+        Assert.True(editor.ApplyBinds())
+        Assert.True(HotkeyManager.activeHotkeys.Has("Sign Report"))
+        Assert.Equal("", ExclusiveOperations.Active())
+        lease := PACSCommands.AcquireClinicalAutomation("Sign Report")
+        PACSCommands.ReleaseClinicalAutomation()
+        Assert.Equal("acquired", lease.status)
     }
 
     ; A discard whose saved profile cannot be reloaded keeps the changes, says so,
