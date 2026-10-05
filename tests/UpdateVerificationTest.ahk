@@ -75,7 +75,9 @@ class UpdateVerificationTest {
         artifact := this.CopyRunningInterpreter()
         wrongDigest := (SubStr(artifact.sha256, 1, 1) = "0" ? "1" : "0") SubStr(artifact.sha256, 2)
         parsed := UpdateChecker.ParseVersion(artifact.version)
-        wrongVersion := "v" parsed.major "." parsed.minor "." (parsed.patch + 1)
+        wrongMajor := "v" (parsed.major + 1) "." parsed.minor "." parsed.patch
+        wrongMinor := "v" parsed.major "." (parsed.minor + 1) "." parsed.patch
+        wrongPatch := "v" parsed.major "." parsed.minor "." (parsed.patch + 1)
 
         cases := [
             {label: "size", size: artifact.size + 1, digest: artifact.sha256, version: artifact.version},
@@ -83,7 +85,9 @@ class UpdateVerificationTest {
             {label: "digest", size: artifact.size, digest: wrongDigest, version: artifact.version},
             {label: "prefixed digest", size: artifact.size, digest: "sha256:" artifact.sha256, version: artifact.version},
             {label: "short digest", size: artifact.size, digest: SubStr(artifact.sha256, 2), version: artifact.version},
-            {label: "version", size: artifact.size, digest: artifact.sha256, version: wrongVersion}
+            {label: "major version", size: artifact.size, digest: artifact.sha256, version: wrongMajor},
+            {label: "minor version", size: artifact.size, digest: artifact.sha256, version: wrongMinor},
+            {label: "patch version", size: artifact.size, digest: artifact.sha256, version: wrongPatch}
         ]
         for testCase in cases {
             Assert.False(
