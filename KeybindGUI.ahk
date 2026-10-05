@@ -1089,7 +1089,7 @@ class KeybindGUI {
                 )
             }
 
-            MsgBox("Profile saved successfully!", "Success")
+            MsgBox("Profile saved successfully!", "Success", "Icon!")
             this.ClearProfileDirty(profileName)
             return true
         } finally this.EndProfileMutationTransaction()

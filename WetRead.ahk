@@ -719,7 +719,7 @@ WetRead() {
     return RunPinnedWetReadWorkflow(
         clipText,
         pasteMode,
-        (*) => StickyNoteOpener().Open({title: "Vue PACS", exe: "mp.exe"}),
+        (*) => StickyNoteOpener().Open(AppControl.VuePacsWindowSpec()),
         (*) => PowerScribe.CaptureReport(),
         (reportText, session) => CheckAttending(reportText, session),
         PerformWetReadPaste
