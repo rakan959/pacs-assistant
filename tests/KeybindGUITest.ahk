@@ -1508,27 +1508,32 @@ class KeybindGUITest {
         Assert.Equal(0, editor.notices)
     }
 
+    ; A main-window rename dialog captured for one profile is otherwise intact here;
+    ; once another profile is current its OK must not rename the captured one.
     TestStaleRenameDialogCannotRenameAnotherProfile() {
         this.UseTempProfilesFolder()
         profileA := ProfileManager.NewProfile()
         profileB := ProfileManager.NewProfile()
         dialog := FakeProfileDialog("A")
+        editor := {base: RenameRuntimeTrackingKeybindGUI.Prototype}
+        editor.createCalls := 0
+        editor.applyCalls := 0
+        editor.gui := FakeProfileDialog()
 
         ProfileManager.defaultProfile := ""
         ProfileManager.profiles := Map("A", profileA, "B", profileB)
-        ProfileManager.currentProfile := "B"
+        ProfileManager.currentProfile := "A"
         ProfileManager.SaveProfile("A", profileA)
-        try this.gui.RenameProfile("A", "Renamed", dialog)
+        Assert.True(editor.CaptureRenameDialogState(dialog, "A"))
+        ProfileManager.currentProfile := "B"
+        result := editor.RenameProfile("A", "Renamed", dialog)
 
-        keptA := ProfileManager.profiles.Has("A")
-        keptB := ProfileManager.profiles.Has("B")
-        createdRename := ProfileManager.profiles.Has("Renamed")
-        capturedDestroyed := dialog.destroyed
-
-        Assert.True(keptA)
-        Assert.True(keptB)
-        Assert.False(createdRename)
-        Assert.True(capturedDestroyed)
+        Assert.False(result)
+        Assert.True(ProfileManager.profiles.Has("A"))
+        Assert.True(ProfileManager.profiles.Has("B"))
+        Assert.False(ProfileManager.profiles.Has("Renamed"))
+        Assert.True(dialog.destroyed)
+        Assert.Equal(0, editor.createCalls)
     }
 
     TestDestroyedRenameDialogCannotMutateProfile() {
