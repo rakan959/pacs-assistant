@@ -59,8 +59,7 @@ class UpdateCheckerTest {
 
     ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
     static helpers := [
-        "NewUpdaterScripts",
-        "UpdaterScriptNames",
+        "LaunchedScriptPath",
         "UseTestInstall"
     ]
 
@@ -725,18 +724,17 @@ class UpdateCheckerTest {
         result := UpdateChecker.PerformUpdate(updateInfo, updateGui)
 
         newExe := this.installRoot "\pacs-assistant.new.exe"
-        scripts := this.NewUpdaterScripts()
         Assert.True(result)
         Assert.Equal(1, transport.downloads.Length)
         Assert.Equal(updateInfo.downloadUrl, transport.downloads[1].url)
         Assert.Equal(newExe, transport.downloads[1].destination)
         Assert.True(FileExist(newExe), "the verified download must stay staged for the updater")
-        Assert.Equal(1, scripts.Length)
-        Assert.Equal(UpdateChecker.BuildUpdaterScript(), FileRead(scripts[1], "UTF-8"))
         Assert.Equal(1, launches.Length)
+        scriptPath := this.LaunchedScriptPath(launches[1])
+        Assert.Equal(UpdateChecker.BuildUpdaterScript(), FileRead(scriptPath, "UTF-8"))
         Assert.Equal(this.installRoot, launches[1].workingDirectory)
         Assert.Equal(UpdateChecker.UpdaterCommand(
-            scripts[1],
+            scriptPath,
             this.installRoot "\pacs-assistant.exe",
             newExe,
             this.installRoot "\pacs-assistant.backup.exe"
@@ -777,11 +775,10 @@ class UpdateCheckerTest {
             Assert.True(InStr(TestRunner.dialogs[-1].text, testCase.reason), testCase.label)
         }
         Assert.Equal(0, launches.Length)
-        Assert.Equal(0, this.NewUpdaterScripts().Length)
     }
 
-    ; A download that fails verification is deleted, and no updater script is written
-    ; or launched to install it.
+    ; A download that fails verification is deleted, and no updater is launched to
+    ; install it.
     TestRejectedDownloadIsDiscardedWithoutLaunchingTheUpdater() {
         launches := this.UseTestInstall()
         updateInfo := InterpreterUpdateInfo()
@@ -798,7 +795,6 @@ class UpdateCheckerTest {
         Assert.False(result)
         Assert.Equal(1, transport.downloads.Length)
         Assert.False(FileExist(this.installRoot "\pacs-assistant.new.exe"))
-        Assert.Equal(0, this.NewUpdaterScripts().Length)
         Assert.Equal(0, launches.Length)
         Assert.Equal(0, updateGui.destroyCalls)
         Assert.Equal(1, coordinator.cancelCalls)
@@ -829,8 +825,9 @@ class UpdateCheckerTest {
         UpdateChecker.compiledProbe := this.originalCompiledProbe
         UpdateChecker.launchUpdater := this.originalLaunchUpdater
         if (this.installRoot != "") {
-            for path in this.NewUpdaterScripts()
-                try FileDelete(path)
+            ; A launch is only recorded, so the script it names is still on disk.
+            for launch in this.launches
+                try FileDelete(this.LaunchedScriptPath(launch))
             try DirDelete(this.installRoot, true)
         }
         UpdateChecker.skippedVersion := ""
@@ -845,32 +842,19 @@ class UpdateCheckerTest {
     UseTestInstall() {
         this.installRoot := TestTempPath("update-install")
         DirCreate(this.installRoot)
-        this.updaterScriptsBefore := this.UpdaterScriptNames()
         UpdateChecker.installDirectory := this.installRoot
         UpdateChecker.installedExecutable := this.installRoot "\pacs-assistant.exe"
         UpdateChecker.compiledProbe := (*) => true
-        launches := []
+        launches := this.launches := []
         UpdateChecker.launchUpdater := (command, workingDirectory) => launches.Push(
             {command: command, workingDirectory: workingDirectory}
         )
         return launches
     }
 
-    ; Updater scripts written to the temp folder since UseTestInstall.
-    NewUpdaterScripts() {
-        paths := []
-        for name in this.UpdaterScriptNames() {
-            if !this.updaterScriptsBefore.Has(name)
-                paths.Push(A_Temp "\" name)
-        }
-        return paths
-    }
-
-    UpdaterScriptNames() {
-        names := Map()
-        loop files A_Temp "\pacs-assistant-updater-*.ps1"
-            names[A_LoopFileName] := true
-        return names
+    ; The updater script a recorded launch would run, or "" when it names none.
+    LaunchedScriptPath(launch) {
+        return RegExMatch(launch.command, '-File "([^"]+)"', &match) ? match[1] : ""
     }
 }
 
