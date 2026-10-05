@@ -164,6 +164,8 @@ class TestRunnerTest {
         Assert.Equal(root "\settings.ini", Settings.settingsFile)
         Assert.Equal(root "\config.ini", ProfileManager.configPath)
         Assert.Equal(root "\profiles", ProfileManager.profilesPath)
+        ; Otherwise settings and profiles beside the scripts would be migrated in.
+        Assert.Equal(root, AppStorage.LegacyRoot())
     }
 
     SetupFailureIsCountedAndDoesNotStopTheClass() {
@@ -248,8 +250,8 @@ class TestRunnerTest {
     }
 
     ; The exit codes the README documents for CI, observed from a separate process:
-    ; 10 for an uncaught error, 11 for a run that exits before every test ran or
-    ; that ran no test at all.
+    ; 10 for an uncaught error, 11 for a run that exits before every test ran (here
+    ; after one has passed) or that ran no test at all.
     HarnessExitCodesReachTheProcess() {
         SplitPath(A_LineFile, , &testsDir)
         root := TestTempPath("pacs-harness-exit")
@@ -273,7 +275,9 @@ class TestRunnerTest {
             UseIsolatedDataRoot("pacs-harness-exit-probe")
             #Include %TESTS%\TestRunner.ahk
             class ExitingProbe {
-                static tests := ["ExitsMidRun"]
+                static tests := ["Passes", "ExitsMidRun"]
+                Passes() {
+                }
                 ExitsMidRun() {
                     ExitApp(0)
                 }
