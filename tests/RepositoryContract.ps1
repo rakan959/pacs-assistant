@@ -246,8 +246,10 @@ if ([regex]::Matches($workflow, '& scripts/AssertReleaseTagCommit\.ps1').Count -
     $failures.Add('Release publication must verify the tag commit both before release handling and immediately before publishing a new draft.')
 }
 Assert-Matches $workflow '(?ms)Resolve-ReleaseTagCommit.*?AssertReleaseTagCommit\.ps1.*?\$release\s*=\s*Find-ReleaseByTag' 'Release handling must reject a moved tag before either the existing- or new-release branch.'
-Assert-Matches $workflow "(?ms)'release',\s*'create'.*?'--draft'.*?'release',\s*'upload'.*?Resolve-ReleaseTagCommit.*?AssertReleaseTagCommit\.ps1.*?'release',\s*'edit'.*?'--draft=false'" 'New releases must remain drafts through asset upload and a second exact tag-commit check.'
-Assert-Matches $workflow '(?s)\$uploadedDraft\s*=\s*Find-ReleaseByTag.*?ValidateExistingRelease\.ps1.*?-ExpectedDraft \$true.*?--draft=false' 'Uploaded draft bytes and metadata must be revalidated before publication.'
+Assert-Matches $workflow '(?s)\$createdDraft = Invoke-GitHubJson -Method POST.*?draft = \$true.*?uploads\.github\.com.*?Resolve-ReleaseTagCommit.*?AssertReleaseTagCommit\.ps1.*?Invoke-GitHubJson -Method PATCH' 'New releases must remain drafts through asset upload and a second exact tag-commit check.'
+Assert-Matches $workflow '(?s)\$uploadedDraft\s*=\s*Invoke-GitHubJson.*?ValidateExistingRelease\.ps1.*?-ExpectedDraft \$true.*?draft = \$false' 'Uploaded draft bytes and metadata must be revalidated before publication.'
+Assert-NotMatches $workflow "'release',\s*'(?:upload|edit)'" 'Release uploads and publication must never rediscover their target by tag.'
+Assert-Matches $workflow '\$latestPolicy = if \(\$expectedPrerelease\) \{ ''false'' \} else \{ ''legacy'' \}' 'Publication must explicitly preserve stable semantic latest-selection and exclude prereleases.'
 Assert-Matches $workflow '(?s)--paginate.*?--slurp.*?releases\?per_page=100.*?FindReleaseByTag\.ps1' 'Release discovery must include authenticated draft releases across every API page.'
 Assert-Matches $workflow '(?ms)^concurrency:\s*\r?\n\s+group:\s*\$\{\{\s*github\.workflow\s*\}\}-\$\{\{\s*github\.ref\s*\}\}\s*\r?\n\s+cancel-in-progress:\s*false' 'Workflow runs for the same ref must be serialized so one rerun cannot delete another active draft.'
 Assert-Matches $workflow '(?s)if \(\$release -and \$release\.draft\).*?ValidateOwnedDraftRelease\.ps1.*?--method DELETE' 'A rerun must validate and remove only its own interrupted draft before recreating it.'
@@ -260,6 +262,9 @@ if (-not (Test-Path -LiteralPath $releaseFinderPath -PathType Leaf)) {
 [[{"id":11,"tag_name":"v1.0.0","draft":false}],[{"id":22,"tag_name":"v2.0.0","draft":true}]]
 '@
     $draft = & $releaseFinderPath -ReleaseJson $releasePagesJson -ReleaseTag 'v2.0.0'
+    if ($draft -isnot [pscustomobject] -or $draft.PSObject.Properties.Name -cnotcontains 'draft') {
+        $failures.Add('Release discovery must return the release object itself, so validators see its own JSON properties.')
+    }
     if ($draft.id -ne 22 -or -not $draft.draft) {
         $failures.Add('Release discovery did not recover an interrupted draft by exact tag.')
     }
@@ -818,6 +823,12 @@ if (-not (Test-Path -LiteralPath $autoHotkeyLicensePath -PathType Leaf)) {
     $autoHotkeyLicense = Get-Content -Raw $autoHotkeyLicensePath
     Assert-Matches $autoHotkeyLicense 'GNU GENERAL PUBLIC LICENSE\s+Version 2' 'The AutoHotkey license copy must include GPL version 2.'
     Assert-Matches $autoHotkeyLicense 'PCRE LICENCE' 'The AutoHotkey license copy must retain the bundled PCRE notice.'
+}
+
+try {
+    & (Join-Path $PSScriptRoot 'ReleaseWorkflowTest.ps1')
+} catch {
+    $failures.Add("The release workflow regression fixtures failed: $($_.Exception.Message)")
 }
 
 if ($failures.Count -gt 0) {

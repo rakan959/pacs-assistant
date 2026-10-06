@@ -291,8 +291,11 @@ boundary in GitHub settings:
 - add a tag ruleset for `v*` that restricts updates and deletions.
 
 CI compares the tag's resolved commit with the workflow commit before release handling,
-creates new releases as drafts, uploads their assets, repeats that comparison, and only
-then publishes the draft. The API comparison and publication are separate operations,
+creates new releases as drafts, captures their database ID, uploads and validates their
+assets by that ID, repeats the tag comparison, and only then publishes the same draft.
+Stable publication uses GitHub's `legacy` latest-selection policy (creation date and
+semantic version); prereleases are never marked latest. The API comparison and
+publication are separate operations,
 so the tag ruleset closes the remaining ref-movement window. The EXE's file properties
 are stamped at compile time in the build job, from the tag via the generated
 `Version.ahk`; the release job generates release notes from the commits and publishes

@@ -34,5 +34,5 @@ if ($matchedReleases.Count -gt 1) {
     throw "GitHub returned multiple releases for exact tag '$ReleaseTag'."
 }
 if ($matchedReleases.Count -eq 1) {
-    Write-Output -NoEnumerate $matchedReleases[0]
+    return $matchedReleases[0]
 }

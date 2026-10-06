@@ -245,17 +245,38 @@ jobs:
           $expectedPrerelease = $env:RELEASE_TAG -match '^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)-'
 
           function Invoke-GitHubJson {
-            param([Parameter(Mandatory)][string] $Endpoint)
+            param(
+              [Parameter(Mandatory)][string] $Endpoint,
+              [ValidateSet('GET', 'POST', 'PATCH')][string] $Method = 'GET',
+              [hashtable] $Body,
+              [string] $InputFile = ''
+            )
 
-            $output = @(& gh api `
-              --method GET `
-              --header 'Accept: application/vnd.github+json' `
-              --header 'X-GitHub-Api-Version: 2022-11-28' `
-              $Endpoint 2>&1)
-            if ($LASTEXITCODE -ne 0) {
-              throw "GitHub API request failed for '$Endpoint': $($output -join ' ')"
+            $requestFile = $null
+            try {
+              $apiArguments = @(
+                'api', '--method', $Method,
+                '--header', 'Accept: application/vnd.github+json',
+                '--header', 'X-GitHub-Api-Version: 2022-11-28',
+                $Endpoint
+              )
+              if ($null -ne $Body) {
+                $requestFile = New-TemporaryFile
+                [IO.File]::WriteAllText($requestFile.FullName, ($Body | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+                $apiArguments += @('--input', $requestFile.FullName, '--header', 'Content-Type: application/json')
+              } elseif ($InputFile) {
+                $apiArguments += @('--input', $InputFile, '--header', 'Content-Type: application/octet-stream')
+              }
+              $output = @(& gh @apiArguments 2>&1)
+              if ($LASTEXITCODE -ne 0) {
+                throw "GitHub API $Method request failed for '$Endpoint': $($output -join ' ')"
+              }
+              return ($output -join "`n") | ConvertFrom-Json
+            } finally {
+              if ($null -ne $requestFile) {
+                Remove-Item -LiteralPath $requestFile.FullName -Force
+              }
             }
-            return ($output -join "`n") | ConvertFrom-Json
           }
 
           function Resolve-ReleaseTagCommit {
@@ -325,47 +346,30 @@ jobs:
             $createdDraftId = 0
             $published = $false
             try {
-              $createArguments = @(
-                'release',
-                'create',
-                $env:RELEASE_TAG,
-                '--repo',
-                $env:GITHUB_REPOSITORY,
-                '--title',
-                $env:RELEASE_TAG,
-                '--generate-notes',
-                '--verify-tag',
-                '--draft'
-              )
-              if ($expectedPrerelease) {
-                $createArguments += '--prerelease'
-              }
-              & gh @createArguments
-              if ($LASTEXITCODE -ne 0) {
-                throw "GitHub draft release creation failed (exit $LASTEXITCODE)"
-              }
-
-              $createdDraft = Find-ReleaseByTag
-              if (-not $createdDraft) {
-                throw "The newly created draft could not be discovered."
-              }
+              # Capture the response object's ID directly; all later mutations and
+              # reads address that same release, even if another same-tag draft appears.
+              $createdDraft = Invoke-GitHubJson -Method POST `
+                -Endpoint "repos/$env:GITHUB_REPOSITORY/releases" `
+                -Body @{
+                  tag_name = $env:RELEASE_TAG
+                  target_commitish = $env:EXPECTED_COMMIT
+                  name = $env:RELEASE_TAG
+                  generate_release_notes = $true
+                  draft = $true
+                  prerelease = $expectedPrerelease
+                  make_latest = 'false'
+                }
               & scripts/ValidateOwnedDraftRelease.ps1 `
                 -Release $createdDraft `
                 -ReleaseTag $env:RELEASE_TAG `
                 -ExpectedPrerelease $expectedPrerelease
               $createdDraftId = [long] $createdDraft.id
 
-              $uploadArguments = @(
-                'release',
-                'upload',
-                $env:RELEASE_TAG
-              ) + $assets + @(
-                '--repo',
-                $env:GITHUB_REPOSITORY
-              )
-              & gh @uploadArguments
-              if ($LASTEXITCODE -ne 0) {
-                throw "GitHub release asset upload failed (exit $LASTEXITCODE)"
+              foreach ($asset in $assets) {
+                $assetName = [Uri]::EscapeDataString([IO.Path]::GetFileName($asset))
+                $null = Invoke-GitHubJson -Method POST `
+                  -Endpoint "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$createdDraftId/assets?name=$assetName" `
+                  -InputFile $asset
               }
 
               $actualTagCommit = Resolve-ReleaseTagCommit $encodedTag
@@ -373,7 +377,10 @@ jobs:
                 -ExpectedCommitSha $env:EXPECTED_COMMIT `
                 -ActualTagCommitSha $actualTagCommit
 
-              $uploadedDraft = Find-ReleaseByTag
+              $uploadedDraft = Invoke-GitHubJson "repos/$env:GITHUB_REPOSITORY/releases/$createdDraftId"
+              if ($uploadedDraft.id -ne $createdDraftId) {
+                throw 'The uploaded release does not match the created draft ID.'
+              }
               & scripts/ValidateExistingRelease.ps1 `
                 -Release $uploadedDraft `
                 -ReleaseTag $env:RELEASE_TAG `
@@ -383,30 +390,31 @@ jobs:
                 -ActualTagCommitSha $actualTagCommit `
                 -Assets $assets
 
-              $publishArguments = @(
-                'release',
-                'edit',
-                $env:RELEASE_TAG,
-                '--repo',
-                $env:GITHUB_REPOSITORY,
-                '--verify-tag',
-                '--draft=false'
-              )
-              & gh @publishArguments
-              if ($LASTEXITCODE -ne 0) {
-                throw "GitHub draft release publication failed (exit $LASTEXITCODE)"
+              $latestPolicy = if ($expectedPrerelease) { 'false' } else { 'legacy' }
+              $publishedRelease = Invoke-GitHubJson -Method PATCH `
+                -Endpoint "repos/$env:GITHUB_REPOSITORY/releases/$createdDraftId" `
+                -Body @{ draft = $false; make_latest = $latestPolicy }
+              if ($publishedRelease.id -ne $createdDraftId) {
+                throw 'The publication response does not match the created draft ID.'
               }
+              & scripts/ValidateExistingRelease.ps1 `
+                -Release $publishedRelease `
+                -ReleaseTag $env:RELEASE_TAG `
+                -ExpectedPrerelease $expectedPrerelease `
+                -ExpectedCommitSha $env:EXPECTED_COMMIT `
+                -ActualTagCommitSha $actualTagCommit `
+                -Assets $assets
               $published = $true
             } catch {
               $publicationError = $_
               if ($createdDraftId -gt 0 -and -not $published) {
                 $disposition = 'leave'
                 try {
-                  # The edit request may have reached GitHub even when the CLI lost
+                  # The PATCH request may have reached GitHub even when the CLI lost
                   # its success response. Re-read server state before any deletion:
                   # a matching published release is success, while only the same
                   # workflow-owned object still proven to be a draft may be cleaned.
-                  $failedRelease = Find-ReleaseByTag
+                  $failedRelease = Invoke-GitHubJson "repos/$env:GITHUB_REPOSITORY/releases/$createdDraftId"
                   $disposition = & scripts/ClassifyReleaseAfterPublishFailure.ps1 `
                     -Release $failedRelease `
                     -CreatedDraftId $createdDraftId `
