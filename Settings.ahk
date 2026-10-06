@@ -34,7 +34,6 @@ class Settings {
         "MessageBoxNewCase", false,
         "AlertSound", "Default Beep",  ; Name from alertSounds
         "CustomSoundFile", "",         ; Path to custom sound file
-        "AutoConvertWetReadLineEndings", true,  ; Convert LF to CRLF when pasting wet reads
         "SwapMicrophoneOnLogin", false,
         "MicrophoneName", "",          ; Blank = leave PowerScribe's selection alone
         ; Superseded by per-bind scopes, kept only so profiles written under the older
@@ -50,7 +49,6 @@ class Settings {
         "AutoRefreshPACS",
         "AudioAlertNewCase",
         "MessageBoxNewCase",
-        "AutoConvertWetReadLineEndings",
         "SwapMicrophoneOnLogin",
         "RestrictHotkeysByActiveWindow"
     ]
@@ -303,11 +301,10 @@ class Settings {
             settingsGui.Add("GroupBox", "x35 y55 w330 h75", "Updates")
             checkboxes["AutoUpdate"] := settingsGui.Add("Checkbox", "x50 y78", "Automatically check for updates")
             checkboxes["SkipBetaVersions"] := settingsGui.Add("Checkbox", "x50 y103", "Skip beta versions")
-            settingsGui.Add("GroupBox", "x35 y140 w330 h175", "PACS and wet reads")
+            settingsGui.Add("GroupBox", "x35 y140 w330 h115", "PACS")
             checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x50 y165", "Auto refresh PACS")
             settingsGui.Add("Text", "x50 y195", "Refresh interval (seconds):")
             refreshIntervalEdit := settingsGui.Add("Edit", "x50 y218 w75 Number", this.Get("RefreshInterval"))
-            checkboxes["AutoConvertWetReadLineEndings"] := settingsGui.Add("Checkbox", "x50 y258", "Convert clipboard line endings")
 
             tab.UseTab(2)
             settingsGui.Add("GroupBox", "x35 y55 w330 h140", "PowerScribe login")

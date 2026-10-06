@@ -8,7 +8,8 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - Toggle Dictation, Draft Report, Sign Report
 - Select Next/Previous Field, Delete Previous/Next Word
 - Open/Force Restart PACS (legacy command name): asks PowerScribe to close, requires any save prompt to be completed manually, and closes only revalidated PACS/portal windows. It never force-kills a process by executable basename; an unverified or stuck close cancels the restart.
-- Paste Wet Read (optional LF→CRLF conversion; choose a verified UIA Value or ControlSetText write)
+- Paste Wet Read: types the clipboard into a new Vue PACS sticky note and saves it once
+  the whole note has landed
 - Toggle PowerScribe, Next/Previous Series. The legacy **Toggle EPIC Window**
   command remains loadable for profile compatibility but deliberately performs no
   window action until a stable exact Hyperspace title/executable identity is captured.
@@ -61,15 +62,17 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 
 3) **Wet read workflow**
 - Copy your wet read text to clipboard.
-- Use the wet read hotkey; if prompted, pick a verified direct-write method (UIA Value or ControlSetText). PACS Assistant does not synthesize Ctrl+V because the system clipboard can change between validation and paste delivery.
-  The workflow first pins a newly created Sticky Notes window for the active PACS
-  study; a pre-existing/reused or ownerless window is rejected.
-- The source clipboard is read once and never rewritten. The app performs one verified
-  direct write after confirming the original note is unchanged. If another actor changes
-  the note, it does not retry or roll back over that newer value. No clinical note is
-  staged into clipboard history or cloud synchronization.
-- "Convert clipboard line endings" in Settings (on by default) normalizes LF→CRLF
-  before pasting; turn it off to paste the text exactly as copied.
+- With the study open in Vue PACS, use the wet read hotkey. PACS Assistant presses the
+  study's Sticky Notes button and takes the Sticky Notes window that opens (a new one,
+  or one PACS brings to the front); a Sticky Notes window left in the background is
+  never used.
+- In that window it starts a new note, picks the note type, and types the text. It
+  presses Save only after the note reads back with the whole text. If the note cannot
+  be read back or does not fill within a few seconds, it leaves the note unsaved and
+  tells you to check it and click Save.
+- The clipboard is read once and never rewritten. Each line break is typed as one
+  Enter, tabs become spaces, and trailing blank lines are dropped. The note text is
+  never written to `error.log`.
 
 4) **Keybind scope**
 - Select a bind and click **Set Scope**.
@@ -90,7 +93,6 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
   click before each scan (semantic refresh clicking remains disabled until the exact
   live control identity is approved). Off by default. The scan runs only while a new-case
   sound or Windows notification is also on, since alerts are all it is used for.
-- Convert clipboard line endings (LF→CRLF) for wet reads; on by default
 - PowerScribe: set microphone on login, and the name to match. An exact name is
   preferred; a partial name such as `PowerMic` is accepted only when exactly one
   full device name matches.
@@ -231,7 +233,7 @@ if ($process.ExitCode -ne 0) {
 | `AppControl.ahk` | Restarting PACS, the save-changes prompt, window toggles |
 | `WetRead.ahk` | The wet-read workflow |
 | `ClinicalNotices.ahk` | Result dialogs of clinical commands, shown once the command releases its lease |
-| `UIAValue.ahk` | Safe UIA value read/write |
+| `UIAValue.ahk` | Safe UIA value reads |
 | `UIAElementIdentity.ahk` | UIA element identity checks used when revalidating targets |
 | `PACSMonitor.ahk` | Worklist polling and new-study alerts |
 | `MicrophoneManager.ahk` | Microphone selection on the PowerScribe login screen |

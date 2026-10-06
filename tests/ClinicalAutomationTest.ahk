@@ -509,15 +509,14 @@ class ClinicalAutomationTest {
         ClinicalNotices.presenter := (text, title, options) => presented.Push(
             {title: title, leaseHeld: PACSCommands.clinicalCommandActive}
         )
-        unconfirmed := WetReadPasteEngine.NewResult()
-        unconfirmed.reason := "verification-error"
+        unsaved := {saved: false, typed: true, reason: "incomplete", message: "Check the note, then click Save."}
         sources := Map(
-            "Sticky Note Target Not Verified", (*) => StopWetRead("stopped"),
-            "Sticky Note Not Verified", (*) => ReportWetReadPasteResult(unconfirmed, "uia"),
+            "Wet Read Stopped", (*) => StopWetRead("stopped"),
+            "Wet Read Not Saved", (*) => ReportUnsavedWetRead(unsaved),
             "PACS Restart Cancelled", (*) => StopRestart("stopped"),
             "Microphone Not Selected", (*) => MicrophoneManager.ApplyNowFailed("not selected", "Microphone Not Selected"),
             ; The Sticky Notes stop, then the attending notice.
-            "Attending Not Assigned", (*) => RunPinnedWetReadWorkflow("note", "uia", (*) => 0, (*) => 0, (*) => 0, (*) => true)
+            "Attending Not Assigned", (*) => RunPinnedWetReadWorkflow("note", (*) => 0, (*) => 0, (*) => 0, (*) => true)
         )
         capturedLog := LogCapture()
         try {

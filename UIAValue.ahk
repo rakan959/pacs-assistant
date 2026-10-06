@@ -2,16 +2,12 @@
 #Include UIA-v2/Lib/UIA.ahk
 
 /**
- * Safe access to a UIA element's value.
+ * Safe reads of a UIA element's value.
  *
  * UIA-v2's `element.Value` accessor tries ValuePattern, then RangeValuePattern, then
- * the legacy accessibility pattern, and on a failed write replaces the error with a
- * generic one. Pattern support is a capability boundary rather than an application
- * failure: the Sticky Notes field, for example, does not support ValuePattern.
- *
- * Reads therefore go through plain property lookups. A write is gated on
- * ValuePattern being available and calls ValuePattern.SetValue directly: one write
- * through the pattern the caller chose, and that pattern's own error if it fails.
+ * the legacy accessibility pattern. Pattern support is a capability boundary rather
+ * than an application failure: the Sticky Notes field, for example, does not
+ * support ValuePattern. Reads therefore go through plain property lookups.
  */
 class UIAValue {
     /**
@@ -47,32 +43,10 @@ class UIAValue {
 
         ; An empty value is valid, but the property APIs also return an empty default
         ; for unsupported patterns. Capability flags are the only safe way to tell
-        ; those states apart before a direct-write transaction.
+        ; those states apart.
         legacySupported := false
         try legacySupported := element.GetPropertyValue(UIA.Property.IsLegacyIAccessiblePatternAvailable) ? true : false
 
         return {supported: legacyRead && legacySupported, value: ""}
-    }
-
-    ; Whether this element can be written through ValuePattern
-    static CanWrite(element) {
-        try {
-            return element.GetPropertyValue(UIA.Property.IsValuePatternAvailable) ? true : false
-        }
-        return false
-    }
-
-    /**
-     * Writes a value through ValuePattern only, when the element supports it.
-     * @returns true if the write was attempted and did not throw; false when the
-     * element has no ValuePattern, so the caller can pick another strategy instead
-     * of retrying something that cannot work.
-     */
-    static Write(element, text) {
-        if !this.CanWrite(element)
-            return false
-
-        element.ValuePattern.SetValue(text)
-        return true
     }
 }

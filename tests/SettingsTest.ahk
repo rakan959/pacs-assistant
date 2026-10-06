@@ -73,7 +73,6 @@ class SettingsTest {
         Assert.Equal(60, Settings.Get("RefreshInterval"))
         Assert.False(Settings.Get("AudioAlertNewCase"))
         Assert.False(Settings.Get("MessageBoxNewCase"))
-        Assert.True(Settings.Get("AutoConvertWetReadLineEndings"))
         Assert.True(Settings.Get("RestrictHotkeysByActiveWindow"))
         Assert.Equal("Default Beep", Settings.Get("AlertSound"))
         Assert.Equal("", Settings.Get("CustomSoundFile"))
@@ -87,9 +86,6 @@ class SettingsTest {
 
         SetTestSetting("AutoUpdate", false)
         Assert.False(Settings.Get("AutoUpdate"))
-
-        SetTestSetting("AutoConvertWetReadLineEndings", false)
-        Assert.False(Settings.Get("AutoConvertWetReadLineEndings"))
 
         SetTestSetting("RestrictHotkeysByActiveWindow", false)
         Assert.False(Settings.Get("RestrictHotkeysByActiveWindow"))

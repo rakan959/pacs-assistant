@@ -1,738 +1,262 @@
 ; = CONTENTS
 ;   + Preamble
-;   + WetReadTest class (wet-read paste, UIA write/verify, sticky note targeting, attending routing)
-;   + Test doubles (wet-read drivers/elements, sticky target elements, sticky window drivers)
+;   + WetReadTest class (window matching, opening Sticky Notes, typing and saving the
+;       note, text preparation, workflow notices and attending routing)
+;   + Test doubles (titled window driver, opener driver, writer driver and field)
 
 #Requires AutoHotkey v2.0
 #Include ../WetRead.ahk
 #Include TestRunner.ahk
 #Include LogCapture.ahk
-#Include FakeWindowList.ahk
 
 class WetReadTest {
-    static helpers := ["PastedText"]
-
     static tests := [
-        "PasteConvertsLineEndingsOnlyWhenTheSettingIsOn",
-        "ClipboardPasteModeIsRejectedWithoutMutation",
-        "UnsupportedUIADoesNotClearTheNote",
-        "PostMutationUIAErrorCanSucceedOnlyWithExactReadback",
-        "FailedUIAVerificationDoesNotOverwriteChangedValue",
-        "UIAFailureDoesNotRetryWhenCapabilityChanges",
-        "FailedControlVerificationDoesNotOverwriteChangedValue",
-        "UnsupportedControlDoesNotAttemptRollback",
-        "PreconditionChangeIsNotReportedAsRestored",
-        "ConcurrentEditAfterWritePreventsRetryAndRollback",
-        "UnreadableNoteDoesNotAttemptPaste",
-        "UnreadableNativeFieldFailsClosed",
-        "StickyRootMustBelongToPacsProcess",
-        "PacsSessionRecheckRequiresTheSameUniqueWindow",
-        "StickyButtonFilterRequiresEachProperty",
-        "StickyOpenerRejectsSameProcessWrongWindowButton",
-        "NativeStickyButtonReportsWhetherClickActioned",
+        "StickyWindowsMatchTitlesContainingStickyNotes",
+        "PacsWindowsListTheActiveVuePacsWindowFirst",
+        "OpenerTakesTheWindowTheButtonOpened",
+        "OpenerWaitsForTheWindowToAppear",
+        "OpenerTakesAReusedWindowPacsBroughtToTheFront",
+        "OpenerNeverTakesABackgroundStickyNotesWindow",
+        "OpenerRefusesTwoNewStickyNotesWindows",
+        "OpenerUsesTheVuePacsWindowThatHasTheButton",
+        "OpenerReportsAMissingButtonOrPacsWindow",
+        "OpenerStopsWhenVuePacsCannotBeActivated",
+        "WriterFollowsTheVersion2Sequence",
+        "SaveWaitsUntilTheWholeNoteHasLanded",
+        "NoteThatNeverCompletesIsNotSaved",
+        "UnreadableNoteIsTypedButNotSaved",
+        "ExistingNoteTextIsPartOfTheReadback",
+        "ReadbackAcceptsEveryLineBreakForm",
+        "FocusLossStopsBeforeTyping",
+        "MissingTextFieldStopsBeforeTyping",
+        "MissingOrUnresponsiveSaveLeavesTheNoteUnsaved",
+        "PreparedTextTypesEachLineBreakOnceAndKeepsSymbols",
+        "UnsavedWetReadIsReportedWithoutItsText",
         "AttendingFailureMessagesReadAsOneSentence",
-        "StickyOpenerRejectsAmbiguousSameWindowButtons",
-        "StickyOpenerRejectsUnreadableCandidateAlongsideValidButton",
-        "StickyOpenerRejectsTitleChangeBeforeInvoke",
-        "StickyOpenerRejectsDuplicateAppearingBeforeInvoke",
-        "StickyOpenerRejectsPacsFocusLostBeforeRediscovery",
-        "StickyOpenerRejectsPacsFocusLostBeforeInvoke",
-        "StickyOpenerRejectsUnactivatedStickyWindow",
-        "StickyOpenerRejectsPreexistingReactivatedStickyWindow",
-        "NativeProcessDiscoveryIncludesHiddenUntitledWindow",
-        "NativeStickyLookupReadsHiddenWindowTitles",
-        "StickyOpenerRejectsOwnerlessStickyWindow",
-        "StickyOpenerPinsNewlyActiveExactWindow",
-        "StickyOpenerRejectsTwoNewWindowsAfterInvoke",
-        "NativeStickySessionAcceptsTheOneNewOwnedStickyWindow",
-        "NativeStickySessionRejectsANewSiblingStickyWindow",
-        "NativeStickySessionRejectsADifferentNewStickyWindow",
-        "NativeStickySessionRejectsAWrongOwner",
-        "NativeStickySessionRejectsAReusedPreexistingWindow",
-        "NativeStickySessionRejectsIncompleteSessionsAndFailedEnumeration",
-        "NativeActivateStickyVerifiesIdentityAroundActivation",
-        "PasteFailureDialogNamesEachOutcome",
-        "UnconfirmedPasteIsLoggedWithItsReason",
-        "LineEndingConversionProducesCrlfOnly",
-        "StickyDriverUsesExactValidatedWindowHandle",
-        "StickyNoteTargetRequiresExpectedTypeProcessAndCapability",
-        "StickyNoteTargetMustBeTheUniqueWritableField",
-        "StickyNoteTargetRejectsUnreadableWritableSibling",
-        "NativeDirectWriteRefusesStaleStickyTarget",
-        "NativeControlWithoutHandleIsUnsupported",
-        "NativeControlWriteRefusesStaleStickyTarget",
-        "NativeControlWriteHasNoFocusSideEffect",
-        "NativeForwardVerificationRejectsCaseOnlyDifference",
         "RoutingFailureReportsTheActualCause",
+        "OpenerFailureReasonIsShownAndLogged",
         "StickyOpenerFailureAlsoReportsAttendingOutcome",
-        "ThrowingStickyOpenerStillReportsAttendingOutcome",
         "UnexpectedWorkflowFaultsAreLoggedWithTheirStack",
-        "WetReadStopsBeforePastingAreLogged",
-        "PasteTimeRechecksStopBeforeAnyWrite",
+        "WetReadStopsBeforeTypingAreLogged",
+        "ThrowingStickyOpenerStillReportsAttendingOutcome",
         "ThrowingReportCaptureStillPastesAndReportsAttendingOutcome",
-        "StickyTargetIsPinnedBeforePowerScribeRouting"
+        "StickyNoteIsOpenedBeforePowerScribeRouting"
     ]
 
-    PasteConvertsLineEndingsOnlyWhenTheSettingIsOn() {
-        saved := UseTestSettings("probe-line-endings")
-        original := WetReadPasteEngine.GetOwnPropDesc("Paste")
-        try {
-            SetTestSetting("AutoConvertWetReadLineEndings", true)
-            Assert.Equal("a`r`nb", this.PastedText("a`nb"))
-            SetTestSetting("AutoConvertWetReadLineEndings", false)
-            Assert.Equal("a`nb", this.PastedText("a`nb"))
-        } finally {
-            WetReadPasteEngine.DefineProp("Paste", original)
-            RestoreTestSettings(saved)
-        }
-    }
-    PastedText(clipText) {
-        pasted := []
-        WetReadPasteEngine.DefineProp("Paste", {Call: (cls, field, text, mode, driver) => (pasted.Push(text), {success: true, unsupported: false, unchanged: false, reason: "", error: ""})})
-        field := FakeStickyTargetElement(UIA.Type.Document, 42, true, 200)
-        session := {stickyHwnd: 200, pacsRoot: {ProcessId: 42, WinId: 100}}
-        session.driver := FakePinnedStickyDriver(true, LocatingStickyTargetRoot(42, [field], 200, field))
-        Assert.True(PerformWetReadPaste(clipText, "uia", session))
-        Assert.Equal(1, pasted.Length)
-        return pasted[1]
+    ; v2.0b7 found the window with the default title match: any title containing
+    ; "Sticky Notes", case-sensitive.
+    StickyWindowsMatchTitlesContainingStickyNotes() {
+        driver := TitledWindowDriver([
+            {hwnd: 1, title: "Sticky Notes", exe: "mp.exe"},
+            {hwnd: 2, title: "Sticky Notes - 12345678", exe: "mp.exe"},
+            {hwnd: 3, title: "Notes", exe: "mp.exe"},
+            {hwnd: 4, title: "sticky notes", exe: "notepad.exe"},
+            {hwnd: 5, title: "Sticky Notes", exe: "ApplicationFrameHost.exe"}
+        ])
+        Assert.Equal("1,2,5", TitledWindowDriver.Join(driver.ListStickyWindows()))
     }
 
-    ClipboardPasteModeIsRejectedWithoutMutation() {
-        driver := FakeWetReadDriver("existing note")
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "send", driver)
-
-        Assert.False(result.success)
-        Assert.Equal("invalid-mode", result.reason)
-        Assert.Equal("existing note", driver.fieldValue)
-        Assert.Equal(0, driver.readCalls)
-        Assert.Equal(0, driver.uiaCalls)
-        Assert.Equal(0, driver.controlCalls)
+    PacsWindowsListTheActiveVuePacsWindowFirst() {
+        driver := TitledWindowDriver([
+            {hwnd: 10, title: "Vue PACS", exe: "mp.exe"},
+            {hwnd: 11, title: "Explorer Portal", exe: "mp.exe"},
+            {hwnd: 12, title: "Vue PACS Client", exe: "mp.exe"},
+            {hwnd: 13, title: "Vue PACS", exe: "other.exe"}
+        ])
+        driver.active := 12
+        Assert.Equal("12,10", TitledWindowDriver.Join(driver.ListPacsWindows()))
     }
 
-    UnsupportedUIADoesNotClearTheNote() {
-        driver := FakeWetReadDriver("existing note")
-        driver.uiaSupported := false
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
-
-        Assert.False(result.success)
-        Assert.True(result.unsupported)
-        Assert.True(result.unchanged)
-        Assert.Equal("existing note", driver.fieldValue)
-        Assert.Equal(0, driver.controlCalls)
-    }
-
-    PostMutationUIAErrorCanSucceedOnlyWithExactReadback() {
-        field := PostMutationFailingWetReadElement("existing note", "new wet read")
-        driver := NativeWetReadDriver(
-            "Sticky Notes",
-            FakeWetReadTargetDriver(true)
-        )
-
-        result := WetReadPasteEngine.Paste(
-            field,
-            "new wet read",
-            "uia",
-            driver
-        )
-
-        Assert.True(result.success)
-        Assert.False(result.unsupported)
-        Assert.False(result.unchanged)
-        Assert.Equal("new wet read", field.storedValue)
-        Assert.Equal(1, field.writeCalls)
-    }
-
-    FailedUIAVerificationDoesNotOverwriteChangedValue() {
-        driver := FakeWetReadDriver("existing note")
-        driver.failedText := "new wet read"
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
-
-        Assert.False(result.success)
-        Assert.False(result.unchanged)
-        Assert.Equal("value-changed", result.reason)
-        Assert.Equal("partial value", driver.fieldValue)
-        Assert.Equal(1, driver.uiaCalls)
-    }
-
-    UIAFailureDoesNotRetryWhenCapabilityChanges() {
-        driver := FakeWetReadDriver("existing note")
-        driver.failedText := "new wet read"
-        driver.uiaSupportedCalls := 1
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
-
-        Assert.False(result.success)
-        Assert.False(result.unsupported)
-        Assert.False(result.unchanged)
-        Assert.Equal("partial value", driver.fieldValue)
-        Assert.Equal(1, driver.uiaCalls)
-    }
-
-    FailedControlVerificationDoesNotOverwriteChangedValue() {
-        driver := FakeWetReadDriver("existing note")
-        driver.failedText := "new wet read"
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "control", driver)
-
-        Assert.False(result.success)
-        Assert.False(result.unchanged)
-        Assert.Equal("value-changed", result.reason)
-        Assert.Equal("partial value", driver.fieldValue)
-        Assert.Equal(1, driver.controlCalls)
-    }
-
-    UnsupportedControlDoesNotAttemptRollback() {
-        driver := FakeWetReadDriver("existing note")
-        driver.controlSupported := false
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "control", driver)
-
-        Assert.False(result.success)
-        Assert.True(result.unsupported)
-        Assert.True(result.unchanged)
-        Assert.Equal("existing note", driver.fieldValue)
-        Assert.Equal(1, driver.controlCalls)
-    }
-
-    PreconditionChangeIsNotReportedAsRestored() {
-        driver := PreconditionChangingWetReadDriver(
-            "existing note",
-            "user's newer note"
-        )
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
-
-        Assert.False(result.success)
-        Assert.False(result.unchanged)
-        Assert.Equal("precondition-changed", result.reason)
-        Assert.Equal(0, driver.uiaCalls)
-        Assert.Equal(0, driver.controlCalls)
-    }
-
-    ConcurrentEditAfterWritePreventsRetryAndRollback() {
-        driver := FakeWetReadDriver("existing note")
-        driver.concurrentValueAfterWait := "user's newer note"
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
-
-        Assert.False(result.success)
-        Assert.False(result.unchanged)
-        Assert.Equal("value-changed", result.reason)
-        Assert.Equal("user's newer note", driver.fieldValue)
-        Assert.Equal(1, driver.uiaCalls)
-        Assert.Equal(0, driver.controlCalls)
-    }
-
-    UnreadableNoteDoesNotAttemptPaste() {
-        driver := FakeWetReadDriver("existing note")
-        driver.throwOnRead := true
-
-        result := WetReadPasteEngine.Paste(1, "new wet read", "uia", driver)
-
-        Assert.False(result.success)
-        Assert.Equal("read", result.reason)
-        Assert.Equal("existing note", driver.fieldValue)
-        Assert.Equal(0, driver.uiaCalls)
-        Assert.Equal(0, driver.controlCalls)
-    }
-
-    UnreadableNativeFieldFailsClosed() {
-        driver := NativeWetReadDriver(
-            "Sticky Notes",
-            FakeWetReadTargetDriver(true)
-        )
-        Assert.Throws(
-            () => driver.Read(UnsupportedWetReadElement()),
-            "cannot be read safely"
-        )
-    }
-
-    StickyRootMustBelongToPacsProcess() {
-        pacsRoot := FakeStickyTargetRoot(42, [])
-        stickyRoot := FakeStickyTargetRoot(42, [], 200)
-        unrelatedRoot := FakeStickyTargetRoot(99, [], 300)
-
-        Assert.True(NativeWetReadDriver.IsExpectedStickyRoot(pacsRoot, stickyRoot))
-        Assert.False(NativeWetReadDriver.IsExpectedStickyRoot(pacsRoot, unrelatedRoot))
-    }
-
-    ; The PACS window captured before Sticky Notes opens must still be the only
-    ; exact PACS window, under the same HWND and process.
-    PacsSessionRecheckRequiresTheSameUniqueWindow() {
-        target := AppControl.VuePacsWindowSpec()
-        pacs := {hwnd: 100, title: target.title, exe: target.exe, pid: 42}
-        second := {hwnd: 101, title: target.title, exe: target.exe, pid: 42}
-        cases := [
-            {label: "same window", windows: [pacs], hwnd: 100, pid: 42, expected: true},
-            {label: "different HWND", windows: [pacs], hwnd: 101, pid: 42, expected: false},
-            {label: "different process", windows: [pacs], hwnd: 100, pid: 43, expected: false},
-            {label: "second exact window", windows: [pacs, second], hwnd: 100, pid: 42, expected: false},
-            {label: "window gone", windows: [], hwnd: 100, pid: 42, expected: false},
-            {label: "no HWND", windows: [pacs], hwnd: 0, pid: 42, expected: false}
-        ]
-        driver := NativeStickyNoteWindowDriver()
-        originalWindowDriver := AppControl.windowDriver
-        try {
-            for testCase in cases {
-                AppControl.windowDriver := FakeWindowList(testCase.windows)
-                Assert.Equal(
-                    testCase.expected,
-                    !!driver.IsExpectedPacsSession(target, testCase.hwnd, testCase.pid),
-                    testCase.label
-                )
-            }
-        } finally AppControl.windowDriver := originalWindowDriver
-    }
-
-    ; Only an enabled button with the exact name, in the PACS root's process and
-    ; window, is the Sticky Notes button; each condition alone rejects it.
-    StickyButtonFilterRequiresEachProperty() {
-        opener := StickyNoteOpener()
-        name := StickyNoteOpener.stickyButtonName
-        valid := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, name)
-        Assert.True(opener.FindUniqueStickyButton(FakeStickyTargetRoot(42, [valid], 100)) == valid)
-        variants := [
-            {label: "name casing", property: "Name", value: StrUpper(name)},
-            {label: "type", property: "Type", value: UIA.Type.Text},
-            {label: "disabled", property: "IsEnabled", value: false},
-            {label: "process", property: "ProcessId", value: 43},
-            {label: "window", property: "WinId", value: 999}
-        ]
-        for variant in variants {
-            button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, name)
-            button.%variant.property% := variant.value
-            Assert.Equal(0, opener.FindUniqueStickyButton(FakeStickyTargetRoot(42, [button], 100)), variant.label)
-        }
-    }
-
-    StickyOpenerRejectsSameProcessWrongWindowButton() {
-        wrongWindowButton := FakeStickyTargetElement(
-            UIA.Type.Button,
-            42,
-            false,
-            999,
-            "scn_sticky_notes"
-        )
-        pacsRoot := FakeStickyTargetRoot(42, [wrongWindowButton], 100)
-        driver := FakeStickyNoteWindowDriver(pacsRoot)
-
-        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
-        Assert.Equal(0, driver.invokeCalls)
-    }
-
-    StickyOpenerRejectsAmbiguousSameWindowButtons() {
-        first := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
-        second := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
-        pacsRoot := FakeStickyTargetRoot(42, [first, second], 100)
-        driver := FakeStickyNoteWindowDriver(pacsRoot)
-
-        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
-        Assert.Equal(0, driver.invokeCalls)
-    }
-
-    StickyOpenerRejectsUnreadableCandidateAlongsideValidButton() {
-        valid := FakeStickyTargetElement(
-            UIA.Type.Button,
-            42,
-            false,
-            100,
-            "scn_sticky_notes"
-        )
-        unreadable := UnreadableStickyTargetElement(42, 100)
-        pacsRoot := FakeStickyTargetRoot(42, [valid, unreadable], 100)
-        driver := FakeStickyNoteWindowDriver(pacsRoot)
-
-        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
-        Assert.Equal(0, driver.invokeCalls)
-    }
-
-    StickyOpenerRejectsTitleChangeBeforeInvoke() {
-        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
-        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
-        driver := FakeStickyNoteWindowDriver(pacsRoot)
-        driver.livePacsTitle := "Different PACS Window"
-
-        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
-        Assert.Equal(0, driver.invokeCalls)
-    }
-
-    StickyOpenerRejectsDuplicateAppearingBeforeInvoke() {
-        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
-        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
-        driver := FakeStickyNoteWindowDriver(pacsRoot)
-        driver.exactPacsWindowCount := 2
-
-        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
-        Assert.Equal(0, driver.invokeCalls)
-    }
-
-    ; Focus is checked before the root is reacquired and again just before the
-    ; click; losing it at either point must refuse the click, even if regained.
-    StickyOpenerRejectsPacsFocusLostBeforeRediscovery() {
-        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
-        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
-        driver := FakeStickyNoteWindowDriver(pacsRoot)
-        driver.activeResults := [false, true]
-
-        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
-        Assert.Equal(0, driver.invokeCalls)
-        Assert.Equal(1, driver.rootCalls)
-    }
-
-    StickyOpenerRejectsPacsFocusLostBeforeInvoke() {
-        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
-        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
-        driver := FakeStickyNoteWindowDriver(pacsRoot)
-        driver.activeResults := [true, false]
-
-        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
-        Assert.Equal(0, driver.invokeCalls)
-    }
-
-    StickyOpenerRejectsUnactivatedStickyWindow() {
-        button := FakeStickyTargetElement(
-            UIA.Type.Button,
-            42,
-            false,
-            100,
-            "scn_sticky_notes"
-        )
-        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
-        staleSticky := FakeStickyTargetRoot(42, [], 200)
-        driver := FakeStickyNoteWindowDriver(pacsRoot, staleSticky, 0)
-
-        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
-        Assert.Equal(1, driver.invokeCalls)
-    }
-
-    StickyOpenerRejectsPreexistingReactivatedStickyWindow() {
-        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
-        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
-        stickyRoot := FakeStickyTargetRoot(42, [], 200)
-        driver := FakeStickyNoteWindowDriver(pacsRoot, stickyRoot, 200)
-        driver.preexistingProcessWindows := [100, 200]
-
-        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
-        Assert.Equal(1, driver.invokeCalls)
-    }
-
-    NativeProcessDiscoveryIncludesHiddenUntitledWindow() {
-        hiddenWindow := Gui()
-        hiddenWindow.Show("Hide")
-        try {
-            windows := NativeStickyNoteWindowDriver().FindProcessWindows(
-                DllCall("GetCurrentProcessId")
-            )
-            found := false
-            for hwnd in windows {
-                if (hwnd = hiddenWindow.Hwnd) {
-                    found := true
-                    break
-                }
-            }
-            Assert.True(found)
-        } finally hiddenWindow.Destroy()
-    }
-
-    ; The real driver against this process, which, like the PACS process, has hidden
-    ; top-level windows: their titles must not fail the Sticky Notes lookup.
-    NativeStickyLookupReadsHiddenWindowTitles() {
-        processId := DllCall("GetCurrentProcessId")
-        driver := NativeStickyNoteWindowDriver()
-        owner := Gui(, "Sticky Lookup Owner")
-        sticky := 0
-        try {
-            preexisting := driver.FindProcessWindows(processId)
-            sticky := Gui("+Owner" owner.Hwnd, NativeStickyNoteWindowDriver.stickyTitle)
-            sticky.Show("w200 h80 NoActivate")
-
-            found := driver.FindExactStickyWindows(processId)
-            Assert.True(IsObject(found), "a hidden window's title failed the lookup")
-            Assert.Equal(1, found.Length)
-            Assert.Equal(sticky.Hwnd, found[1])
-            Assert.True(driver.IsExpectedStickySession({
-                pacsHwnd: owner.Hwnd,
-                stickyHwnd: sticky.Hwnd,
-                processId: processId,
-                preexistingProcessWindows: preexisting
-            }))
-        } finally {
-            if sticky
-                sticky.Destroy()
-            owner.Destroy()
-        }
-    }
-
-    StickyOpenerRejectsOwnerlessStickyWindow() {
-        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
-        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
-        stickyRoot := FakeStickyTargetRoot(42, [], 200)
-        driver := FakeStickyNoteWindowDriver(pacsRoot, stickyRoot, 200)
-        driver.stickyOwner := 0
-
-        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
-    }
-
-    StickyOpenerPinsNewlyActiveExactWindow() {
-        button := FakeStickyTargetElement(
-            UIA.Type.Button,
-            42,
-            false,
-            100,
-            "scn_sticky_notes"
-        )
-        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
-        stickyRoot := FakeStickyTargetRoot(42, [], 200)
-        driver := FakeStickyNoteWindowDriver(pacsRoot, stickyRoot, 200)
-
-        session := StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"})
-
-        Assert.Equal(100, session.pacsHwnd)
+    OpenerTakesTheWindowTheButtonOpened() {
+        driver := FakeOpenerDriver([100], 100, [[7], [7, 200]])
+        session := StickyNoteOpener(driver).Open()
+        Assert.False(HasProp(session, "failure"), HasProp(session, "failure") ? session.failure : "")
         Assert.Equal(200, session.stickyHwnd)
-        Assert.True(session.stickyRoot = stickyRoot)
-        Assert.Equal(1, driver.invokeCalls)
+        Assert.Equal(100, session.pacsHwnd)
+        Assert.Equal(driver, session.driver)
+        Assert.Equal("activate 100|invoke 100", driver.Log())
     }
 
-    StickyOpenerRejectsTwoNewWindowsAfterInvoke() {
-        button := FakeStickyTargetElement(UIA.Type.Button, 42, false, 100, "scn_sticky_notes")
-        pacsRoot := FakeStickyTargetRoot(42, [button], 100)
-        stickyRoot := FakeStickyTargetRoot(42, [], 200)
-        driver := FakeStickyNoteWindowDriver(pacsRoot, stickyRoot, 200)
-        driver.postClickStickyWindows := [200, 201]
-
-        Assert.Equal(0, StickyNoteOpener(driver).Open({title: "Vue PACS", exe: "mp.exe"}))
-        Assert.Equal(1, driver.invokeCalls)
+    OpenerWaitsForTheWindowToAppear() {
+        driver := FakeOpenerDriver([100], 100, [[], [], [], [200]])
+        session := StickyNoteOpener(driver).Open()
+        Assert.Equal(200, session.stickyHwnd)
+        Assert.True(driver.clock > 0 && driver.clock < StickyNoteOpener.appearTimeoutMs, driver.clock)
     }
 
-    NativeStickySessionAcceptsTheOneNewOwnedStickyWindow() {
-        driver := PrimitiveStickyNoteWindowDriver.Standard()
-
-        Assert.True(driver.IsExpectedStickySession(PrimitiveStickyNoteWindowDriver.Session()))
+    ; PACS may raise a Sticky Notes window it already had instead of creating one.
+    OpenerTakesAReusedWindowPacsBroughtToTheFront() {
+        driver := FakeOpenerDriver([100], 100, [[200], [200]], 200)
+        session := StickyNoteOpener(driver).Open()
+        Assert.Equal(200, session.stickyHwnd)
     }
 
-    NativeStickySessionRejectsANewSiblingStickyWindow() {
-        driver := PrimitiveStickyNoteWindowDriver.Standard()
-        driver.AddWindow(201, "Sticky Notes", 100)
-
-        Assert.False(driver.IsExpectedStickySession(PrimitiveStickyNoteWindowDriver.Session()))
+    ; Another study's note, or another program's "Sticky Notes" window, that stays in
+    ; the background is never the target.
+    OpenerNeverTakesABackgroundStickyNotesWindow() {
+        driver := FakeOpenerDriver([100], 100, [[300], [300]])
+        session := StickyNoteOpener(driver).Open()
+        Assert.True(HasProp(session, "failure"))
+        Assert.True(InStr(session.failure, "no Sticky Notes window opened within 3 seconds"), session.failure)
+        Assert.True(InStr(session.failure, "fake.exe/FakeClass"), session.failure)
+        Assert.True(driver.clock >= StickyNoteOpener.appearTimeoutMs)
     }
 
-    ; The pinned window was retitled and another new Sticky Notes window opened:
-    ; one new window still matches, but not the pinned one.
-    NativeStickySessionRejectsADifferentNewStickyWindow() {
-        driver := PrimitiveStickyNoteWindowDriver.Standard()
-        driver.titles[200] := "Untitled"
-        driver.AddWindow(201, "Sticky Notes", 100)
-
-        Assert.False(driver.IsExpectedStickySession(PrimitiveStickyNoteWindowDriver.Session()))
+    OpenerRefusesTwoNewStickyNotesWindows() {
+        driver := FakeOpenerDriver([100], 100, [[], [200, 201]])
+        session := StickyNoteOpener(driver).Open()
+        Assert.Equal("more than one Sticky Notes window opened", session.failure)
     }
 
-    NativeStickySessionRejectsAWrongOwner() {
-        driver := PrimitiveStickyNoteWindowDriver.Standard()
-        driver.owners[200] := 999
-
-        Assert.False(driver.IsExpectedStickySession(PrimitiveStickyNoteWindowDriver.Session()))
+    OpenerUsesTheVuePacsWindowThatHasTheButton() {
+        driver := FakeOpenerDriver([100, 101], 101, [[], [200]])
+        session := StickyNoteOpener(driver).Open()
+        Assert.Equal(101, session.pacsHwnd)
+        Assert.Equal("activate 101|invoke 101", driver.Log())
     }
 
-    NativeStickySessionRejectsAReusedPreexistingWindow() {
-        driver := PrimitiveStickyNoteWindowDriver.Standard()
-        session := PrimitiveStickyNoteWindowDriver.Session()
-        session.preexistingProcessWindows := [100, 150, 200]
+    OpenerReportsAMissingButtonOrPacsWindow() {
+        driver := FakeOpenerDriver([100], 0, [[]])
+        Assert.Equal("the Sticky Notes button was not found in Vue PACS", StickyNoteOpener(driver).Open().failure)
+        Assert.Equal("", driver.Log())
 
-        Assert.False(driver.IsExpectedStickySession(session))
+        driver := FakeOpenerDriver([], 0, [[]])
+        Assert.Equal("no Vue PACS window is open", StickyNoteOpener(driver).Open().failure)
     }
 
-    NativeStickySessionRejectsIncompleteSessionsAndFailedEnumeration() {
-        driver := PrimitiveStickyNoteWindowDriver.Standard()
-        Assert.False(driver.IsExpectedStickySession(0))
-        for propertyName in ["pacsHwnd", "stickyHwnd", "processId", "preexistingProcessWindows"] {
-            session := PrimitiveStickyNoteWindowDriver.Session()
-            session.DeleteProp(propertyName)
-            Assert.False(driver.IsExpectedStickySession(session), "Session without " propertyName " was accepted")
-        }
-
-        driver.processWindows := 0
-        Assert.False(driver.IsExpectedStickySession(PrimitiveStickyNoteWindowDriver.Session()))
-
-        ; A window that disappears while titles are read makes the set unknowable.
-        vanishing := PrimitiveStickyNoteWindowDriver.Standard()
-        vanishing.processWindows.Push(300)
-        Assert.False(vanishing.IsExpectedStickySession(PrimitiveStickyNoteWindowDriver.Session()))
+    OpenerStopsWhenVuePacsCannotBeActivated() {
+        driver := FakeOpenerDriver([100], 100, [[], [200]])
+        driver.activateOk := false
+        Assert.Equal("Vue PACS could not be brought to the front", StickyNoteOpener(driver).Open().failure)
+        Assert.Equal("activate 100", driver.Log())
     }
 
-    NativeActivateStickyVerifiesIdentityAroundActivation() {
-        session := PrimitiveStickyNoteWindowDriver.Session()
-
-        wrongOwner := PrimitiveStickyNoteWindowDriver.Standard()
-        wrongOwner.owners[200] := 999
-        Assert.False(wrongOwner.ActivateSticky(session))
-        Assert.Equal(0, wrongOwner.activated.Length, "An unverified session must not be activated")
-
-        failedActivation := PrimitiveStickyNoteWindowDriver.Standard()
-        failedActivation.activationSucceeds := false
-        Assert.False(failedActivation.ActivateSticky(session))
-
-        siblingOnActivation := PrimitiveStickyNoteWindowDriver.Standard()
-        siblingOnActivation.siblingOnActivation := 201
-        Assert.False(siblingOnActivation.ActivateSticky(session))
-        Assert.Equal(1, siblingOnActivation.activated.Length)
-
-        verified := PrimitiveStickyNoteWindowDriver.Standard()
-        Assert.True(verified.ActivateSticky(session))
-        Assert.Equal(200, verified.activated[1])
-    }
-
-    PasteFailureDialogNamesEachOutcome() {
-        Assert.Equal(0, WetReadPasteFailureDialog({success: true, unsupported: false, unchanged: false, reason: ""}, "uia"))
-
-        unsupported := WetReadPasteFailureDialog({success: false, unsupported: true, unchanged: true, reason: "unsupported"}, "uia")
-        Assert.Equal("Paste Method Unavailable", unsupported.title)
-        Assert.True(InStr(unsupported.text, "UIA Value method"), unsupported.text)
-        unsupportedControl := WetReadPasteFailureDialog({success: false, unsupported: true, unchanged: true, reason: "unsupported"}, "control")
-        Assert.True(InStr(unsupportedControl.text, "ControlSetText method"), unsupportedControl.text)
-
-        expectedTitles := [
-            ["value-changed", false, "Sticky Note Changed"],
-            ["precondition-changed", false, "Sticky Note Changed"],
-            ["read", false, "Sticky Note Not Verified"],
-            ["precondition-read", false, "Sticky Note Not Verified"],
-            ["verification-error", false, "Sticky Note Not Verified"],
-            ["verification", true, "Paste Failed"]
-        ]
-        for expected in expectedTitles {
-            dialog := WetReadPasteFailureDialog(
-                {success: false, unsupported: false, unchanged: expected[2], reason: expected[1]},
-                "uia"
-            )
-            Assert.Equal(expected[3], dialog.title, "Wrong dialog for reason '" expected[1] "'")
-        }
-
-        ; The write may have happened, and the engine never restores.
-        unconfirmed := WetReadPasteFailureDialog(
-            {success: false, unsupported: false, unchanged: false, reason: "verification-error"},
-            "uia"
+    WriterFollowsTheVersion2Sequence() {
+        driver := FakeWriterDriver()
+        result := StickyNoteWriter(driver.Session()).Write("No acute findings.")
+        Assert.True(result.saved, result.message)
+        Assert.Equal(
+            "activate|invoke YY0|mouse 87K/|key r|controlclick V|type No acute findings.|invoke YY0/",
+            driver.Log()
         )
-        Assert.True(InStr(unconfirmed.text, "not confirmed"), unconfirmed.text)
-        Assert.False(InStr(unconfirmed.text, "restore"), unconfirmed.text)
     }
 
-    UnconfirmedPasteIsLoggedWithItsReason() {
-        failed := WetReadPasteEngine.NewResult()
-        failed.reason := "verification-error"
-        failed.error := "simulated readback failure"
-        confirmed := WetReadPasteEngine.NewResult()
-        confirmed.success := true
+    ; Regression for v2.0b7: Save is a UIA action outside the keyboard queue, so it
+    ; must wait for the note to read back with the whole text, however slowly the
+    ; typed keys are processed.
+    SaveWaitsUntilTheWholeNoteHasLanded() {
+        text := "Small left pleural effusion.`nNo pneumothorax."
+        driver := FakeWriterDriver()
+        driver.charsPerPoll := 4
+        result := StickyNoteWriter(driver.Session()).Write(text)
+        Assert.True(result.saved, result.message)
+        Assert.True(driver.reads > 3, "the note was read back while it filled")
+        Assert.Equal(StrLen(text), driver.visibleAtSave)
+    }
 
+    NoteThatNeverCompletesIsNotSaved() {
+        driver := FakeWriterDriver()
+        driver.charsPerPoll := 2
+        driver.maxVisible := 5
+        result := StickyNoteWriter(driver.Session()).Write("Appendix is normal.")
+        Assert.False(result.saved)
+        Assert.True(result.typed)
+        Assert.Equal("incomplete", result.reason)
+        Assert.True(InStr(result.message, "did not click Save"), result.message)
+        Assert.True(InStr(result.message, "Check the note, then click Save."), result.message)
+        Assert.False(InStr(driver.Log(), "invoke YY0/"), driver.Log())
+    }
+
+    UnreadableNoteIsTypedButNotSaved() {
+        driver := FakeWriterDriver()
+        driver.readable := false
+        result := StickyNoteWriter(driver.Session()).Write("Normal study.")
+        Assert.False(result.saved)
+        Assert.True(result.typed)
+        Assert.Equal("unreadable", result.reason)
+        Assert.True(InStr(driver.Log(), "type Normal study."), driver.Log())
+        Assert.False(InStr(driver.Log(), "invoke YY0/"), driver.Log())
+    }
+
+    ExistingNoteTextIsPartOfTheReadback() {
+        driver := FakeWriterDriver()
+        driver.baseline := "Earlier note."
+        driver.charsPerPoll := 3
+        result := StickyNoteWriter(driver.Session()).Write("Earlier")
+        Assert.True(result.saved, result.message)
+        ; "Earlier" was already in the note; Save waits for the typed copy as well.
+        Assert.Equal(StrLen("Earlier"), driver.visibleAtSave)
+    }
+
+    ReadbackAcceptsEveryLineBreakForm() {
+        for lineBreak in ["`r`n", "`r", "`n"] {
+            driver := FakeWriterDriver()
+            driver.readLineBreak := lineBreak
+            result := StickyNoteWriter(driver.Session()).Write("Line one`nLine two")
+            Assert.True(result.saved, result.message)
+        }
+    }
+
+    FocusLossStopsBeforeTyping() {
+        driver := FakeWriterDriver()
+        driver.loseFocusAfter := "mouse 87K/"
+        result := StickyNoteWriter(driver.Session()).Write("Normal study.")
+        Assert.False(result.saved)
+        Assert.False(result.typed)
+        Assert.True(InStr(result.message, "lost focus. Nothing was typed."), result.message)
+        Assert.Equal("activate|invoke YY0|mouse 87K/", driver.Log())
+    }
+
+    MissingTextFieldStopsBeforeTyping() {
+        driver := FakeWriterDriver()
+        driver.elements["V"] := FakeWriterElement("V", UIA.Type.Button)
+        result := StickyNoteWriter(driver.Session()).Write("Normal study.")
+        Assert.False(result.typed)
+        Assert.True(InStr(result.message, "text field was not found"), result.message)
+        Assert.False(InStr(driver.Log(), "type "), driver.Log())
+
+        driver := FakeWriterDriver()
+        driver.elements.Delete("YY0")
+        result := StickyNoteWriter(driver.Session()).Write("Normal study.")
+        Assert.False(result.typed)
+        Assert.Equal("activate", driver.Log())
+    }
+
+    MissingOrUnresponsiveSaveLeavesTheNoteUnsaved() {
+        driver := FakeWriterDriver()
+        driver.elements.Delete("YY0/")
+        result := StickyNoteWriter(driver.Session()).Write("Normal study.")
+        Assert.False(result.saved)
+        Assert.True(result.typed)
+        Assert.Equal("no-save", result.reason)
+
+        driver := FakeWriterDriver()
+        driver.saveResponds := false
+        result := StickyNoteWriter(driver.Session()).Write("Normal study.")
+        Assert.False(result.saved)
+        Assert.Equal("save-not-pressed", result.reason)
+    }
+
+    ; SendText types + ^ ! # { } as themselves; v2.0b7's Send read them as keys.
+    PreparedTextTypesEachLineBreakOnceAndKeepsSymbols() {
+        Assert.Equal("a`nb`nc", PrepareWetReadText("a`r`nb`rc"))
+        Assert.Equal("Level 1+ {x} #3 ^ !", PrepareWetReadText("Level 1+ {x} #3 ^ !"))
+        Assert.Equal("a b", PrepareWetReadText("a`tb"))
+        Assert.Equal("  Indented`nline", PrepareWetReadText("  Indented`r`nline`r`n`r`n  `t"))
+        Assert.Equal("", PrepareWetReadText(" `r`n`t"))
+    }
+
+    UnsavedWetReadIsReportedWithoutItsText() {
         capturedLog := LogCapture()
         try {
-            Assert.False(ReportWetReadPasteResult(failed, "uia"))
-            Assert.True(ReportWetReadPasteResult(confirmed, "uia"))
-            loggedFailures := capturedLog.Count("Wet read paste not confirmed (verification-error): simulated readback failure")
-            loggedEntries := capturedLog.Count("Wet read")
+            driver := FakeWriterDriver()
+            driver.maxVisible := 3
+            Assert.False(PerformWetReadPaste("Private note text", driver.Session()))
+            logged := capturedLog.Text()
         } finally capturedLog.Restore()
-
-        Assert.Equal(1, loggedFailures)
-        Assert.Equal(1, loggedEntries)
-        Assert.Equal(1, TestRunner.dialogs.Length)
-        Assert.Equal("Sticky Note Not Verified", TestRunner.dialogs[1].title)
-    }
-
-    LineEndingConversionProducesCrlfOnly() {
-        Assert.Equal("a`r`nb`r`nc`rd", ConvertWetReadLineEndings("a`nb`r`nc`rd"))
-        Assert.Equal("", ConvertWetReadLineEndings(""))
-    }
-
-    StickyDriverUsesExactValidatedWindowHandle() {
-        driver := NativeWetReadDriver.ForRoot(FakeStickyTargetRoot(42, [], 200))
-
-        Assert.Equal("ahk_id 200", driver.targetTitle)
-    }
-
-    StickyNoteTargetRequiresExpectedTypeProcessAndCapability() {
-        valid := FakeStickyTargetElement(UIA.Type.Document, 42, true)
-        root := FakeStickyTargetRoot(42, [valid])
-        wrongType := FakeStickyTargetElement(UIA.Type.Button, 42, true)
-        wrongProcess := FakeStickyTargetElement(UIA.Type.Edit, 99, true)
-        wrongWindow := FakeStickyTargetElement(UIA.Type.Edit, 42, true, 200)
-        noCapability := FakeStickyTargetElement(UIA.Type.Edit, 42, false)
-
-        Assert.True(NativeWetReadDriver.IsExpectedNoteField(root, valid))
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongType))
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongProcess))
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, wrongWindow))
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, noCapability))
-    }
-
-    StickyNoteTargetMustBeTheUniqueWritableField() {
-        selected := FakeStickyTargetElement(UIA.Type.Document, 42, true)
-        other := FakeStickyTargetElement(UIA.Type.Edit, 42, true)
-        root := FakeStickyTargetRoot(42, [selected, other])
-
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, selected))
-    }
-
-    StickyNoteTargetRejectsUnreadableWritableSibling() {
-        selected := FakeStickyTargetElement(UIA.Type.Document, 42, true)
-        unreadable := UnreadableNoteFieldElement()
-        root := FakeStickyTargetRoot(42, [selected, unreadable])
-
-        Assert.False(NativeWetReadDriver.IsExpectedNoteField(root, selected))
-    }
-
-    NativeDirectWriteRefusesStaleStickyTarget() {
-        field := FakeWritableWetReadElement()
-        driver := NativeWetReadDriver(
-            "Sticky Notes",
-            FakeWetReadTargetDriver(false)
-        )
-
-        Assert.False(driver.WriteUIA(field, "new wet read"))
-        Assert.Equal(0, field.writeCalls)
-    }
-
-    NativeControlWriteRefusesStaleStickyTarget() {
-        controlDriver := FakeWetReadControlDriver()
-        driver := NativeWetReadDriver(
-            "Sticky Notes",
-            FakeWetReadTargetDriver(false),
-            controlDriver
-        )
-
-        Assert.False(driver.WriteControl({NativeWindowHandle: 555}, "new wet read"))
-        Assert.Equal(0, controlDriver.writes.Length)
-    }
-
-    NativeControlWithoutHandleIsUnsupported() {
-        driver := NativeWetReadDriver(
-            "Sticky Notes",
-            FakeWetReadTargetDriver(true)
-        )
-
-        Assert.False(driver.WriteControl({NativeWindowHandle: 0}, "new wet read"))
-    }
-
-    NativeControlWriteHasNoFocusSideEffect() {
-        controlDriver := FakeWetReadControlDriver()
-        driver := NativeWetReadDriver(
-            "ahk_id 200",
-            FakeWetReadTargetDriver(true),
-            controlDriver
-        )
-
-        Assert.True(driver.WriteControl({NativeWindowHandle: 555}, "new wet read"))
-        Assert.Equal(1, controlDriver.writes.Length)
-        Assert.Equal(555, controlDriver.writes[1].hwnd)
-        Assert.Equal("new wet read", controlDriver.writes[1].value)
-    }
-
-    NativeForwardVerificationRejectsCaseOnlyDifference() {
-        driver := FakeNativeWetReadValueDriver("New Wet Read")
-
-        Assert.False(driver.WaitForValue(1, "new wet read", 150))
-        Assert.True(driver.WaitForValue(1, "New Wet Read", 150))
+        Assert.True(InStr(logged, "Wet read typed but not saved (incomplete)"), logged)
+        Assert.False(InStr(logged, "Private note text"), logged)
+        Assert.Equal("Wet Read Not Saved", TestRunner.dialogs[-1].title)
     }
 
     ; The routing error is a cause; AttendingFailureMessage adds the instruction once.
@@ -760,14 +284,19 @@ class WetReadTest {
         Assert.False(InStr(message, "Could not read the report") > 0)
     }
 
-    ; UIA-v2's semantic Click() returns the pattern it used, or 0 when nothing
-    ; actioned the button.
-    NativeStickyButtonReportsWhetherClickActioned() {
-        driver := NativeStickyNoteWindowDriver()
-
-        Assert.True(driver.InvokeStickyButton(FakeClickResult("Invoke")))
-        Assert.False(driver.InvokeStickyButton(FakeClickResult(0)))
-        Assert.False(driver.InvokeStickyButton(FakeClickResult(Error("simulated UIA failure"))))
+    OpenerFailureReasonIsShownAndLogged() {
+        notifications := []
+        capturedLog := LogCapture()
+        try {
+            RunPinnedWetReadWorkflow("wet read",
+                (*) => {failure: "the Sticky Notes button was not found in Vue PACS"},
+                (*) => {text: "", session: 0}, (*) => true, (*) => true,
+                RecordNotification.Bind(notifications))
+            logged := capturedLog.Count("Wet read stopped: The Sticky Notes window for the study in Vue PACS could not be opened. Nothing was typed: the Sticky Notes button was not found in Vue PACS.")
+        } finally capturedLog.Restore()
+        Assert.Equal(1, logged)
+        Assert.Equal("Sticky Note Not Opened", notifications[1].title)
+        Assert.True(InStr(notifications[1].text, "button was not found in Vue PACS"), notifications[1].text)
     }
 
     StickyOpenerFailureAlsoReportsAttendingOutcome() {
@@ -776,7 +305,6 @@ class WetReadTest {
 
         result := RunPinnedWetReadWorkflow(
             "wet read",
-            "uia",
             (*) => 0,
             (*) => (captureCalls++, {text: "", session: 0}),
             (*) => true,
@@ -787,7 +315,7 @@ class WetReadTest {
         Assert.False(result)
         Assert.Equal(0, captureCalls)
         Assert.Equal(2, notifications.Length)
-        Assert.Equal("Sticky Note Target Not Verified", notifications[1].title)
+        Assert.Equal("Sticky Note Not Opened", notifications[1].title)
         Assert.Equal("Attending Not Assigned", notifications[2].title)
         Assert.True(InStr(notifications[2].text, "Set it manually") > 0)
         ; PowerScribe was never asked, so it must not be blamed.
@@ -803,17 +331,17 @@ class WetReadTest {
         session := {stickyHwnd: 1}
         capturedLog := LogCapture()
         try {
-            RunPinnedWetReadWorkflow("wet read", "uia",
+            RunPinnedWetReadWorkflow("wet read",
                 (*) => {}.missingProperty, (*) => {text: "", session: 0}, (*) => true, (*) => true, notify)
-            openerFaults := capturedLog.Count("the Sticky Notes target could not be verified: PropertyError")
-            RunPinnedWetReadWorkflow("wet read", "uia",
+            openerFaults := capturedLog.Count("the Sticky Notes window could not be opened: PropertyError")
+            RunPinnedWetReadWorkflow("wet read",
                 (*) => session, (*) => {}.missingProperty, (*) => true, (*) => true, notify)
             captureFaults := capturedLog.Count("could not read the PowerScribe report: PropertyError")
-            RunPinnedWetReadWorkflow("wet read", "uia",
+            RunPinnedWetReadWorkflow("wet read",
                 (*) => session, (*) => {text: "EXAMINATION: CT HEAD", session: 0},
                 (*) => ThrowError("attending 'Dr. A' cannot be selected in PowerScribe automatically"),
                 (*) => true, notify)
-            RunPinnedWetReadWorkflow("wet read", "uia",
+            RunPinnedWetReadWorkflow("wet read",
                 (*) => session, (*) => {text: "EXAMINATION: CT HEAD", session: 0},
                 (*) => Integer("not a number"), (*) => true, notify)
             routingFaults := capturedLog.Count("Attending routing failed: TypeError")
@@ -832,47 +360,26 @@ class WetReadTest {
         Assert.True(stackLines >= 3, "each logged fault carries its call stack")
     }
 
-    WetReadStopsBeforePastingAreLogged() {
+    WetReadStopsBeforeTypingAreLogged() {
         notifications := []
         capturedLog := LogCapture()
         try {
-            RunPinnedWetReadWorkflow("wet read", "uia",
+            RunPinnedWetReadWorkflow("wet read",
                 (*) => 0, (*) => {text: "", session: 0}, (*) => true, (*) => true,
                 RecordNotification.Bind(notifications))
-            Assert.False(PerformWetReadPaste("wet read", "uia", 0))
-            openerStops := capturedLog.Count("Wet read stopped: A new Sticky Notes window")
-            pasteStops := capturedLog.Count("Wet read stopped: The pinned Sticky Notes window is no longer the verified target")
+            Assert.False(PerformWetReadPaste("wet read", 0))
+            driver := FakeWriterDriver()
+            driver.activateOk := false
+            Assert.False(PerformWetReadPaste("wet read", driver.Session()))
+            openerStops := capturedLog.Count("Wet read stopped: The Sticky Notes window for the study in Vue PACS could not be opened")
+            pasteStops := capturedLog.Count("Wet read stopped: The Sticky Notes window was not opened. Nothing was typed.")
+            activationStops := capturedLog.Count("Wet read stopped: The Sticky Notes window could not be brought to the front. Nothing was typed.")
         } finally capturedLog.Restore()
 
         Assert.Equal(1, openerStops)
         Assert.Equal(1, pasteStops)
-        Assert.Equal("Sticky Note Target Not Verified", TestRunner.dialogs[TestRunner.dialogs.Length].title)
-    }
-
-    ; The pinned window is proven again at the moment of pasting: one that no longer
-    ; activates is not touched, and a located field that is not the expected note
-    ; field gets nothing.
-    PasteTimeRechecksStopBeforeAnyWrite() {
-        session := {stickyHwnd: 200, pacsRoot: {ProcessId: 42, WinId: 100}}
-
-        session.driver := FakePinnedStickyDriver(false, 0)
-        Assert.False(PerformWetReadPaste("wet read", "uia", session))
-        Assert.Equal(0, session.driver.rootCalls)
-        Assert.True(InStr(TestRunner.dialogs[-1].text, "no longer the verified target"), TestRunner.dialogs[-1].text)
-
-        ; The reacquired root belongs to another process, or to another window.
-        session.driver := FakePinnedStickyDriver(true, FakeStickyTargetRoot(43, [], 200))
-        Assert.False(PerformWetReadPaste("wet read", "uia", session))
-        Assert.True(InStr(TestRunner.dialogs[-1].text, "could not be reacquired"), TestRunner.dialogs[-1].text)
-
-        session.driver := FakePinnedStickyDriver(true, FakeStickyTargetRoot(42, [], 201))
-        Assert.False(PerformWetReadPaste("wet read", "uia", session))
-        Assert.True(InStr(TestRunner.dialogs[-1].text, "target changed"), TestRunner.dialogs[-1].text)
-
-        button := FakeStickyTargetElement(UIA.Type.Button, 42, true, 200)
-        session.driver := FakePinnedStickyDriver(true, LocatingStickyTargetRoot(42, [button], 200, button))
-        Assert.False(PerformWetReadPaste("wet read", "uia", session))
-        Assert.True(InStr(TestRunner.dialogs[-1].text, "unexpected text target"), TestRunner.dialogs[-1].text)
+        Assert.Equal(1, activationStops)
+        Assert.Equal("Wet Read Stopped", TestRunner.dialogs[-1].title)
     }
 
     ThrowingStickyOpenerStillReportsAttendingOutcome() {
@@ -882,7 +389,6 @@ class WetReadTest {
 
         try result := RunPinnedWetReadWorkflow(
             "wet read",
-            "uia",
             ThrowError.Bind("simulated opener failure"),
             (*) => (captureCalls++, {text: "", session: 0}),
             (*) => true,
@@ -896,7 +402,7 @@ class WetReadTest {
         Assert.False(result)
         Assert.Equal(0, captureCalls)
         Assert.Equal(2, notifications.Length)
-        Assert.Equal("Sticky Note Target Not Verified", notifications[1].title)
+        Assert.Equal("Sticky Note Not Opened", notifications[1].title)
         Assert.True(InStr(notifications[1].text, "simulated opener failure") > 0)
         Assert.Equal("Attending Not Assigned", notifications[2].title)
         ; The opener error is reported once, in the sticky notice.
@@ -913,7 +419,6 @@ class WetReadTest {
 
         try result := RunPinnedWetReadWorkflow(
             "wet read",
-            "uia",
             (*) => stickySession,
             ThrowError.Bind("simulated report failure"),
             (*) => routeCalls++,
@@ -932,7 +437,7 @@ class WetReadTest {
         Assert.True(InStr(notifications[1].text, "simulated report failure") > 0)
     }
 
-    StickyTargetIsPinnedBeforePowerScribeRouting() {
+    StickyNoteIsOpenedBeforePowerScribeRouting() {
         events := []
         stickySession := {stickyHwnd: 200}
         openSticky := (*) => (events.Push("open-sticky"), stickySession)
@@ -941,14 +446,13 @@ class WetReadTest {
             {text: "EXAMINATION: CT CHEST", session: {hwnd: 300}}
         )
         routeAttending := (*) => events.Push("route-attending")
-        pasteAction := (text, mode, session) => (
-            events.Push("paste-pinned-sticky"),
+        pasteAction := (text, session) => (
+            events.Push("type-into-opened-sticky"),
             session = stickySession
         )
 
         result := RunPinnedWetReadWorkflow(
             "wet read",
-            "uia",
             openSticky,
             captureReport,
             routeAttending,
@@ -960,399 +464,200 @@ class WetReadTest {
         Assert.Equal("open-sticky", events[1])
         Assert.Equal("capture-report", events[2])
         Assert.Equal("route-attending", events[3])
-        Assert.Equal("paste-pinned-sticky", events[4])
+        Assert.Equal("type-into-opened-sticky", events[4])
     }
 }
 
-class FakeWetReadDriver {
-    __New(fieldValue) {
-        this.fieldValue := fieldValue
-        this.readCalls := 0
-        this.failedText := ""
-        this.uiaSupported := true
-        this.uiaSupportedCalls := 0
-        this.uiaCalls := 0
-        this.controlSupported := true
-        this.controlCalls := 0
-        this.throwOnRead := false
-        this.concurrentValueAfterWait := ""
+; The native driver over a fixed set of windows, for its title and process matching.
+class TitledWindowDriver extends NativeStickyNoteWindowDriver {
+    __New(windows) {
+        this.windows := windows
+        this.active := 0
     }
 
-    Read(field) {
-        this.readCalls++
-        if this.throwOnRead
-            throw Error("simulated unreadable field")
-        return this.fieldValue
-    }
-
-    WriteUIA(field, value) {
-        this.uiaCalls++
-        if (!this.uiaSupported || (this.uiaSupportedCalls > 0 && this.uiaCalls > this.uiaSupportedCalls))
-            return false
-        this.fieldValue := value = this.failedText ? "partial value" : value
-        return true
-    }
-
-    WriteControl(field, value) {
-        this.controlCalls++
-        if !this.controlSupported
-            return false
-        this.fieldValue := value = this.failedText ? "partial value" : value
-        return true
-    }
-
-    WaitForValue(field, expected, timeoutMs) {
-        if (this.concurrentValueAfterWait != "") {
-            this.fieldValue := this.concurrentValueAfterWait
-            this.concurrentValueAfterWait := ""
-            return false
+    ListVisibleWindows(winTitle := "") {
+        exe := RegExMatch(winTitle, "^ahk_exe (.+)$", &match) ? match[1] : ""
+        list := []
+        for window in this.windows {
+            if (exe = "" || window.exe = exe)
+                list.Push(window.hwnd)
         }
-        return this.fieldValue = expected
-    }
-}
-
-class PreconditionChangingWetReadDriver extends FakeWetReadDriver {
-    __New(firstValue, secondValue) {
-        super.__New(firstValue)
-        this.firstValue := firstValue
-        this.secondValue := secondValue
-    }
-
-    Read(*) {
-        this.readCalls++
-        return this.readCalls = 1 ? this.firstValue : this.secondValue
-    }
-}
-
-class FakeNativeWetReadValueDriver extends NativeWetReadDriver {
-    __New(currentValue) {
-        this.currentValue := currentValue
-        this.now := 0
-    }
-
-    Read(*) {
-        return this.currentValue
-    }
-
-    NowMilliseconds() {
-        return this.now
-    }
-
-    Pause(milliseconds) {
-        this.now += milliseconds
-    }
-}
-
-class UnsupportedWetReadElement {
-    GetPropertyValue(propertyId) {
-        return ""
-    }
-}
-
-class PostMutationFailingWetReadElement {
-    __New(value, failingValue) {
-        this.storedValue := value
-        this.failingValue := failingValue
-        this.writeCalls := 0
-    }
-
-    GetPropertyValue(propertyId) {
-        switch propertyId {
-            case UIA.Property.ValueValue: return this.storedValue
-            case UIA.Property.IsValuePatternAvailable: return true
-            case UIA.Property.IsLegacyIAccessiblePatternAvailable: return false
-        }
-        return ""
-    }
-
-    ValuePattern => FakeWetReadValuePattern(this)
-
-    WriteValue(text) {
-        this.writeCalls++
-        this.storedValue := text
-        if (text = this.failingValue)
-            throw Error("provider failed after mutation")
-    }
-}
-
-class FakeWritableWetReadElement {
-    __New() {
-        this.writeCalls := 0
-        this.storedValue := ""
-    }
-
-    GetPropertyValue(property) {
-        return property = UIA.Property.IsValuePatternAvailable
-    }
-
-    ValuePattern => FakeWetReadValuePattern(this)
-
-    WriteValue(text) {
-        this.writeCalls++
-        this.storedValue := text
-    }
-}
-
-; The ValuePattern of a fake note field: SetValue writes through the field's
-; WriteValue, as UIAValue.Write calls it.
-class FakeWetReadValuePattern {
-    __New(element) {
-        this.element := element
-    }
-
-    SetValue(text) {
-        this.element.WriteValue(text)
-    }
-}
-
-class FakeStickyTargetElement {
-    __New(elementType, processId, readable := false, windowId := 100, name := "") {
-        this.Type := elementType
-        this.ProcessId := processId
-        this.WinId := windowId
-        this.Name := name
-        this.IsEnabled := true
-        this.IsValuePatternAvailable := readable
-        this.IsLegacyIAccessiblePatternAvailable := false
-        this.NativeWindowHandle := 0
-    }
-}
-
-class UnreadableStickyTargetElement {
-    __New(processId, windowId) {
-        this.ProcessId := processId
-        this.WinId := windowId
-        this.Name := "scn_sticky_notes"
-        this.IsEnabled := true
-    }
-
-    Type {
-        get {
-            throw Error("simulated unreadable UIA property")
-        }
-    }
-}
-
-class UnreadableNoteFieldElement {
-    Type := UIA.Type.Document
-
-    ProcessId {
-        get {
-            throw Error("simulated unreadable note-field property")
-        }
-    }
-}
-
-; A Sticky Notes root whose positional path locates the given element.
-class LocatingStickyTargetRoot extends FakeStickyTargetRoot {
-    __New(processId, children, windowId, pathElement) {
-        super.__New(processId, children, windowId)
-        this.pathElement := pathElement
-    }
-
-    ElementFromPath(*) {
-        return this.pathElement
-    }
-}
-
-; The pinned Sticky Notes session PerformWetReadPaste reacquires: whether its
-; window still activates, and the root it returns afterwards.
-class FakePinnedStickyDriver {
-    __New(activates, root) {
-        this.activates := activates
-        this.root := root
-        this.rootCalls := 0
-    }
-
-    ActivateSticky(*) {
-        return this.activates
-    }
-
-    GetRoot(*) {
-        this.rootCalls++
-        return this.root
-    }
-}
-
-class FakeStickyTargetRoot {
-    __New(processId, children, windowId := 100) {
-        this.ProcessId := processId
-        this.WinId := windowId
-        this.children := children
-    }
-
-    FindElements(condition) {
-        matches := []
-        for child in this.children {
-            if (HasProp(condition, "Name") && child.Name = condition.Name)
-                matches.Push(child)
-            else if (HasProp(condition, "Type")
-                && ((condition.Type = "Document" && child.Type = UIA.Type.Document)
-                || (condition.Type = "Edit" && child.Type = UIA.Type.Edit)))
-                matches.Push(child)
-        }
-        return matches
-    }
-}
-
-class FakeStickyNoteWindowDriver {
-    __New(pacsRoot, stickyRoot := 0, activatedStickyHwnd := 0) {
-        this.pacsRoot := pacsRoot
-        this.stickyRoot := stickyRoot
-        this.activatedStickyHwnd := activatedStickyHwnd
-        this.invokeCalls := 0
-        this.livePacsTitle := "Vue PACS"
-        this.exactPacsWindowCount := 1
-        this.preexistingProcessWindows := [pacsRoot.WinId]
-        this.postClickStickyWindows := activatedStickyHwnd > 0
-            ? [activatedStickyHwnd]
-            : []
-        this.stickyWindowQueries := 0
-        this.stickyOwner := pacsRoot.WinId
-        ; Scripted answers for successive PACS focus checks; once used up, PACS
-        ; stays active.
-        this.activeResults := []
-        this.rootCalls := 0
-    }
-
-    CaptureActivePacs(*) {
-        return this.pacsRoot.WinId
-    }
-
-    GetRoot(hwnd) {
-        this.rootCalls++
-        if (hwnd = this.pacsRoot.WinId)
-            return this.pacsRoot
-        if (this.stickyRoot && hwnd = this.stickyRoot.WinId)
-            return this.stickyRoot
-        return 0
-    }
-
-    IsActive(hwnd) {
-        if (this.activeResults.Length && !this.activeResults.RemoveAt(1))
-            return false
-        return hwnd = this.pacsRoot.WinId
-    }
-
-    IsExpectedPacsSession(target, hwnd, processId) {
-        return this.exactPacsWindowCount = 1
-            && this.livePacsTitle == target.title
-            && hwnd = this.pacsRoot.WinId
-            && processId = this.pacsRoot.ProcessId
-    }
-
-    InvokeStickyButton(*) {
-        this.invokeCalls++
-        return true
-    }
-
-    WaitForActiveSticky(*) {
-        return this.activatedStickyHwnd
-    }
-
-    GetOwner(*) {
-        return this.stickyOwner
-    }
-
-    FindProcessWindows(*) {
-        this.stickyWindowQueries++
-        return (this.stickyWindowQueries = 1
-            ? this.preexistingProcessWindows
-            : this.postClickStickyWindows).Clone()
-    }
-
-    FindExactStickyWindows(*) {
-        this.stickyWindowQueries++
-        return this.postClickStickyWindows.Clone()
-    }
-}
-
-class FakeWetReadControlDriver {
-    __New() {
-        this.writes := []
-    }
-
-    SetText(hwnd, value) {
-        this.writes.Push({hwnd: hwnd, value: value})
-    }
-}
-
-class FakeWetReadTargetDriver {
-    __New(matches) {
-        this.matches := matches
-    }
-
-    IsExpectedTarget(*) {
-        return this.matches
-    }
-}
-
-; The real NativeStickyNoteWindowDriver gate over scripted Win32 primitives, so the
-; session identity checks run as shipped. PACS window 100, process 42; window 150 is
-; an unrelated pre-existing process window and 200 is the new Sticky Notes window.
-class PrimitiveStickyNoteWindowDriver extends NativeStickyNoteWindowDriver {
-    __New(processWindows, titles, owners) {
-        this.processWindows := processWindows
-        this.titles := titles
-        this.owners := owners
-        this.activationSucceeds := true
-        this.siblingOnActivation := 0
-        this.activated := []
-    }
-
-    static Standard() {
-        return PrimitiveStickyNoteWindowDriver(
-            [100, 150, 200],
-            Map(100, "Vue PACS", 150, "Toolbar", 200, "Sticky Notes"),
-            Map(200, 100)
-        )
-    }
-
-    static Session() {
-        return {
-            pacsHwnd: 100,
-            stickyHwnd: 200,
-            processId: 42,
-            preexistingProcessWindows: [100, 150]
-        }
-    }
-
-    AddWindow(hwnd, title, owner) {
-        this.processWindows.Push(hwnd)
-        this.titles[hwnd] := title
-        this.owners[hwnd] := owner
-    }
-
-    FindProcessWindows(processId) {
-        return IsObject(this.processWindows) ? this.processWindows.Clone() : 0
+        return list
     }
 
     GetTitle(hwnd) {
-        if !this.titles.Has(hwnd)
-            throw TargetError("Target window not found.")
-        return this.titles[hwnd]
+        for window in this.windows {
+            if (window.hwnd = hwnd)
+                return window.title
+        }
+        return ""
     }
 
-    GetOwner(hwnd) {
-        return this.owners.Has(hwnd) ? this.owners[hwnd] : 0
-    }
+    ActiveWindow() => this.active
 
-    ActivateWindow(hwnd) {
-        this.activated.Push(hwnd)
-        if this.siblingOnActivation
-            this.AddWindow(this.siblingOnActivation, "Sticky Notes", 100)
-        return this.activationSucceeds
+    static Join(list) {
+        text := ""
+        for item in list
+            text .= (text = "" ? "" : ",") item
+        return text
     }
 }
 
-class FakeClickResult {
-    __New(result) {
-        this.result := result
+; Opener double. stickyLists holds successive ListStickyWindows results: the first
+; is the list before the button is pressed; the last repeats.
+class FakeOpenerDriver {
+    __New(pacsWindows, buttonWindow, stickyLists, activeAfterClick := 0) {
+        this.pacsWindows := pacsWindows
+        this.buttonWindow := buttonWindow
+        this.stickyLists := stickyLists
+        this.activeAfterClick := activeAfterClick
+        this.listCalls := 0
+        this.activateOk := true
+        this.active := 0
+        this.clock := 0
+        this.actions := []
     }
 
-    Click(*) {
-        if (this.result is Error)
-            throw this.result
-        return this.result
+    ListPacsWindows() => this.pacsWindows.Clone()
+    GetRoot(hwnd) => {hwnd: hwnd}
+
+    FindByName(root, name) {
+        if (root.hwnd = this.buttonWindow && name == StickyNoteOpener.stickyButtonName)
+            return {hwnd: root.hwnd}
+        return 0
+    }
+
+    Activate(hwnd) {
+        this.actions.Push("activate " hwnd)
+        if this.activateOk
+            this.active := hwnd
+        return this.activateOk
+    }
+
+    ListStickyWindows() {
+        this.listCalls++
+        return this.stickyLists[Min(this.listCalls, this.stickyLists.Length)].Clone()
+    }
+
+    Invoke(button) {
+        this.actions.Push("invoke " button.hwnd)
+        if this.activeAfterClick
+            this.active := this.activeAfterClick
+        return true
+    }
+
+    ActiveWindow() => this.active
+    Describe(hwnd) => "fake.exe/FakeClass"
+    Now() => this.clock
+
+    Pause(milliseconds) {
+        this.clock += milliseconds
+    }
+
+    Log() {
+        text := ""
+        for action in this.actions
+            text .= (text = "" ? "" : "|") action
+        return text
+    }
+}
+
+class FakeWriterElement {
+    __New(path, type := UIA.Type.Button) {
+        this.path := path
+        this.Type := type
+    }
+}
+
+; Writer double. The note field shows the typed text charsPerPoll characters per
+; read (0 = at once), stopping at maxVisible, after any baseline text.
+class FakeWriterDriver {
+    __New() {
+        this.elements := Map(
+            "YY0", FakeWriterElement("YY0"),
+            "87K/", FakeWriterElement("87K/", UIA.Type.Text),
+            "V", FakeWriterElement("V", UIA.Type.Document),
+            "YY0/", FakeWriterElement("YY0/")
+        )
+        this.actions := []
+        this.activateOk := true
+        this.active := 0
+        this.loseFocusAfter := ""
+        this.readable := true
+        this.baseline := ""
+        this.typed := ""
+        this.charsPerPoll := 0
+        this.maxVisible := -1
+        this.visible := 0
+        this.readLineBreak := "`r`n"
+        this.reads := 0
+        this.saveResponds := true
+        this.visibleAtSave := -1
+        this.clock := 0
+    }
+
+    Session() => {stickyHwnd: 200, pacsHwnd: 100, driver: this}
+
+    Record(action) {
+        this.actions.Push(action)
+        if (action = this.loseFocusAfter)
+            this.active := 0
+    }
+
+    Activate(hwnd) {
+        this.Record("activate")
+        if this.activateOk
+            this.active := hwnd
+        return this.activateOk
+    }
+
+    IsActive(hwnd) => this.active = hwnd
+    GetRoot(hwnd) => {hwnd: hwnd}
+    FindByPath(root, path) => this.elements.Has(path) ? this.elements[path] : 0
+
+    Invoke(element) {
+        this.Record("invoke " element.path)
+        if (element.path = StickyNoteWriter.savePath) {
+            this.visibleAtSave := this.visible
+            return this.saveResponds
+        }
+        return true
+    }
+
+    MouseClick(element) => this.Record("mouse " element.path)
+    SendKey(keys) => this.Record("key " keys)
+    ControlClick(element) => this.Record("controlclick " element.path)
+
+    TypeText(text) {
+        this.Record("type " text)
+        this.typed := text
+        this.visible := this.charsPerPoll ? 0 : StrLen(text)
+        if (this.maxVisible >= 0)
+            this.visible := Min(this.visible, this.maxVisible)
+    }
+
+    ReadText(element) {
+        if !this.readable
+            return {supported: false, value: ""}
+        this.reads++
+        if (this.typed != "" && this.charsPerPoll) {
+            limit := this.maxVisible >= 0 ? this.maxVisible : StrLen(this.typed)
+            this.visible := Min(this.visible + this.charsPerPoll, limit, StrLen(this.typed))
+        }
+        shown := SubStr(this.typed, 1, this.visible)
+        return {supported: true, value: StrReplace(this.baseline shown, "`n", this.readLineBreak)}
+    }
+
+    Now() => this.clock
+
+    Pause(milliseconds) {
+        this.clock += milliseconds
+    }
+
+    Log() {
+        text := ""
+        for action in this.actions
+            text .= (text = "" ? "" : "|") action
+        return text
     }
 }

@@ -7,8 +7,8 @@
  * PACSCommands.RunClinicalCommand holds the lease, notices are queued and shown in
  * order once it has released the lease; at any other time they show at once.
  *
- * A prompt whose answer the command needs (PromptWetReadMode) is not a notice and
- * stays modal under the lease.
+ * A prompt whose answer the command needs is not a notice and stays modal under
+ * the lease.
  */
 class ClinicalNotices {
     static deferring := false
