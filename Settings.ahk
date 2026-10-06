@@ -22,8 +22,13 @@ class Settings {
     ; One day is a deliberate product bound as well as protection from AutoHotkey's
     ; DWORD-backed timer period wrapping after seconds are multiplied by 1000.
     static maxRefreshIntervalSeconds := 86400
-    static dialogLogicalWidth := 440
+    ; The settings window's width, and the most height its content may take (both
+    ; logical units); the window is as tall as its content. Both fit a 1366x768
+    ; screen at 150% scaling (SettingsTest), and the layout audit checks the content
+    ; stays within the height.
+    static dialogLogicalWidth := 680
     static dialogLogicalHeight := 420
+    static dialogColumnWidth := 300
     ; Keys are PascalCase, unlike other map keys (style guide s4), because each one is
     ; also the persisted settings.ini key name.
     static defaultSettings := Map(
@@ -291,66 +296,70 @@ class Settings {
             settingsGui := UITheme.NewWindow("PACS Assistant - Settings")
             settingsGui.settingsRevision := this.revision
             checkboxes := Map()
-            width := this.dialogLogicalWidth - 2 * UITheme.margin
-            ; Page content sits inside the tab's border; x/w below are for that column.
-            x := UITheme.margin + 16
-            w := width - 32
-            tab := settingsGui.Add(
-                "Tab3",
-                "xm ym w" width " h312",
-                ["General", "PowerScribe", "Notifications"]
-            )
+            ; One page, two columns, every position relative to the control above it,
+            ; and a height that follows the content, so no control can land on
+            ; another or below the buttons at any display scaling.
+            column := this.dialogColumnWidth
+            gutter := this.dialogLogicalWidth - 2 * UITheme.margin - 2 * column
+            left := UITheme.margin
+            right := left + column + gutter
+            top := UITheme.margin
+            buttonWidth := UITheme.buttonWidth
+            fieldWidth := column - buttonWidth - UITheme.gap
 
-            tab.UseTab(1)
-            UITheme.AddSectionLabel(settingsGui, "Updates", "x" x " y" (UITheme.margin + 44) " w" w)
-            checkboxes["AutoUpdate"] := settingsGui.Add("Checkbox", "x" x " y+8 w" w, "Check for updates &automatically")
-            checkboxes["SkipBetaVersions"] := settingsGui.Add("Checkbox", "x" x " y+6 w" w, "Skip &beta versions")
+            ; Left column: updates, then the PowerScribe microphone.
+            UITheme.AddSectionLabel(settingsGui, "Updates", "x" left " y" top " w" column)
+            checkboxes["AutoUpdate"] := settingsGui.Add("Checkbox", "x" left " y+8 w" column, "Check for updates &automatically")
+            checkboxes["SkipBetaVersions"] := settingsGui.Add("Checkbox", "x" left " y+6 w" column, "Skip &beta versions")
             if AppVersion.isDevBuild
-                UITheme.AddNote(settingsGui, "This is a development build, so it never checks for updates.", "x" x " y+6 w" w)
-            UITheme.AddSectionLabel(settingsGui, "PACS worklist", "x" x " y+18 w" w)
-            checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x" x " y+8 w" w, "&Refresh PACS and scan for new studies automatically")
-            settingsGui.Add("Text", "x" x " y+12", "Every")
-            refreshIntervalEdit := settingsGui.Add("Edit", "x+6 yp-3 w64 Number Right", this.Get("RefreshInterval"))
-            settingsGui.Add("Text", "x+6 yp+3", "seconds (" this.minRefreshIntervalSeconds " or more)")
-            UITheme.AddNote(
-                settingsGui,
-                "New studies are announced only while a sound or notification is turned on in the Notifications tab.",
-                "x" x " y+10 w" w
-            )
+                UITheme.AddNote(settingsGui, "This development build never checks for updates.", "x" left " y+6 w" column)
 
-            tab.UseTab(2)
-            UITheme.AddSectionLabel(settingsGui, "Microphone", "x" x " y" (UITheme.margin + 44) " w" w)
-            checkboxes["SwapMicrophoneOnLogin"] := settingsGui.Add("Checkbox", "x" x " y+8 w" w, "Select a &microphone when PowerScribe logs in")
-            settingsGui.Add("Text", "x" x " y+12 w" w, "Microphone &name")
-            micNameEdit := settingsGui.Add("Edit", "x" x " y+4 w" w, this.Get("MicrophoneName"))
+            UITheme.AddSectionLabel(settingsGui, "PowerScribe microphone", "x" left " y+22 w" column)
+            checkboxes["SwapMicrophoneOnLogin"] := settingsGui.Add("Checkbox", "x" left " y+8 w" column, "Select a &microphone when PowerScribe logs in")
+            settingsGui.Add("Text", "x" left " y+12 w" column, "Microphone &name")
+            micNameEdit := settingsGui.Add("Edit", "x" left " y+4 r1 w" column, this.Get("MicrophoneName"))
             UITheme.SetPlaceholder(micNameEdit, "For example, PowerMic")
             UITheme.AddNote(
                 settingsGui,
                 "An exact device name is best. A partial name such as PowerMic works when it matches only one device.",
-                "x" x " y+6 w" w
+                "x" left " y+6 w" column
             )
 
-            tab.UseTab(3)
-            UITheme.AddSectionLabel(settingsGui, "When a new study arrives", "x" x " y" (UITheme.margin + 44) " w" w)
-            checkboxes["AudioAlertNewCase"] := settingsGui.Add("Checkbox", "x" x " y+8 w" w, "Play a &sound")
-            checkboxes["MessageBoxNewCase"] := settingsGui.Add("Checkbox", "x" x " y+6 w" w, "Show a &Windows notification")
-            UITheme.AddSectionLabel(settingsGui, "Sound", "x" x " y+18 w" w)
-            buttonWidth := UITheme.buttonWidth
-            soundDropDown := settingsGui.Add("DropDownList", "x" x " y+8 w" (w - buttonWidth - UITheme.gap), this.alertSounds)
+            ; Right column: everything about new studies.
+            UITheme.AddSectionLabel(settingsGui, "New studies", "x" right " y" top " w" column)
+            checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x" right " y+8 w" column, "Auto-&refresh PACS and scan for new studies")
+            settingsGui.Add("Text", "x" right " y+12", "Every")
+            refreshIntervalEdit := settingsGui.Add("Edit", "x+6 yp-3 r1 w64 Number Right", this.Get("RefreshInterval"))
+            settingsGui.Add("Text", "x+6 yp+3", "seconds (" this.minRefreshIntervalSeconds " or more)")
+            checkboxes["AudioAlertNewCase"] := settingsGui.Add("Checkbox", "x" right " y+14 w" column, "Play a &sound when one arrives")
+            checkboxes["MessageBoxNewCase"] := settingsGui.Add("Checkbox", "x" right " y+6 w" column, "Show a &Windows notification when one arrives")
+            UITheme.AddNote(settingsGui, "Scanning runs only while a sound or a notification is on.", "x" right " y+6 w" column)
+
+            settingsGui.Add("Text", "x" right " y+14 w" column, "Alert s&ound")
+            soundDropDown := settingsGui.Add("DropDownList", "x" right " y+4 w" fieldWidth, this.alertSounds)
             soundDropDown.Value := this.FindSoundIndex(this.Get("AlertSound"))
-            settingsGui.Add("Button", "x+" UITheme.gap " yp-1 w" buttonWidth " h" UITheme.buttonHeight, "&Test")
+            soundDropDown.GetPos(,,, &fieldHeight)
+            settingsGui.Add("Button", "x+" UITheme.gap " yp w" buttonWidth " h" fieldHeight, "&Test")
                 .OnEvent("Click", (*) => (
                     settingsGui.Opt("+OwnDialogs"),
                     this.TestSound(soundDropDown.Text, customSoundEdit.Text)
                 ))
-            settingsGui.Add("Text", "x" x " y+12 w" w, "Custom sound file")
-            customSoundEdit := settingsGui.Add("Edit", "x" x " y+4 w" (w - buttonWidth - UITheme.gap) " ReadOnly", this.Get("CustomSoundFile"))
-            browseButton := settingsGui.Add("Button", "x+" UITheme.gap " yp-2 w" buttonWidth " h" UITheme.buttonHeight, "Br&owse...")
+            settingsGui.Add("Text", "x" right " y+12 w" column, "Custom sound file")
+            customSoundEdit := settingsGui.Add("Edit", "x" right " y+4 r1 w" fieldWidth " ReadOnly", this.Get("CustomSoundFile"))
+            UITheme.ShowEnd(customSoundEdit)
+            customSoundEdit.GetPos(,,, &fieldHeight)
+            browseButton := settingsGui.Add("Button", "x+" UITheme.gap " yp w" buttonWidth " h" fieldHeight, "Br&owse...")
             browseButton.OnEvent("Click", (*) => (
                 settingsGui.Opt("+OwnDialogs"),
                 this.BrowseSound(customSoundEdit)
             ))
-            UITheme.AddNote(settingsGui, "A .wav or .mp3 file, played when the sound is Custom File.", "x" x " y+6 w" w)
+            UITheme.AddNote(settingsGui, "A .wav or .mp3 file, for the Custom File sound.", "x" right " y+6 w" column)
+
+            ; A rule down the gutter, as tall as the taller column.
+            UITheme.AddSeparator(
+                settingsGui,
+                "x" (left + column + gutter // 2) " y" top " w1 h" (UITheme.ContentBottom(settingsGui) - top)
+            )
 
             for setting, checkbox in checkboxes {
                 checkbox.Value := this.Get(setting)
@@ -364,7 +373,6 @@ class Settings {
             soundDropDown.OnEvent("Change", syncCustomSound)
             syncCustomSound()
 
-            tab.UseTab()
             controls := {
                 checkboxes: checkboxes,
                 refreshInterval: refreshIntervalEdit,
@@ -373,7 +381,7 @@ class Settings {
                 customSound: customSoundEdit
             }
             cancel := (*) => settingsGui.Destroy()
-            UITheme.AddFooter(settingsGui, width, [
+            UITheme.AddFooter(settingsGui, this.dialogLogicalWidth - 2 * UITheme.margin, [
                 {
                     text: "Save",
                     default: true,
@@ -385,7 +393,7 @@ class Settings {
             settingsGui.OnEvent("Close", cancel)
             settingsGui.OnEvent("Escape", cancel)
 
-            settingsGui.Show("w" this.dialogLogicalWidth " h" this.dialogLogicalHeight)
+            UITheme.ShowDialog(settingsGui)
             return settingsGui
         } finally this.dialogRelease.Call()
     }
@@ -457,8 +465,10 @@ class Settings {
     ; Browse for custom sound file
     static BrowseSound(editControl) {
         selectedPath := FileSelect(3,, "Select Sound File", "Sound Files (*.wav; *.mp3)")
-        if selectedPath
+        if selectedPath {
             editControl.Value := selectedPath
+            UITheme.ShowEnd(editControl)
+        }
     }
 
     ; Test selected sound

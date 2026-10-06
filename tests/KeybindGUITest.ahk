@@ -80,6 +80,9 @@ class KeybindGUITest {
         "TestDiscardBeforeCaseRenameKeepsStoredRuntime",
         "TestSuccessfulMainRenameDoesNotReapplyHotkeys",
         "TestProfileSelectionRequiresTheExactName",
+        "TestEveryBuiltInCommandHasANamedGroup",
+        "TestFunctionDisplayOrderFollowsTheGroups",
+        "TestFunctionRowsOutsideTheGroupedListAreOnlyAdded",
         "TestProfileSummaryCountsFunctionsAndNamesTheDefault",
         "TestScopeChoiceMapsTheDialogToFlags",
         "TestScopeWithNoWindowTickedIsRefused",
@@ -2201,6 +2204,36 @@ class KeybindGUITest {
         Assert.Equal(0, this.gui.ProfileListIndex(["AA"], "A"))
         Assert.Equal(0, this.gui.ProfileListIndex(["a"], "A"))
         Assert.Equal(0, this.gui.ProfileListIndex(["A"], ""))
+    }
+
+    ; A new built-in command must be given a group on purpose, not fall into Other.
+    TestEveryBuiltInCommandHasANamedGroup() {
+        for name, _ in PACSCommands.commands {
+            groupId := KeybindGUI.FunctionGroupId(name)
+            Assert.True(groupId < KeybindGUI.customGroupId, name)
+        }
+        Assert.Equal(KeybindGUI.customGroupId, KeybindGUI.FunctionGroupId("Custom: Macro"))
+        Assert.Equal(KeybindGUI.functionGroups.Length, KeybindGUI.FunctionGroupId("Retired Command"))
+    }
+
+    TestFunctionDisplayOrderFollowsTheGroups() {
+        binds := Map(
+            "Sign Report", "^s", "Custom: B", "", "Next Series", "",
+            "Toggle Dictation", "", "Retired Command", "", "Custom: A", ""
+        )
+        order := KeybindGUI.FunctionDisplayOrder(binds)
+        expected := ["Toggle Dictation", "Sign Report", "Next Series", "Custom: A", "Custom: B", "Retired Command"]
+        Assert.Equal(expected.Length, order.Length)
+        for index, name in expected
+            Assert.Equal(name, order[index])
+    }
+
+    ; Outside the main window's grouped list (as in these tests' list doubles) a row
+    ; is only added.
+    TestFunctionRowsOutsideTheGroupedListAreOnlyAdded() {
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
+        Assert.Equal(2, this.gui.AddFunctionRow(listView, "Draft Report", "Unassigned", "Any window"))
+        Assert.Equal("Draft Report", listView.GetText(2, 1))
     }
 
     TestProfileSummaryCountsFunctionsAndNamesTheDefault() {

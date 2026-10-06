@@ -40,8 +40,28 @@ class KeybindGUI {
     ; Main window content width and keybind-list height at first show, in logical
     ; units. The window can be resized larger; the list takes the extra space.
     static mainContentWidth := 640
-    static mainListHeight := 280
+    static mainListHeight := 360
     static mainMinListHeight := 120
+    ; The main list's groups, in display order, each with its built-in commands in
+    ; the order they are listed. Presentation only: a function's group never affects
+    ; its binding. Custom functions go to Custom; a name no group lists (such as a
+    ; command from another version) goes to the last group.
+    static functionGroups := [
+        {name: "PowerScribe", functions: [
+            "Toggle Dictation", "Draft Report", "Sign Report", "Select Next Field",
+            "Select Previous Field", "Delete Previous Word", "Delete Next Word",
+            "Set PowerScribe Microphone"
+        ]},
+        {name: "PACS", functions: ["Next Series", "Previous Series", "Open/Force Restart PACS"]},
+        {name: "Wet reads", functions: ["Paste Wet Read", "Paste Wet Read (Clipboard)"]},
+        {name: "Windows", functions: ["Toggle PowerScribe Window", "Toggle EPIC Window"]},
+        {name: "Custom", functions: []},
+        {name: "Not in this version", functions: []}
+    ]
+    static customGroupId := 5
+    ; Default values ("Unassigned", "Any window") are drawn in this color
+    ; (COLORREF, 0xBBGGRR): 4.5:1 against white, so still readable.
+    static mutedTextColor := 0x767676
 
     __New() {
         ProfileManager.LoadProfiles()
@@ -82,9 +102,8 @@ class KeybindGUI {
         this.gui.Show("w" width " h" height)
         ; Start in the list, so the arrow keys, F2 and Delete work at once.
         view.list.Focus()
-        ; MinSize is in physical pixels and the layout is in logical units.
-        this.gui.Opt("+MinSize" Round(width * A_ScreenDPI / 96) "x"
-            Round(this.MainViewHeight(view, KeybindGUI.mainMinListHeight) * A_ScreenDPI / 96))
+        ; Logical units, like the layout: Gui scales MinSize for the display itself.
+        this.gui.Opt("+MinSize" width "x" this.MainViewHeight(view, KeybindGUI.mainMinListHeight))
         A_IconTip := "PACS Assistant - " profileName
 
         if applyBinds
@@ -112,18 +131,22 @@ class KeybindGUI {
         lv := mainGui.Add("ListView", "w600 h200 -Multi +LV0x10000", ["Function", "Keybind", "Active In"])
         view.list := lv
         UITheme.UseExplorerTheme(lv)
+        KeybindGUI.EnableFunctionGroups(lv)
         currentProfile := ProfileManager.profiles[profileName]
-        for funcName, bind in currentProfile.binds
-            lv.Add(, funcName, this.PrettifyHotkey(bind), this.ScopeLabel(funcName))
+        for funcName in KeybindGUI.FunctionDisplayOrder(currentProfile.binds) {
+            bind := currentProfile.binds[funcName]
+            this.AddFunctionRow(lv, funcName, this.PrettifyHotkey(bind), this.ScopeLabel(funcName))
+        }
         if lv.GetCount()
-            lv.Modify(1, "Select Focus")
+            lv.Modify(1, "Select Focus")  ; rows were added in display order
         lv.OnEvent("ItemSelect", (*) => this.RefreshMainView())
         lv.OnEvent("DoubleClick", (ctrl, row) => row ? this.ChangeSelectedKeybind(ctrl) : 0)
         lv.OnEvent("ContextMenu", (ctrl, row, *) => this.ShowFunctionMenu(ctrl, row))
         lv.OnNotify(-155, (ctrl, lParam) => this.OnFunctionListKey(ctrl, lParam))  ; LVN_KEYDOWN
+        lv.OnNotify(-12, (ctrl, lParam) => KeybindGUI.OnFunctionListDraw(ctrl, lParam))  ; NM_CUSTOMDRAW
 
         ; Footer: profile-wide settings at the left, Save at the right.
-        view.rule := UITheme.AddSeparator(mainGui, "x0 w10")
+        view.rule := UITheme.AddSeparator(mainGui, "x0 w10 h1")
         view.attendingsButton := this.AddMainButton(mainGui, "Modality Atte&ndings...", 160, (*) => this.ShowModalityAttendingsDialog())
         view.settingsButton := this.AddMainButton(mainGui, "Settin&gs...", 104, (*) => Settings.ShowDialog())
         view.saveButton := this.AddMainButton(mainGui, "&Save Changes", 128, (*) => this.SaveCurrentProfile())
@@ -132,6 +155,117 @@ class KeybindGUI {
         scale := A_ScreenDPI / 96
         view.status.SetParts(Round(220 * scale), Round(200 * scale))
         return view
+    }
+
+    /**
+     * Adds a function's row to a keybind list. In the main window's grouped list the
+     * row is placed in its group at once: a grouped ListView does not show a row
+     * that belongs to no group.
+     * @returns the row number
+     */
+    AddFunctionRow(listView, funcName, bindText, scopeText) {
+        row := listView.Add(, funcName, bindText, scopeText)
+        if (row && HasProp(listView, "functionGroupsEnabled"))
+            KeybindGUI.SetRowGroup(listView, row, KeybindGUI.FunctionGroupId(funcName))
+        return row
+    }
+
+    ; The group a function's row goes in (a functionGroups index).
+    static FunctionGroupId(funcName) {
+        if (InStr(funcName, "Custom: ") = 1)
+            return this.customGroupId
+        for index, group in this.functionGroups {
+            for name in group.functions {
+                if (name == funcName)
+                    return index
+            }
+        }
+        return this.functionGroups.Length
+    }
+
+    ; A profile's function names in display order: each group's built-in commands
+    ; in the order the group lists them, then custom functions, then the rest.
+    static FunctionDisplayOrder(binds) {
+        ordered := []
+        listed := Map()
+        for group in this.functionGroups {
+            for name in group.functions {
+                if binds.Has(name) {
+                    ordered.Push(name)
+                    listed[name] := true
+                }
+            }
+        }
+        for groupId in [this.customGroupId, this.functionGroups.Length] {
+            for name, _ in binds {
+                if (!listed.Has(name) && this.FunctionGroupId(name) = groupId) {
+                    ordered.Push(name)
+                    listed[name] := true
+                }
+            }
+        }
+        return ordered
+    }
+
+    ; Turns on group view and adds every group (LVM_ENABLEGROUPVIEW,
+    ; LVM_INSERTGROUP). A group without rows is not shown.
+    static EnableFunctionGroups(listView) {
+        SendMessage(0x109D, true, 0, listView)
+        ; LVGROUP up to uAlign: cbSize, mask, pszHeader, cchHeader, pszFooter,
+        ; cchFooter, iGroupId, stateMask, state, uAlign.
+        headerOffset := 8
+        groupIdOffset := A_PtrSize = 8 ? 36 : 24
+        size := A_PtrSize = 8 ? 56 : 40
+        for index, group in this.functionGroups {
+            header := group.name
+            info := Buffer(size, 0)
+            NumPut("UInt", size, info, 0)
+            NumPut("UInt", 0x11, info, 4)  ; LVGF_HEADER | LVGF_GROUPID
+            NumPut("Ptr", StrPtr(header), info, headerOffset)
+            NumPut("Int", index, info, groupIdOffset)
+            SendMessage(0x1091, -1, info.Ptr, listView)
+        }
+        listView.functionGroupsEnabled := true
+    }
+
+    ; LVM_SETITEMW with LVIF_GROUPID: moves a row into a group.
+    static SetRowGroup(listView, row, groupId) {
+        item := Buffer(A_PtrSize = 8 ? 88 : 60, 0)
+        NumPut("UInt", 0x100, item, 0)
+        NumPut("Int", row - 1, item, 4)
+        NumPut("Int", groupId, item, A_PtrSize = 8 ? 52 : 40)
+        SendMessage(0x104C, 0, item.Ptr, listView)
+    }
+
+    /**
+     * NM_CUSTOMDRAW for the keybind list: draws the default values, "Unassigned"
+     * and "Any window", in a muted color so the keybinds that are set stand out.
+     * Any failure leaves the default drawing.
+     */
+    static OnFunctionListDraw(listView, lParam) {
+        ; NMLVCUSTOMDRAW: dwDrawStage after the NMHDR header; dwItemSpec, clrText and
+        ; iSubItem at their x64 or x86 offsets.
+        stageOffset := 3 * A_PtrSize
+        itemOffset := A_PtrSize = 8 ? 56 : 36
+        textColorOffset := A_PtrSize = 8 ? 80 : 48
+        subItemOffset := A_PtrSize = 8 ? 88 : 56
+        try {
+            stage := NumGet(lParam, stageOffset, "UInt")
+            if (stage = 0x1)      ; CDDS_PREPAINT
+                return 0x20       ; CDRF_NOTIFYITEMDRAW
+            if (stage = 0x10001)  ; CDDS_ITEMPREPAINT
+                return 0x20       ; CDRF_NOTIFYSUBITEMDRAW
+            if (stage = 0x30001) {  ; CDDS_ITEMPREPAINT | CDDS_SUBITEM
+                row := NumGet(lParam, itemOffset, "UPtr") + 1
+                column := NumGet(lParam, subItemOffset, "Int") + 1
+                text := column > 1 ? listView.GetText(row, column) : ""
+                muted := (column = 2 && text == "Unassigned") || (column = 3 && text == "Any window")
+                ; Set for every cell: a color set for one cell carries into the next.
+                color := muted ? this.mutedTextColor : DllCall("GetSysColor", "Int", 8, "UInt")
+                NumPut("UInt", color, lParam, textColorOffset)
+            }
+        }
+        return 0
     }
 
     AddMainButton(mainGui, text, width, action) {
@@ -153,6 +287,8 @@ class KeybindGUI {
         toolsMenu.Add("Modality &Attendings...", (*) => this.ShowModalityAttendingsDialog())
         toolsMenu.Add("&Settings...", (*) => Settings.ShowDialog())
         toolsMenu.Add()
+        toolsMenu.Add(KeybindGUI.suspendMenuItem, (*) => this.ToggleSuspend())
+        toolsMenu.Add()
         toolsMenu.Add("Open &Data Folder", (*) => this.OpenDataFolder())
 
         helpMenu := Menu()
@@ -161,6 +297,7 @@ class KeybindGUI {
         helpMenu.Add("&About PACS Assistant", (*) => this.ShowAbout())
 
         view.profileMenu := profileMenu
+        view.menus := Map("Profile", profileMenu, "Tools", toolsMenu, "Help", helpMenu)
         bar := MenuBar()
         bar.Add("&Profile", profileMenu)
         bar.Add("&Tools", toolsMenu)
@@ -169,6 +306,21 @@ class KeybindGUI {
     }
 
     static saveMenuItem := "&Save Changes"
+    static suspendMenuItem := "S&uspend Keybinds"
+
+    /**
+     * Turns every keybind off, or back on. Key capture and the background services
+     * are unaffected. The window's title, status bar and menu, and the tray menu
+     * (through onSuspendChanged), all show the state.
+     * @returns whether keybinds are now suspended
+     */
+    ToggleSuspend() {
+        Suspend(-1)
+        this.RefreshMainView()
+        if this.HasOwnProp("onSuspendChanged")
+            this.onSuspendChanged.Call()
+        return A_IsSuspended
+    }
 
     ; Client height of the main window for a given keybind-list height.
     MainViewHeight(view, listHeight) {
@@ -257,6 +409,12 @@ class KeybindGUI {
                 view.profileMenu.Disable(KeybindGUI.saveMenuItem)
             view.status.SetText(" " (dirty ? "Unsaved changes" : "All changes saved"), 1)
             view.status.SetText(" " (A_IsSuspended ? "Keybinds suspended" : "Keybinds active"), 2)
+            ; Suspended keybinds do nothing when pressed, so the title says so too.
+            view.gui.Title := "PACS Assistant - " view.profileName (A_IsSuspended ? " (keybinds suspended)" : "")
+            if A_IsSuspended
+                view.menus["Tools"].Check(KeybindGUI.suspendMenuItem)
+            else
+                view.menus["Tools"].Uncheck(KeybindGUI.suspendMenuItem)
             ; Left-aligned: right-aligned text would sit under the size grip.
             view.status.SetText(" " AppVersion.current, 3)
             return true
@@ -751,7 +909,7 @@ class KeybindGUI {
             "xm y+4 w" width
         )
         inputGui.Add("Text", "xm y+14 w" width, "Profile &name")
-        nameEdit := inputGui.Add("Edit", "xm y+4 w" width)
+        nameEdit := inputGui.Add("Edit", "xm y+4 r1 w" width)
         UITheme.SetPlaceholder(nameEdit, "For example, Neuro or Night Float")
         close := (*) => (this.CloseNewProfilePrompt(inputGui), true)
         UITheme.AddFooter(inputGui, width, [
@@ -2057,7 +2215,7 @@ class KeybindGUI {
             UITheme.AddHeading(renameGui, "Rename profile", "xm ym w" width)
             UITheme.AddNote(renameGui, "Its keybinds and modality attendings stay with it.", "xm y+4 w" width)
             renameGui.Add("Text", "xm y+14 w" width, "&New name for '" name "'")
-            nameEdit := renameGui.Add("Edit", "xm y+4 w" width, name)
+            nameEdit := renameGui.Add("Edit", "xm y+4 r1 w" width, name)
             cancel := (*) => renameGui.Destroy()
             UITheme.AddFooter(renameGui, width, [
                 {text: "Rename", action: (*) => this.RenameProfile(name, nameEdit.Value, renameGui, parentGui), default: true},
@@ -2215,29 +2373,32 @@ class KeybindGUI {
             "xm y+4 w" width
         )
 
+        ; Each list exists only when it has something to add. A list left out stays
+        ; "", which SelectedFunction accepts.
         selectorGui.Add("Text", "xm y+14 w" width, "&Built-in commands")
-        lbBuiltIn := selectorGui.Add("ListBox", "xm y+4 w" width " r9", builtInFunctions)
-        if (builtInFunctions.Length = 0)
+        lbBuiltIn := ""
+        if (builtInFunctions.Length > 0)
+            lbBuiltIn := selectorGui.Add("ListBox", "xm y+4 w" width " r9", builtInFunctions)
+        else
             UITheme.AddNote(selectorGui, "Every built-in command is already in this profile.", "xm y+4 w" width)
 
-        ; Custom functions get their own list when the profile has any. lbCustom stays
-        ; defined either way, because the Add handler reads it even when there is no
-        ; custom list.
         lbCustom := ""
         if (customFunctions.Length > 0) {
             selectorGui.Add("Text", "xm y+14 w" width, "&Custom keybinds")
             lbCustom := selectorGui.Add("ListBox", "xm y+4 w" width " r4", customFunctions)
             selectorGui.Add("Button", "x" (UITheme.margin + width - 180) " y+" UITheme.gap " w180 h" UITheme.buttonHeight, "&Delete Custom Keybind...")
                 .OnEvent("Click", (*) => this.DeleteCustomFunction(lbCustom.Text, selectorGui))
-            this.LinkFunctionLists(lbBuiltIn, lbCustom)
+            if lbBuiltIn
+                this.LinkFunctionLists(lbBuiltIn, lbCustom)
         }
 
         add := (*) => this.AddFunction(this.SelectedFunction(lbBuiltIn, lbCustom), listView, selectorGui)
-        lbBuiltIn.OnEvent("DoubleClick", add)
-        if lbCustom
-            lbCustom.OnEvent("DoubleClick", add)
+        for functionList in [lbBuiltIn, lbCustom] {
+            if functionList
+                functionList.OnEvent("DoubleClick", add)
+        }
         cancel := (*) => selectorGui.Destroy()
-        UITheme.AddFooter(
+        footer := UITheme.AddFooter(
             selectorGui,
             width,
             [
@@ -2249,6 +2410,8 @@ class KeybindGUI {
                 this.ShowCustomKeybindDialog(listView, selectorGui.profileName)
             )}]
         )
+        ; With nothing left to add, only a new custom keybind remains.
+        footer["Add"].Enabled := !!(lbBuiltIn || lbCustom)
         ; The title-bar X must destroy like Cancel; Close only hides by default.
         selectorGui.OnEvent("Close", cancel)
         selectorGui.OnEvent("Escape", cancel)
@@ -2404,11 +2567,11 @@ class KeybindGUI {
         UITheme.AddNote(customGui, "Sends keys or text when you press its keybind.", "xm y+4 w" width)
 
         customGui.Add("Text", "xm y+14 w" width, "&Name")
-        nameEdit := customGui.Add("Edit", "xm y+4 w" width)
+        nameEdit := customGui.Add("Edit", "xm y+4 r1 w" width)
         UITheme.SetPlaceholder(nameEdit, "For example, Normal chest")
 
         customGui.Add("Text", "xm y+12 w" width, "&Keys to send")
-        keysEdit := customGui.Add("Edit", "xm y+4 w" width)
+        keysEdit := customGui.Add("Edit", "xm y+4 r1 w" width)
         UITheme.SetPlaceholder(keysEdit, "{F9}, ^c or text to type")
         UITheme.AddNote(
             customGui,
@@ -2417,7 +2580,7 @@ class KeybindGUI {
         )
 
         customGui.Add("Text", "xm y+12 w" width, "&Target window (optional)")
-        windowEdit := customGui.Add("Edit", "xm y+4 w" width)
+        windowEdit := customGui.Add("Edit", "xm y+4 r1 w" width)
         UITheme.SetPlaceholder(windowEdit, "Whichever window is active")
         UITheme.AddNote(
             customGui,
@@ -2491,7 +2654,7 @@ class KeybindGUI {
                 currentProfile.customFuncs[funcName] := {keys: keys, window: window}
                 currentProfile.binds[funcName] := ""
                 currentProfile.scopes[funcName] := "Any"
-                row := listView.Add(, funcName, "Unassigned", "Any window")
+                row := this.AddFunctionRow(listView, funcName, "Unassigned", "Any window")
                 this.ResizeColumns(listView)
                 this.MarkProfileDirty(profileName)
             } catch Any {
@@ -2558,7 +2721,7 @@ class KeybindGUI {
             try {
                 profile.binds[funcName] := ""
                 profile.scopes[funcName] := "Any"
-                row := listView.Add(, funcName, "Unassigned", "Any window")
+                row := this.AddFunctionRow(listView, funcName, "Unassigned", "Any window")
                 this.ResizeColumns(listView)
                 this.MarkProfileDirty(profileName)
             } catch Any {
@@ -2735,10 +2898,27 @@ class KeybindGUI {
         }
     }
 
+    ; Sizes the Function and Keybind columns to their contents (never narrower than a
+    ; readable minimum) and gives the Active In column the rest of the list's width,
+    ; measured inside any vertical scrollbar, so the list never scrolls sideways.
     ResizeColumns(listView) {
         listView.ModifyCol(1, "AutoHdr")  ; Function column
         listView.ModifyCol(2, "AutoHdr")  ; Keybind column
-        listView.ModifyCol(3, "AutoHdr")  ; Scope column
+        if !HasProp(listView, "Hwnd") {
+            listView.ModifyCol(3, "AutoHdr")
+            return
+        }
+        scale := A_ScreenDPI / 96
+        used := 0
+        for index, minimum in [200, 140] {
+            ; LVM_GETCOLUMNWIDTH and LVM_SETCOLUMNWIDTH work in pixels.
+            width := Max(SendMessage(0x101D, index - 1, 0, listView), Round(minimum * scale))
+            SendMessage(0x101E, index - 1, width, listView)
+            used += width
+        }
+        rect := Buffer(16, 0)
+        DllCall("GetClientRect", "Ptr", listView.Hwnd, "Ptr", rect)
+        SendMessage(0x101E, 2, Max(NumGet(rect, 8, "Int") - used, Round(120 * scale)), listView)
     }
 
     ; How a bind's window scope reads in the ListView
@@ -2918,7 +3098,7 @@ class KeybindGUI {
         first := true
         for modality in ReportModality.names {
             modGui.Add("Text", "xm y+" (first ? 16 : 10) " w" labelWidth, modality)
-            attendingEdit := modGui.Add("Edit", "x+" UITheme.gap " yp-3 w" (width - labelWidth - UITheme.gap), ProfileManager.GetModalityAttending(modality))
+            attendingEdit := modGui.Add("Edit", "x+" UITheme.gap " yp-3 r1 w" (width - labelWidth - UITheme.gap), ProfileManager.GetModalityAttending(modality))
             UITheme.SetPlaceholder(attendingEdit, "PowerScribe default")
             edits[modality] := attendingEdit
             first := false

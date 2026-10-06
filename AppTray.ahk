@@ -20,14 +20,13 @@
 class AppTray {
     static openItem := "&Open PACS Assistant"
     static suspendItem := "&Suspend Keybinds"
-    static app := 0
 
     /**
-     * @param app the main window's owner: ShowMainWindow() brings it forward and
-     *     RefreshMainView() redraws its status after a suspend.
+     * @param app the main window's owner: ShowMainWindow() brings it forward, and
+     *     ToggleSuspend() turns keybinds off or on and reports the change through
+     *     its onSuspendChanged callback, which keeps this menu's checkmark in step.
      */
     static Install(app) {
-        this.app := app
         tray := A_TrayMenu
         tray.Delete()
         tray.Add(this.openItem, (*) => app.ShowMainWindow())
@@ -35,22 +34,18 @@ class AppTray {
         tray.Add("Se&ttings...", (*) => Settings.ShowDialog())
         tray.Add("Check for &Updates...", (*) => UpdateChecker.ShowUpdateDialog())
         tray.Add()
-        tray.Add(this.suspendItem, (*) => this.ToggleSuspend())
+        tray.Add(this.suspendItem, (*) => app.ToggleSuspend())
         tray.Add()
         ; ExitApp runs the same shutdown gate as closing the window (main.ahk OnExit).
         tray.Add("E&xit", (*) => ExitApp())
         tray.Default := this.openItem
+        app.onSuspendChanged := ObjBindMethod(this, "SyncSuspend")
     }
 
-    ; Suspending turns every keybind off until it is resumed; key capture and the
-    ; background services are unaffected.
-    static ToggleSuspend() {
-        Suspend(-1)
+    static SyncSuspend() {
         if A_IsSuspended
             A_TrayMenu.Check(this.suspendItem)
         else
             A_TrayMenu.Uncheck(this.suspendItem)
-        if IsObject(this.app)
-            this.app.RefreshMainView()
     }
 }

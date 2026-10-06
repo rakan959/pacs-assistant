@@ -58,10 +58,12 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 
 2) **Initial setup**
 - Launch, create a profile, assign keybinds, and set notification/update preferences.
-- The main window lists the profile's functions with their keybinds and the window each
-  one is active in. Select a function and use **Set Keybind**, **Set Scope** or
-  **Remove**; or double-click it or press F2 to set its keybind, press Delete to remove
-  it, or right-click it for the same commands.
+- The main window lists the profile's functions, grouped as PowerScribe, PACS, Wet
+  reads, Windows and Custom, with their keybinds and the window each one is active in;
+  defaults (Unassigned, Any window) are greyed. A bind for a command this version does
+  not have is listed under "Not in this version". Select a function and use
+  **Set Keybind**, **Set Scope** or **Remove**; or double-click it or press F2 to set
+  its keybind, press Delete to remove it, or right-click it for the same commands.
 - Keybind edits become active immediately. **Save Changes** persists them; it is enabled
   only while there are unsaved changes, and the status bar says whether there are any.
   Closing the app or switching profiles prompts to save, discard, or keep editing when
@@ -69,9 +71,10 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - The **Profile**, **Tools** and **Help** menus hold the rest: switching and renaming
   profiles, Settings, modality attendings, the data folder (settings, profiles and
   `error.log`), update checks and the version.
+- **Suspend Keybinds** (Tools menu, or the tray menu) turns every keybind off until it
+  is chosen again; the title bar and status bar say so while it is on.
 - The tray icon opens the window when double-clicked. Its menu also opens Settings and
-  the update check, suspends every keybind until resumed, and exits. Closing the
-  window exits too.
+  the update check, suspends keybinds, and exits. Closing the window exits too.
 
 3) **Wet read workflow**
 - Copy your wet read text to clipboard.
@@ -106,8 +109,8 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - Assignments are per profile, so a call shift assigned by modality can be its own profile.
 
 ## Settings
-Settings has three tabs: General (updates and the PACS worklist), PowerScribe (the
-microphone) and Notifications (new-study alerts and their sound).
+Settings is one page: updates and the PowerScribe microphone on the left, new-study
+scanning, alerts and their sound on the right.
 
 - Refresh PACS and scan for new studies automatically: turns on new-study scanning at
   the set interval, and the refresh click before each scan (semantic refresh clicking
@@ -202,6 +205,10 @@ Invoke-AutoHotkeyChecked @('/ErrorStdOut', 'tests/RunTests.ahk')
 # Desktop integration checks; these register hotkeys and open real windows, so run locally.
 Invoke-AutoHotkeyChecked @('/ErrorStdOut', 'tests/run-hotkey-tests.ahk')
 Invoke-AutoHotkeyChecked @('/ErrorStdOut', 'tests/run-gui-smoke.ahk')
+# Every window in every state that changes its layout, checked at 100% to 200%
+# scaling for controls outside the window, overlapping controls and labels that do
+# not fit. Add a folder argument to also save a screenshot of every view and menu.
+Invoke-AutoHotkeyChecked @('/ErrorStdOut', 'tests/run-ui-audit.ahk')
 
 # CI, dependency, documentation, and distribution invariants.
 & tests/RepositoryContract.ps1

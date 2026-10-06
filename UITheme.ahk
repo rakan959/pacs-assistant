@@ -86,9 +86,9 @@ class UITheme {
         return label
     }
 
-    ; A one-pixel horizontal rule.
+    ; A one-pixel rule: give it w1 or h1 in the options.
     static AddSeparator(window, options) {
-        return window.Add("Text", options " h1 Background" this.separatorColor)
+        return window.Add("Text", options " Background" this.separatorColor)
     }
 
     /**
@@ -104,7 +104,7 @@ class UITheme {
     static AddFooter(window, contentWidth, rightButtons, leftButtons := []) {
         bottom := this.ContentBottom(window)
         ruleY := bottom + this.sectionGap
-        this.AddSeparator(window, "x0 y" ruleY " w" (contentWidth + 2 * this.margin))
+        this.AddSeparator(window, "x0 y" ruleY " w" (contentWidth + 2 * this.margin) " h1")
         buttonY := ruleY + 1 + 12
         buttons := Map()
 
@@ -162,6 +162,14 @@ class UITheme {
     ; The modern list look (hover highlight, rounded selection) used by Explorer.
     static UseExplorerTheme(ctrl) {
         DllCall("uxtheme\SetWindowTheme", "Ptr", ctrl.Hwnd, "Str", "Explorer", "Ptr", 0)
+    }
+
+    ; Scrolls a one-line Edit to the end of its text, so a long path shows its file
+    ; name (EM_SETSEL to the end, then EM_SCROLLCARET).
+    static ShowEnd(edit) {
+        length := StrLen(edit.Value)
+        SendMessage(0xB1, length, length, edit)
+        SendMessage(0xB7, 0, 0, edit)
     }
 
     ; Grey placeholder text shown while an Edit is empty (EM_SETCUEBANNER).

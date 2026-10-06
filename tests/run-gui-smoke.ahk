@@ -264,6 +264,17 @@ CheckMainWindowState(kb, lv) {
     kb.ClearProfileDirty(ProfileManager.currentProfile)
     Assert(!view.saveButton.Enabled, "clearing the change disables Save Changes again")
 
+    ; Suspended keybinds do nothing, so the window says so in its title and status bar.
+    try {
+        Assert(kb.ToggleSuspend() = true, "Suspend Keybinds suspends them")
+        Assert(InStr(WinGetTitle("ahk_id " mainHwnd), "(keybinds suspended)") > 0, "the title says keybinds are suspended")
+        Assert(StatusBarGetText(2, "ahk_id " mainHwnd) = " Keybinds suspended", "the status bar says keybinds are suspended")
+    } finally {
+        if A_IsSuspended
+            kb.ToggleSuspend()
+    }
+    Assert(!A_IsSuspended && !InStr(WinGetTitle("ahk_id " mainHwnd), "suspended"), "resuming clears the suspended state")
+
     lv.Modify(0, "-Select")
     kb.RefreshMainView()
     Assert(!view.removeButton.Enabled && !view.keybindButton.Enabled, "selection commands are disabled with no row selected")

@@ -149,7 +149,7 @@ $unitStep = [regex]::Match($workflow, '(?ms)^\s*- name: Run unit tests\s*$.*?(?=
 Assert-Matches $unitStep "'tests\\RunTests\.ahk'" 'The unit-test step must run tests\RunTests.ahk.'
 Assert-Matches $unitStep '(?s)if \(\$process\.ExitCode -ne 0\)\s*\{\s*throw' 'The unit-test step must fail when the suite exits non-zero.'
 $syntaxStep = [regex]::Match($workflow, '(?ms)^\s*- name: Validate syntax\s*$.*?(?=^\s*- name:|\z)').Value
-foreach ($validatedScript in @("'main.ahk'", "'WinHttpMetadataWorkerMain\.ahk'", "'tests\\run-hotkey-tests\.ahk'", "'tests\\run-gui-smoke\.ahk'")) {
+foreach ($validatedScript in @("'main.ahk'", "'WinHttpMetadataWorkerMain\.ahk'", "'tests\\run-hotkey-tests\.ahk'", "'tests\\run-gui-smoke\.ahk'", "'tests\\run-ui-audit\.ahk'")) {
     Assert-Matches $syntaxStep $validatedScript "CI must /validate $validatedScript."
 }
 Assert-Matches $runTests 'ExitApp\(TestRunner\.failures > 0 \? 1 : 0\)' 'RunTests.ahk must exit non-zero when any test fails.'
