@@ -85,6 +85,14 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
   selector also has **Duplicate**, and the new-profile prompt has **Import**.
 - **Add All** in Add Function adds every built-in command the profile does not have
   yet, unassigned, so a new profile is a list of keys to set.
+- **Tools > Status** (or double-click the status bar's keybind count) shows, refreshed
+  every two seconds: how many keybinds are live; whether PowerScribe, Vue PACS and
+  Explorer Portal are open (each command needs exactly one); new-study scanning and
+  its last read or failure; the microphone last selected; and updates. It only reads;
+  it never clicks or reads a report.
+- **Show which command a keybind ran** (Settings, off by default) shows the command's
+  name by the pointer for about a second each time a keybind starts one. It is a
+  tooltip, so it never takes focus from PACS or PowerScribe.
 - **Help > Keybind Card** shows the profile's set keys by group, copies them as text,
   or opens a printable page (written to the temp folder) in your browser.
 - **Help > Recent Errors** shows the newest part of `error.log`. **Copy for Bug Report**
@@ -300,6 +308,8 @@ if ($process.ExitCode -ne 0) {
 | `StartupShortcut.ahk` | The Startup folder shortcut behind "Start when I sign in to Windows" |
 | `KeybindCard.ahk` | The keybind card as text and as a printable page |
 | `RecentErrors.ahk` | Help > Recent Errors: the end of `error.log` |
+| `StatusPanel.ahk` | Tools > Status: what PACS Assistant can see, refreshed while open |
+| `CommandFeedback.ahk` | The optional tooltip naming each command a keybind starts |
 | `AppTray.ahk` | The tray icon's menu |
 | `pacs-assistant.ico` | App icon, compiled into the EXE and set for source runs |
 | `HotkeyManager.ahk` | Hotkey registration and window scoping |

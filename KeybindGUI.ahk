@@ -17,6 +17,7 @@
 #Include WindowPlacement.ahk
 #Include KeybindCard.ahk
 #Include RecentErrors.ahk
+#Include StatusPanel.ahk
 
 class KeybindGUI {
     gui := ""
@@ -234,6 +235,7 @@ class KeybindGUI {
         view.status := mainGui.Add("StatusBar")
         scale := A_ScreenDPI / 96
         view.status.SetParts(Round(220 * scale), Round(200 * scale))
+        view.status.OnEvent("DoubleClick", (bar, part) => part = 2 ? this.ShowStatus() : 0)
         return view
     }
 
@@ -372,6 +374,8 @@ class KeybindGUI {
         profileMenu.Add("E&xit", (*) => this.RequestExit())
 
         toolsMenu := Menu()
+        toolsMenu.Add("S&tatus...", (*) => this.ShowStatus())
+        toolsMenu.Add()
         toolsMenu.Add("Modality &Attendings...", (*) => this.ShowModalityAttendingsDialog())
         toolsMenu.Add("&Settings...", (*) => Settings.ShowDialog())
         toolsMenu.Add()
@@ -501,19 +505,8 @@ class KeybindGUI {
                 else
                     view.profileMenu.Disable(item)
             }
-            configured := 0
-            inactive := 0
-            if ProfileManager.profiles.Has(view.profileName) {
-                for funcName, bind in ProfileManager.profiles[view.profileName].binds {
-                    if (bind = "")
-                        continue
-                    configured++
-                    if KeybindGUI.runtimeFailures.Has(funcName)
-                        inactive++
-                }
-            }
             view.status.SetText(" " (dirty ? "Unsaved changes" : "All changes saved"), 1)
-            view.status.SetText(" " KeybindGUI.KeybindStatusText(configured, inactive, A_IsSuspended), 2)
+            view.status.SetText(" " this.CurrentKeybindStatusText(view.profileName), 2)
             ; Repaint the list, so rows follow the registration state.
             DllCall("InvalidateRect", "Ptr", view.list.Hwnd, "Ptr", 0, "Int", false)
             ; Suspended keybinds do nothing when pressed, so the title says so too.
@@ -529,6 +522,24 @@ class KeybindGUI {
             AppLog.Write("The main window could not be refreshed: " ErrorText.Describe(err))
             return false
         }
+    }
+
+    ; The keybind state of a profile (the current one by default) as the status
+    ; bar and the Status window word it.
+    CurrentKeybindStatusText(profileName := "") {
+        profileName := profileName = "" ? ProfileManager.currentProfile : profileName
+        configured := 0
+        inactive := 0
+        if ProfileManager.profiles.Has(profileName) {
+            for funcName, bind in ProfileManager.profiles[profileName].binds {
+                if (bind = "")
+                    continue
+                configured++
+                if KeybindGUI.runtimeFailures.Has(funcName)
+                    inactive++
+            }
+        }
+        return KeybindGUI.KeybindStatusText(configured, inactive, A_IsSuspended)
     }
 
     ; The status bar's keybind state: how many of the set keybinds are live.
@@ -593,6 +604,9 @@ class KeybindGUI {
         }
         return rows
     }
+
+    ; Tools > Status, also opened by double-clicking the status bar's keybind part.
+    ShowStatus() => StatusPanel.Show(() => this.CurrentKeybindStatusText(), this.HasMainWindow() ? this.gui : 0)
 
     ; Help > Keybind Card: the profile's keys at a glance, to copy or print.
     ShowKeybindCard() {

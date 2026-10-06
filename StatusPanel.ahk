@@ -1,0 +1,156 @@
+; = CONTENTS
+;   + Preamble
+;   + StatusPanel class (Tools > Status: whether PACS Assistant's parts are
+;       working, refreshed while open)
+
+#Requires AutoHotkey v2.0
+
+#Include AppControl.ahk
+#Include PACSMonitor.ahk
+#Include MicrophoneManager.ahk
+#Include Settings.ahk
+#Include UpdateChecker.ahk
+#Include UITheme.ahk
+
+/**
+ * Answers "is it working?" in one place. It only reads state the services keep
+ * and the windows that are open; it never clicks, reads a report or changes
+ * anything. Each row is {label, value, tone}, tone being "ok", "warn" or "off".
+ */
+class StatusPanel {
+    static refreshMs := 2000
+    ; Green for working, 5.4:1 against white.
+    static okColor := "107C10"
+
+    ; Rows for the window. keybindText is the main window's keybind state.
+    static Rows(keybindText) {
+        return [
+            this.KeybindState(keybindText),
+            this.WindowRow("PowerScribe", AppControl.PowerScribeWindowSpec()),
+            this.WindowRow("Vue PACS", AppControl.VuePacsWindowSpec()),
+            this.WindowRow("Explorer Portal", AppControl.ExplorerPortalWindowSpec()),
+            this.ScanState(
+                Settings.Get("AutoRefreshPACS"),
+                PACSMonitor.NewCaseAlertsEnabled(),
+                Settings.Get("RefreshInterval"),
+                PACSMonitor.lastScanTime,
+                PACSMonitor.consecutiveScanFailures,
+                PACSMonitor.lastError
+            ),
+            this.MicrophoneState(
+                Settings.Get("SwapMicrophoneOnLogin"),
+                Trim(Settings.Get("MicrophoneName")),
+                MicrophoneManager.lastSelection,
+                MicrophoneManager.lastError
+            ),
+            this.UpdateState(
+                UpdateChecker.updateCheckEligibleProbe.Call(),
+                Settings.Get("AutoUpdate"),
+                UpdateChecker.pendingUpdateInfo
+            )
+        ]
+    }
+
+    ; keybindText as the main window's status bar words it (KeybindStatusText).
+    static KeybindState(keybindText) {
+        tone := InStr(keybindText, " of ") || InStr(keybindText, "suspended") ? "warn"
+            : InStr(keybindText, "No keybinds") ? "off" : "ok"
+        return {label: "Keybinds", value: keybindText, tone: tone}
+    }
+
+    static WindowRow(label, spec) {
+        try count := AppControl.ResolveExactWindows(spec).Length
+        catch
+            return {label: label, value: "Could not be checked", tone: "warn"}
+        return this.WindowState(label, count)
+    }
+
+    static WindowState(label, count) {
+        if (count = 0)
+            return {label: label, value: "Not open", tone: "off"}
+        if (count = 1)
+            return {label: label, value: "Open", tone: "ok"}
+        return {label: label, value: count " windows open; its commands need exactly one", tone: "warn"}
+    }
+
+    static ScanState(enabled, alertsOn, intervalSeconds, lastScanTime, failures, lastError) {
+        row := {label: "New-study scanning"}
+        if !enabled
+            return (row.value := "Off", row.tone := "off", row)
+        if !alertsOn
+            return (row.value := "On, but it waits for a sound or notification to be turned on", row.tone := "warn", row)
+        value := "Every " intervalSeconds " seconds; "
+            . (lastScanTime = "" ? "no scan yet" : "last read at " FormatTime(lastScanTime, "h:mm:ss tt"))
+        if (failures > 0)
+            return (row.value := value ". The last attempt failed: " lastError, row.tone := "warn", row)
+        return (row.value := value, row.tone := "ok", row)
+    }
+
+    static MicrophoneState(enabled, name, lastSelection, lastError) {
+        row := {label: "Microphone"}
+        if (!enabled || name = "")
+            return (row.value := "Not set at login", row.tone := "off", row)
+        if (lastError != "")
+            return (row.value := "'" name "' was not selected: " lastError, row.tone := "warn", row)
+        if IsObject(lastSelection)
+            return (row.value := "'" lastSelection.name "' selected at " FormatTime(lastSelection.time, "h:mm tt"), row.tone := "ok", row)
+        return (row.value := "'" name "' is selected at the next PowerScribe login", row.tone := "ok", row)
+    }
+
+    static UpdateState(eligible, autoUpdate, pendingUpdateInfo) {
+        row := {label: "Updates"}
+        if !eligible
+            return (row.value := "Not checked by this build (development build)", row.tone := "off", row)
+        if (IsObject(pendingUpdateInfo) && HasProp(pendingUpdateInfo, "hasUpdate") && pendingUpdateInfo.hasUpdate)
+            return (row.value := pendingUpdateInfo.latestVersion " is available: Help > Check for Updates", row.tone := "warn", row)
+        return (row.value := autoUpdate ? "Checked automatically; up to date" : "Automatic checks are off", row.tone := autoUpdate ? "ok" : "off", row)
+    }
+
+    static ToneColor(tone) => tone = "ok" ? this.okColor : tone = "warn" ? UITheme.warningColor : UITheme.secondaryColor
+
+    /**
+     * Shows the window, refreshed every refreshMs while it is open. keybindText is
+     * a function returning the main window's keybind state.
+     */
+    static Show(keybindText, ownerGui := 0) {
+        window := UITheme.NewWindow("PACS Assistant - Status", IsObject(ownerGui) ? "+Owner" ownerGui.Hwnd : "")
+        width := 560
+        labelWidth := 150
+        UITheme.AddHeading(window, "Status", "xm ym w" width)
+        UITheme.AddNote(window, "What PACS Assistant can see right now. This window updates every two seconds.", "xm y+4 w" width)
+        values := []
+        for index, row in this.Rows(keybindText.Call()) {
+            UITheme.AddSectionLabel(window, row.label, "xm y+" (index = 1 ? 16 : 8) " w" labelWidth)
+            ; Two lines tall, so a longer value later still fits.
+            values.Push(window.Add("Text", "x+" UITheme.gap " yp w" (width - labelWidth - UITheme.gap) " r2", ""))
+        }
+        ; The timer stops itself once the window is gone, however it went.
+        tick := (*) => this.Fill(window, values, keybindText) ? 0 : SetTimer(tick, 0)
+        close := (*) => (SetTimer(tick, 0), window.Destroy())
+        footer := UITheme.AddFooter(window, width, [{text: "Close", default: true, action: close}])
+        window.OnEvent("Close", close)
+        window.OnEvent("Escape", close)
+        this.Fill(window, values, keybindText)
+        UITheme.ShowDialog(window)
+        footer["Close"].Focus()
+        SetTimer(tick, this.refreshMs)
+        return window
+    }
+
+    ; Writes the current state into the value controls.
+    ; @returns false once the window is gone
+    static Fill(window, values, keybindText) {
+        try {
+            if !DllCall("IsWindow", "Ptr", window.Hwnd)
+                return false
+            for index, row in this.Rows(keybindText.Call()) {
+                control := values[index]
+                control.SetFont("c" this.ToneColor(row.tone))
+                if !(control.Value == row.value)
+                    control.Value := row.value
+            }
+            return true
+        } catch
+            return false
+    }
+}

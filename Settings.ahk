@@ -47,6 +47,7 @@ class Settings {
         "MicrophoneName", "",          ; Blank = leave PowerScribe's selection alone
         "StartMinimized", false,       ; Start with only the tray icon showing
         "CloseToTray", false,          ; Closing the window hides it instead of exiting
+        "ShowCommandFeedback", false,  ; A brief tooltip naming each command a key runs
         ; Superseded by per-bind scopes, kept only so profiles written under the older
         ; [KeybindScopes] scheme migrate to the right scope. See
         ; ProfileManager.MigrateLegacyScope.
@@ -63,6 +64,7 @@ class Settings {
         "SwapMicrophoneOnLogin",
         "StartMinimized",
         "CloseToTray",
+        "ShowCommandFeedback",
         "RestrictHotkeysByActiveWindow"
     ]
 
@@ -340,6 +342,10 @@ class Settings {
                 "An exact device name is best. A partial name such as PowerMic works when it matches only one device.",
                 "x" x " y+6 w" column
             )
+
+            UITheme.AddSectionLabel(settingsGui, "Appearance", "x" x " y+22 w" column)
+            checkboxes["ShowCommandFeedback"] := settingsGui.Add("Checkbox", "x" x " y+8 w" column, "Show which &command a keybind ran")
+            UITheme.AddNote(settingsGui, "Its name appears briefly by the pointer.", "x" x " y+6 w" column)
 
             ; Third column: everything about new studies.
             right := columnX[3], column := widths[3]

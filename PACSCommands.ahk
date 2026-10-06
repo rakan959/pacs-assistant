@@ -10,6 +10,8 @@ class PACSCommands {
     static activeClinicalCommand := ""
     static busyNotifier := (text, title, options) => TrayTip(text, title, options)
     static unavailableNotifier := (text, title, options) => TrayTip(text, title, options)
+    ; Called with a command's name as it starts; main.ahk sets CommandFeedback.
+    static startedNotifier := (*) => 0
     static commandAvailabilityProbe := (*) => true
 
     ; Built-in commands by persisted name. Profiles store these names, so renaming
@@ -83,6 +85,9 @@ class PACSCommands {
         }
 
         ClinicalNotices.Defer()
+        ; Optional feedback that the key was taken (CommandFeedback); it must never
+        ; stop the command.
+        try this.startedNotifier.Call(name)
         try return callback.Call()
         finally {
             this.ReleaseClinicalAutomation()

@@ -20,6 +20,7 @@ OnError(OnError_StdErr)
 global tempDir := UseIsolatedDataRoot("pacs-assistant-gui-smoke")
 
 #Include ../KeybindGUI.ahk
+#Include ../CommandFeedback.ahk
 #Include DesktopChecks.ahk
 
 global openedWindows := []
@@ -246,7 +247,27 @@ Main() {
     }
 
     CheckWindowBehaviour(kb)
+    CheckCommandFeedback()
     return DesktopChecks.Finish("checks")
+}
+
+; The command feedback is a tooltip that takes no focus and clears itself.
+CheckCommandFeedback() {
+    tooltipTitle := "ahk_class tooltips_class32 ahk_pid " DllCall("GetCurrentProcessId", "UInt")
+    probe := CommandFeedback.enabledProbe
+    try {
+        CommandFeedback.enabledProbe := (*) => false
+        Assert(!CommandFeedback.Show("Sign Report"), "no command feedback while it is off")
+        CommandFeedback.enabledProbe := (*) => true
+        active := WinExist("A")
+        Assert(CommandFeedback.Show("Sign Report"), "command feedback shows when it is on")
+        Sleep(100)
+        ; A tooltip's text is its window title.
+        Assert(WinExist(tooltipTitle) && WinGetTitle(tooltipTitle) = "Sign Report", "the feedback names the command")
+        Assert(WinExist("A") = active, "the feedback does not take focus")
+        Sleep(CommandFeedback.durationMs + 400)
+        Assert(!WinExist(tooltipTitle), "the feedback clears itself")
+    } finally CommandFeedback.enabledProbe := probe
 }
 
 ; The main window reopens where it was left, can start hidden behind the tray

@@ -12,6 +12,7 @@ FileEncoding "UTF-8"
 #Include ErrorText.ahk
 #Include AppLog.ahk
 #Include AppTray.ahk
+#Include CommandFeedback.ahk
 
 ; The app icon: compiled into the EXE (which then also uses it for the tray and its
 ; windows), and set at startup for source runs, before any window is created.
@@ -35,6 +36,7 @@ Settings.AddChangeListener(ObjBindMethod(UpdateChecker, "OnSettingsChanged"))
 Settings.AddChangeListener(ObjBindMethod(PACSMonitor, "OnSettingsChanged"))
 Settings.AddChangeListener(ObjBindMethod(MicrophoneManager, "OnSettingsChanged"))
 UpdateChecker.clinicalActivityProbe := (*) => PACSCommands.clinicalCommandActive
+PACSCommands.startedNotifier := ObjBindMethod(CommandFeedback, "Show")
 
 ; Compose every cross-module lease before showing the main window or registering
 ; callbacks, so even the first user action observes the same serialization policy.

@@ -62,6 +62,9 @@ class MicrophoneManager {
     static maxAttempts := 3
     static failureNotified := false
     static lastError := ""
+    ; The last microphone PowerScribe confirmed, {name, time} (A_Now form), or 0;
+    ; for the Status window.
+    static lastSelection := 0
     ; Why SelectMicrophone stops when PowerScribe rerenders the login screen under it
     static selectorChangedReason := "the microphone selector changed before the selection could be made"
     static listChangedReason := "the microphone list changed before the selection could be made"
@@ -539,6 +542,7 @@ class MicrophoneManager {
         this.CollapseVerifiedCombo(session, combo)
         if !succeeded
             return this.SelectionStopped("PowerScribe did not confirm the selection within 1 second")
+        this.lastSelection := {name: finalResolved.name, time: A_Now}
         return true
     }
 
