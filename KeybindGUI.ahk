@@ -968,9 +968,9 @@ class KeybindGUI {
     CancelKeybindPrompt(promptGui) {
         try this.StopListening()
         catch as err {
-            ; The hook may still be live. Retain the capture snapshot, disabled owner,
-            ; dialog, and listening state; restoring/publishing anything would let an
-            ; untracked callback cross the profile boundary.
+            ; The hook may still be live. Retain the capture snapshot, dialog, and
+            ; listening state. RequireCaptureRestart re-enables the owner for exit,
+            ; while the capture lease continues to refuse unsafe profile changes.
             this.NotifyUser(
                 "Key capture could not be stopped and may still be active. Keep this dialog open and restart PACS Assistant before relying on its shortcuts.`n`n" err.Message,
                 "Capture Stop Failed - Restart Required",
