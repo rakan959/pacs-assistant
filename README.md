@@ -59,20 +59,21 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 2) **Initial setup**
 - Launch, create a profile, assign keybinds, and set notification/update preferences.
 - The main window lists the profile's functions, grouped as PowerScribe, PACS, Wet
-  reads, Windows and Custom, with their keybinds and the window each one is active in;
-  defaults (Unassigned, Any window) are greyed. A bind for a command this version does
-  not have is listed under "Not in this version". Select a function and use
+  reads, Windows and Custom, with their keybinds and the window each one is active in.
+  A bind for a command this version does not have is listed under "Not in this
+  version". Select a function and use
   **Set Keybind**, **Set Scope** or **Remove**; or double-click it or press F2 to set
   its keybind, press Delete to remove it, or right-click it for the same commands.
-- Hover a function to see what it does. A keybind that is set but could not be
-  registered is shown in red, its hover text says why, and the status bar counts the
-  keybinds that are live ("8 of 9 keybinds active").
+- The selected function is described under the list. A keybind that is set but could
+  not be registered has Windows' warning icon, the description says why, and the
+  status line at the bottom counts the keybinds that are live ("8 of 9 keybinds
+  active").
 - When you set a keybind, the window shows the key you pressed with any warning (a
   key that would stop typing, one PowerScribe uses itself, a common shortcut) and
   binds it only when you choose **Use Keybind**; **Try Again** listens for another.
   A key another function already has cannot be used.
 - Keybind edits become active immediately. **Save Changes** persists them; it is enabled
-  only while there are unsaved changes, and the status bar says whether there are any.
+  only while there are unsaved changes, and the status line says whether there are any.
   Closing the app or switching profiles prompts to save, discard, or keep editing when
   changes remain.
 - The **Profile**, **Tools** and **Help** menus hold the rest: switching and renaming
@@ -85,7 +86,7 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
   selector also has **Duplicate**, and the new-profile prompt has **Import**.
 - **Add All** in Add Function adds every built-in command the profile does not have
   yet, unassigned, so a new profile is a list of keys to set.
-- **Tools > Status** (or double-click the status bar's keybind count) shows, refreshed
+- **Tools > Status** (or double-click the keybind count in the status line) shows, refreshed
   every two seconds: how many keybinds are live; whether PowerScribe, Vue PACS and
   Explorer Portal are open (each command needs exactly one); new-study scanning and
   its last read or failure; the microphone last selected; and updates. It only reads;
@@ -99,7 +100,7 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
   adds the version and Windows build; check the copy for anything private before you
   send it.
 - **Suspend Keybinds** (Tools menu, or the tray menu) turns every keybind off until it
-  is chosen again; the title bar and status bar say so while it is on.
+  is chosen again; the title bar and status line say so while it is on.
 - The tray icon opens the window when double-clicked. Its menu also opens Settings and
   the update check, suspends keybinds, and exits. Closing the window exits too, unless
   **Close to the tray instead of exiting** is on in Settings.
@@ -141,12 +142,20 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 
 ## Settings
 Settings is one page in three columns: updates and startup; the PowerScribe
-microphone; new-study scanning, alerts and their sound.
+microphone and appearance; new-study scanning, alerts and their sound.
 
 - Startup: **Start when I sign in to Windows** adds a shortcut to your Startup folder
   (removing it there turns the option off). **Start minimized to the tray** opens the
   default profile with only the tray icon showing. **Close to the tray instead of
   exiting** makes the window's X hide it; exit from the tray menu or Profile > Exit.
+- Appearance: **Show which command a keybind ran** (see above), and **Theme**.
+  **Match Windows**, the default, is dark while Windows' app mode is dark (Windows
+  Settings > Personalization > Colors); **Light** and **Dark** fix it. A change applies
+  at once: the main window is redrawn in place, after any dialog it has open closes.
+  With a Windows contrast theme on, every window uses that theme's colors whatever
+  this setting says. Message boxes and file dialogs are drawn by Windows and stay
+  light, and in dark lists the column names are dim. The dark look uses Windows'
+  own dark control themes and was checked on Windows 11.
 
 - Refresh PACS and scan for new studies automatically: turns on new-study scanning at
   the set interval, and the refresh click before each scan (semantic refresh clicking
@@ -243,8 +252,12 @@ Invoke-AutoHotkeyChecked @('/ErrorStdOut', 'tests/run-hotkey-tests.ahk')
 Invoke-AutoHotkeyChecked @('/ErrorStdOut', 'tests/run-gui-smoke.ahk')
 # Every window in every state that changes its layout, checked at 100% to 200%
 # scaling for controls outside the window, overlapping controls and labels that do
-# not fit. Add a folder argument to also save a screenshot of every view and menu.
+# not fit, and for two controls with one access key. Add a folder argument to also
+# save a screenshot of every view and menu, and --theme=dark or --theme=contrast to
+# draw every view in that theme (contrast uses Windows' own colors, as a Windows
+# contrast theme does).
 Invoke-AutoHotkeyChecked @('/ErrorStdOut', 'tests/run-ui-audit.ahk')
+Invoke-AutoHotkeyChecked @('/ErrorStdOut', 'tests/run-ui-audit.ahk', '--theme=dark')
 
 # CI, dependency, documentation, and distribution invariants.
 & tests/RepositoryContract.ps1
@@ -301,8 +314,9 @@ if ($process.ExitCode -ne 0) {
 | `UIAElementIdentity.ahk` | UIA element identity checks used when revalidating targets |
 | `PACSMonitor.ahk` | Worklist polling and new-study alerts |
 | `MicrophoneManager.ahk` | Microphone selection on the PowerScribe login screen |
-| `KeybindGUI.ahk` | Main window (menus, keybind list, status bar) and its dialogs |
-| `UITheme.ahk` | Shared window style: font, colors, spacing, headings and footer buttons |
+| `KeybindGUI.ahk` | Main window (menus, keybind list, status line) and its dialogs |
+| `UITheme.ahk` | Shared window style: font, light, dark and high-contrast colors, spacing, headings and footer buttons |
+| `DarkMenuBar.ahk` | Draws a window's menu bar dark in the dark theme |
 | `CommandInfo.ahk` | What each command does, and warnings about a key before it is bound |
 | `WindowPlacement.ahk` | The main window's last position, kept between runs |
 | `StartupShortcut.ahk` | The Startup folder shortcut behind "Start when I sign in to Windows" |

@@ -8,6 +8,7 @@
 #Include TestRunner.ahk
 #Include ExclusiveOperationsFixture.ahk
 #Include LogCapture.ahk
+#Include UIThemeFixture.ahk
 
 class KeybindGUITest {
     static tests := [
@@ -85,7 +86,7 @@ class KeybindGUITest {
         "TestFunctionRowsOutsideTheGroupedListAreOnlyAdded",
         "TestKeybindStatusTextCountsLiveKeybinds",
         "TestApplyRecordsWhyEachKeybindIsNotActive",
-        "TestFunctionTipAddsWhyAKeybindIsNotActive",
+        "TestFunctionDescriptionAddsWhyAKeybindIsNotActive",
         "TestUniqueProfileNameAvoidsTakenNames",
         "TestProfileCopyIsCreatedUnderItsNewName",
         "TestProfileCopyRefusesATakenName",
@@ -93,6 +94,9 @@ class KeybindGUITest {
         "TestDiscardChangesWaitsForConfirmation",
         "TestAddAllAddsEveryMissingCommandUnassigned",
         "TestKeybindCardListsOnlySetKeybindsInListOrder",
+        "TestThemeChangeWaitsWhileAnOperationRuns",
+        "TestThemeChangeWaitsWhileADialogIsOpen",
+        "TestThemeChangeLeavesAWindowAlreadyInTheTheme",
         "TestProfileSummaryCountsFunctionsAndNamesTheDefault",
         "TestScopeChoiceMapsTheDialogToFlags",
         "TestScopeWithNoWindowTickedIsRefused",
@@ -131,7 +135,8 @@ class KeybindGUITest {
     static helpers := [
         "UseTempProfilesFolder",
         "PrepareBlockedProfileSave",
-        "PrepareDiscardRenameState"
+        "PrepareDiscardRenameState",
+        "CheckThemeChangeKeepsTheWindow"
     ]
 
     Setup() {
@@ -2289,16 +2294,16 @@ class KeybindGUITest {
         Assert.Equal(0, KeybindGUI.runtimeFailures.Count)
     }
 
-    TestFunctionTipAddsWhyAKeybindIsNotActive() {
+    TestFunctionDescriptionAddsWhyAKeybindIsNotActive() {
         profile := ProfileManager.NewProfile()
         profile.customFuncs["Custom: Hello"] := {keys: "Hello", window: ""}
         ProfileManager.profiles := Map("Test", profile)
         ProfileManager.currentProfile := "Test"
         KeybindGUI.runtimeFailures := Map("Sign Report", "AutoHotkey does not accept this key on this computer.")
 
-        Assert.Equal(CommandInfo.Describe("Draft Report"), this.gui.FunctionTip("Draft Report"))
-        Assert.Equal("Sends Hello to whichever window is active.", this.gui.FunctionTip("Custom: Hello"))
-        Assert.True(InStr(this.gui.FunctionTip("Sign Report"), "`nNot active: AutoHotkey does not accept") > 0)
+        Assert.Equal(CommandInfo.Describe("Draft Report"), this.gui.FunctionDescription("Draft Report"))
+        Assert.Equal("Sends Hello to whichever window is active.", this.gui.FunctionDescription("Custom: Hello"))
+        Assert.True(InStr(this.gui.FunctionDescription("Sign Report"), "`nNot active: AutoHotkey does not accept") > 0)
     }
 
     TestUniqueProfileNameAvoidsTakenNames() {
@@ -2420,6 +2425,57 @@ class KeybindGUITest {
         Assert.Equal("Any window", rows[2].activeIn)
         Assert.Equal("Custom", rows[3].group)
         Assert.Equal("PACS", rows[3].activeIn)
+    }
+
+    ; Rebuilding the main window would close the dialogs it owns, so a theme
+    ; change waits while an operation runs or a dialog is open.
+    TestThemeChangeWaitsWhileAnOperationRuns() {
+        this.CheckThemeChangeKeepsTheWindow("light", (mainGui) => (
+            ExclusiveOperations.TryBegin("uiPresentation", "show a dialog"), 0
+        ), false)
+    }
+
+    TestThemeChangeWaitsWhileADialogIsOpen() {
+        dialog := 0
+        try this.CheckThemeChangeKeepsTheWindow("light", (mainGui) => (
+            dialog := Gui("+Owner" mainGui.Hwnd),
+            dialog.Show("x-3000 y-3000 w60 h60 NA")
+        ), false)
+        finally {
+            if IsObject(dialog)
+                try dialog.Destroy()
+        }
+    }
+
+    TestThemeChangeLeavesAWindowAlreadyInTheTheme() {
+        this.CheckThemeChangeKeepsTheWindow("dark", (*) => 0, true)
+    }
+
+    ; A main window built in builtMode, with the Theme setting at Dark: after
+    ; prepare, ApplyThemeChange returns expected, the window is not rebuilt, and a
+    ; later check is queued exactly when it had to wait.
+    CheckThemeChangeKeepsTheWindow(builtMode, prepare, expected) {
+        saved := UIThemeFixture.Save()
+        mainGui := Gui()
+        try {
+            this.gui.gui := mainGui
+            this.gui.mainView := {mode: builtMode}
+            rebuilds := 0
+            this.gui.DefineProp("CreateMainGUI", {Call: (*) => rebuilds++})
+            UIThemeFixture.Use("Dark", false, false)
+            prepare.Call(mainGui)
+
+            Assert.Equal(expected, this.gui.ApplyThemeChange())
+
+            Assert.True(this.gui.HasMainWindow())
+            Assert.Equal(0, rebuilds)
+            Assert.Equal(!expected, this.gui.HasOwnProp("themeCheck"))
+        } finally {
+            if this.gui.HasOwnProp("themeCheck")
+                SetTimer(this.gui.themeCheck, 0)
+            try mainGui.Destroy()
+            UIThemeFixture.Restore(saved)
+        }
     }
 
     TestProfileSummaryCountsFunctionsAndNamesTheDefault() {

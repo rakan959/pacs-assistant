@@ -126,6 +126,8 @@ Main() {
 
     Out("PACS Assistant GUI smoke test")
     Out("")
+    ; Light, whatever this machine's Windows mode; CheckThemeChange switches it.
+    Settings.SaveValues(Map("Theme", "Light"))
 
     ProfileManager.profiles := Map()
     ProfileManager.LoadProfiles()
@@ -247,8 +249,39 @@ Main() {
     }
 
     CheckWindowBehaviour(kb)
+    CheckThemeChange(kb)
     CheckCommandFeedback()
     return DesktopChecks.Finish("checks")
+}
+
+; Changing the Theme setting redraws the main window at once, in place and with
+; its selection: a dark title bar, menu bar and list, then light again.
+CheckThemeChange(kb) {
+    kb.mainView.list.Modify(2, "Select Focus")
+    WinGetPos(&x, &y, &w, &h, "ahk_id " kb.gui.Hwnd)
+    lightGui := kb.gui
+    try {
+        Settings.SaveValues(Map("Theme", "Dark"))
+        Assert(kb.ApplyThemeChange() && kb.gui != lightGui && kb.mainView.mode = "dark", "a change to Dark rebuilds the main window dark")
+        hwnd := kb.gui.Hwnd
+        WinGetPos(&x2, &y2, &w2, &h2, "ahk_id " hwnd)
+        Assert(x2 = x && y2 = y && w2 = w && h2 = h && DllCall("IsWindowVisible", "Ptr", hwnd), "the rebuilt window keeps its place and stays open")
+        Assert(kb.mainView.list.GetNext(0) = 2, "the rebuilt window keeps the selected row")
+        Assert(TitleBarIsDark(hwnd), "the title bar is dark")
+        Assert(DarkMenuBar.windows.Has(hwnd), "the menu bar is drawn dark")
+        Assert(SendMessage(0x1023, 0, 0, kb.mainView.list) = UITheme.ColorRef("text"), "the list's text is light")  ; LVM_GETTEXTCOLOR
+    } finally {
+        Settings.SaveValues(Map("Theme", "Light"))
+        kb.ApplyThemeChange()
+    }
+    Assert(kb.mainView.mode = "light" && !TitleBarIsDark(kb.gui.Hwnd) && !DarkMenuBar.windows.Has(kb.gui.Hwnd), "a change back to Light rebuilds it light")
+}
+
+; DWMWA_USE_IMMERSIVE_DARK_MODE
+TitleBarIsDark(hwnd) {
+    dark := 0
+    DllCall("dwmapi\DwmGetWindowAttribute", "Ptr", hwnd, "UInt", 20, "Int*", &dark, "UInt", 4)
+    return dark
 }
 
 ; The command feedback is a tooltip that takes no focus and clears itself.
@@ -302,27 +335,29 @@ CheckWindowBehaviour(kb) {
     } finally Settings.SaveValues(Map("CloseToTray", false))
 }
 
-; The main window's derived state and keyboard paths: Save and the status bar
+; The main window's derived state and keyboard paths: Save and the status line
 ; follow unsaved changes, the selection commands follow the selection, Delete and
 ; F2 in the list reach removal and key capture, and resizing grows the list.
 CheckMainWindowState(kb, lv) {
     view := kb.mainView
     mainHwnd := kb.gui.Hwnd
     Assert(!view.saveButton.Enabled, "Save Changes starts disabled with nothing to save")
-    Assert(StatusBarGetText(1, "ahk_id " mainHwnd) = " All changes saved", "the status bar says the profile is saved")
-    Assert(StatusBarGetText(2, "ahk_id " mainHwnd) = " 3 keybinds active", "the status bar counts the live keybinds")
+    Assert(view.statusSaved.Value == "All changes saved", "the status line says the profile is saved")
+    Assert(view.statusKeys.Value == "3 keybinds active", "the status line counts the live keybinds")
+    SelectRow(lv, "Draft Report")
+    Assert(view.description.Value == kb.FunctionDescription("Draft Report"), "the selected function is described under the list")
 
     kb.MarkProfileDirty(ProfileManager.currentProfile)
     Assert(view.saveButton.Enabled, "an unsaved change enables Save Changes")
-    Assert(StatusBarGetText(1, "ahk_id " mainHwnd) = " Unsaved changes", "the status bar reports unsaved changes")
+    Assert(view.statusSaved.Value == "Unsaved changes", "the status line reports unsaved changes")
     kb.ClearProfileDirty(ProfileManager.currentProfile)
     Assert(!view.saveButton.Enabled, "clearing the change disables Save Changes again")
 
-    ; Suspended keybinds do nothing, so the window says so in its title and status bar.
+    ; Suspended keybinds do nothing, so the window says so in its title and status line.
     try {
         Assert(kb.ToggleSuspend() = true, "Suspend Keybinds suspends them")
         Assert(InStr(WinGetTitle("ahk_id " mainHwnd), "(keybinds suspended)") > 0, "the title says keybinds are suspended")
-        Assert(StatusBarGetText(2, "ahk_id " mainHwnd) = " Keybinds suspended", "the status bar says keybinds are suspended")
+        Assert(view.statusKeys.Value == "Keybinds suspended", "the status line says keybinds are suspended")
     } finally {
         if A_IsSuspended
             kb.ToggleSuspend()
@@ -428,6 +463,18 @@ AssertScope(listView, funcName, expected) {
         }
     }
     Assert(false, "'" funcName "' is in the list")
+}
+
+; Selects a function's row as a click does, and lets its ItemSelect event run.
+SelectRow(listView, funcName) {
+    loop listView.GetCount() {
+        if (listView.GetText(A_Index, 1) = funcName) {
+            listView.Modify(A_Index, "Select Focus")
+            Sleep(100)
+            return
+        }
+    }
+    throw Error("No '" funcName "' row")
 }
 
 OnExit(Cleanup, -1)

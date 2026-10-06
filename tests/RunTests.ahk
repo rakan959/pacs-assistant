@@ -37,6 +37,7 @@ UseIsolatedDataRoot("pacs-assistant-unit-tests")
 #Include StartupShortcutTest.ahk
 #Include KeybindCardTest.ahk
 #Include StatusPanelTest.ahk
+#Include UIThemeTest.ahk
 #Include UIAValueTest.ahk
 #Include UIAElementIdentityTest.ahk
 
@@ -63,6 +64,7 @@ TestRunner.AddTest(WindowPlacementTest)
 TestRunner.AddTest(StartupShortcutTest)
 TestRunner.AddTest(KeybindCardTest)
 TestRunner.AddTest(StatusPanelTest)
+TestRunner.AddTest(UIThemeTest)
 TestRunner.AddTest(UIAValueTest)
 TestRunner.AddTest(UIAElementIdentityTest)
 

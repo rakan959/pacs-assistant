@@ -10,8 +10,11 @@ FileEncoding "UTF-8"
 ; control, and the window fitting a 1366x768 screen at 150%. Windows flash on
 ; screen while it runs.
 ;
-; Pass a folder as the first argument to also save a PNG of every view, menus
-; included, for visual review. Run it with Invoke-AutoHotkeyChecked (README, "Tests").
+; Pass a folder to also save a PNG of every view, menus included, for visual
+; review, and --theme=light (the default), --theme=dark or --theme=contrast to draw
+; every view in that theme. Contrast stands in for a Windows contrast theme: the
+; views use Windows' own colors, as they do under one. Run it with
+; Invoke-AutoHotkeyChecked (README, "Tests").
 
 #Include HarnessErrors.ahk
 OnError(OnError_StdErr)
@@ -25,7 +28,18 @@ global tempDir := UseIsolatedDataRoot("pacs-assistant-ui-audit")
 #Include DesktopChecks.ahk
 #Include LayoutAudit.ahk
 
-global shotDir := A_Args.Length ? A_Args[1] : ""
+global shotDir := ""
+global auditTheme := "light"
+if !(A_Args.Length && A_Args[1] = "--capture-menu") {
+    for arg in A_Args {
+        if RegExMatch(arg, "^--theme=(light|dark|contrast)$", &themeMatch)
+            auditTheme := themeMatch[1]
+        else if (SubStr(arg, 1, 2) = "--")
+            throw ValueError("Unknown option " arg)
+        else
+            shotDir := arg
+    }
+}
 global auditProcessId := DllCall("GetCurrentProcessId", "UInt")
 global auditKB := 0
 
@@ -35,7 +49,10 @@ Main() {
         DirCreate(shotDir)
     TraySetIcon(A_ScriptDir "\..\pacs-assistant.ico")
     WriteProfiles()
-    DesktopChecks.Out("PACS Assistant layout audit")
+    ; The theme is set, not taken from this machine's Windows settings.
+    Settings.SaveValues(Map("Theme", auditTheme = "dark" ? "Dark" : "Light"))
+    UITheme.highContrastProbe := (*) => auditTheme = "contrast"
+    DesktopChecks.Out("PACS Assistant layout audit, " auditTheme " theme")
     DesktopChecks.Out("")
 
     ProfileManager.profiles := Map()

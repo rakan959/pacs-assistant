@@ -19,8 +19,6 @@
  */
 class StatusPanel {
     static refreshMs := 2000
-    ; Green for working, 5.4:1 against white.
-    static okColor := "107C10"
 
     ; Rows for the window. keybindText is the main window's keybind state.
     static Rows(keybindText) {
@@ -51,7 +49,7 @@ class StatusPanel {
         ]
     }
 
-    ; keybindText as the main window's status bar words it (KeybindStatusText).
+    ; keybindText as the main window's status line words it (KeybindStatusText).
     static KeybindState(keybindText) {
         tone := InStr(keybindText, " of ") || InStr(keybindText, "suspended") ? "warn"
             : InStr(keybindText, "No keybinds") ? "off" : "ok"
@@ -106,7 +104,7 @@ class StatusPanel {
         return (row.value := autoUpdate ? "Checked automatically; up to date" : "Automatic checks are off", row.tone := autoUpdate ? "ok" : "off", row)
     }
 
-    static ToneColor(tone) => tone = "ok" ? this.okColor : tone = "warn" ? UITheme.warningColor : UITheme.secondaryColor
+    static ToneColor(tone) => tone = "ok" ? UITheme.okColor : tone = "warn" ? UITheme.warningColor : UITheme.secondaryColor
 
     /**
      * Shows the window, refreshed every refreshMs while it is open. keybindText is
@@ -122,7 +120,10 @@ class StatusPanel {
         for index, row in this.Rows(keybindText.Call()) {
             UITheme.AddSectionLabel(window, row.label, "xm y+" (index = 1 ? 16 : 8) " w" labelWidth)
             ; Two lines tall, so a longer value later still fits.
-            values.Push(window.Add("Text", "x+" UITheme.gap " yp w" (width - labelWidth - UITheme.gap) " r2", ""))
+            value := window.Add("Text", "x+" UITheme.gap " yp w" (width - labelWidth - UITheme.gap) " r2", "")
+            ; Colored by its state (Fill), not by the theme.
+            value.themed := true
+            values.Push(value)
         }
         ; The timer stops itself once the window is gone, however it went.
         tick := (*) => this.Fill(window, values, keybindText) ? 0 : SetTimer(tick, 0)

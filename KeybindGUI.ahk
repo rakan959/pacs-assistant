@@ -64,12 +64,6 @@ class KeybindGUI {
         {name: "Not in this version", functions: []}
     ]
     static customGroupId := 5
-    ; Default values ("Unassigned", "Any window") are drawn in this color
-    ; (COLORREF, 0xBBGGRR): 4.5:1 against white, so still readable.
-    static mutedTextColor := 0x767676
-    ; A keybind that is set but not registered is drawn in Windows' error red
-    ; (#C42B1C), 5.9:1 against white.
-    static inactiveTextColor := 0x1C2BC4
     ; Why each set keybind of the last applied profile is not registered, by
     ; function name. Replaced by every ApplyProfileBinds.
     static runtimeFailures := Map()
@@ -93,13 +87,15 @@ class KeybindGUI {
 
     /**
      * Builds and shows the main window for the current profile: its keybind list,
-     * the commands that edit it, and a status bar that says whether there are
+     * the commands that edit it, and a status line that says whether there are
      * unsaved changes and whether keybinds are suspended.
      */
     CreateMainGUI(applyBinds := true, startHidden := false) {
         profileName := ProfileManager.currentProfile
         this.gui := UITheme.NewWindow("PACS Assistant - " profileName, "+Resize")
         view := this.BuildMainView(this.gui, profileName)
+        ; The theme it is built in: ApplyThemeChange rebuilds it when that changes.
+        view.mode := UITheme.mode
         this.mainView := view
 
         ; Close hides the window after any callback that does not return true. Every
@@ -112,6 +108,7 @@ class KeybindGUI {
         height := this.MainViewHeight(view, KeybindGUI.FitListHeight(view))
         this.LayoutMainView(view, width, height)
         this.RefreshMainView()
+        UITheme.ApplyTheme(this.gui)
         ; Built hidden, then moved to where it was last left, then shown.
         this.gui.Show("Hide w" width " h" height)
         ; Logical units, like the layout: Gui scales MinSize for the display itself.
@@ -129,6 +126,67 @@ class KeybindGUI {
 
         if applyBinds
             this.ApplyBinds()
+    }
+
+    /**
+     * Rebuilds the main window when the theme it was built in is no longer current:
+     * the Theme setting, Windows' app mode or high contrast changed. Its dialogs
+     * would close with it, so while one is open, or another operation runs, it
+     * tries again shortly. The window keeps its place, visibility and selection.
+     * @returns whether the main window is in the current theme
+     */
+    ApplyThemeChange(*) {
+        mode := UITheme.UpdateMode()
+        if !(this.HasMainWindow() && this.HasOwnProp("mainView") && this.mainView.mode != mode)
+            return true
+        if (ExclusiveOperations.Active() != "" || this.MainWindowHasOpenDialog()) {
+            this.QueueThemeCheck(2000)
+            return false
+        }
+        visible := DllCall("IsWindowVisible", "Ptr", this.gui.Hwnd)
+        active := WinActive(this.gui)
+        minMax := WinGetMinMax(this.gui)
+        if (visible && minMax = 0) {
+            WinGetPos(&x, &y, &w, &h, this.gui)
+            WindowPlacement.SaveRect(x, y, w, h)
+        }
+        selected := this.mainView.list.GetNext(0)
+        this.gui.Destroy()
+        ; The profile and its keybinds are unchanged: only the view is rebuilt,
+        ; hidden, then shown as it was. A window that was behind PowerScribe stays
+        ; behind it (NA: not activated).
+        this.CreateMainGUI(false, true)
+        if (selected && selected <= this.mainView.list.GetCount())
+            this.mainView.list.Modify(selected, "Select Focus Vis")
+        if visible {
+            this.pendingMaximize := false
+            this.gui.Show(minMax = 1 ? "Maximize" : minMax = -1 ? "Minimize" : active ? "" : "NA")
+            if active
+                this.mainView.list.Focus()
+        }
+        return true
+    }
+
+    ; Queues a theme check for a Windows setting change (WM_SETTINGCHANGE). Every
+    ; top-level window gets the broadcast, so the checks coalesce into one.
+    OnWindowsSettingChange(*) => this.QueueThemeCheck(500)
+
+    ; Runs ApplyThemeChange once, delayMs from now. One timer serves every
+    ; request, so repeated changes and retries never stack.
+    QueueThemeCheck(delayMs) {
+        if !this.HasOwnProp("themeCheck")
+            this.themeCheck := ObjBindMethod(this, "ApplyThemeChange")
+        SetTimer(this.themeCheck, -delayMs)
+    }
+
+    ; Whether a window the main window owns (a dialog) is open: rebuilding the
+    ; main window would close it.
+    MainWindowHasOpenDialog() {
+        for hwnd in WinGetList("ahk_pid " DllCall("GetCurrentProcessId")) {
+            if (DllCall("GetWindow", "Ptr", hwnd, "UInt", 4, "Ptr") = this.gui.Hwnd)  ; GW_OWNER
+                return true
+        }
+        return false
     }
 
     ; Moves the hidden main window to its saved place when that is still on a
@@ -207,9 +265,18 @@ class KeybindGUI {
 
         ; The keybind list: function, its key, and the window it is restricted to.
         ; LV0x10000 (double buffering) keeps it from flickering while resized.
-        ; LV0x10000 double-buffers against flicker; LV0x400 asks for hover text.
-        lv := mainGui.Add("ListView", "w600 h200 -Multi +LV0x10000 +LV0x400", ["Function", "Keybind", "Active In"])
+        ; It runs no script while it paints or is hovered. With custom-draw and
+        ; hover-text callbacks, the dark layout audit hung in about 3 runs of 7: the
+        ; list repainted one row forever (100% CPU, every timer starved). So a
+        ; keybind that is not active is marked with Windows' warning icon, and the
+        ; selected function is described below the list.
+        lv := mainGui.Add("ListView", "w600 h200 -Multi +LV0x10000", ["Function", "Keybind", "Active In"])
         view.list := lv
+        ; Its own image list: a ListView destroys its image lists with itself.
+        icons := IL_Create(1, 0, false)
+        IL_Add(icons, "user32.dll", 2)  ; IDI_WARNING
+        lv.SetImageList(icons, 1)
+        lv.warningIcons := true
         UITheme.UseExplorerTheme(lv)
         KeybindGUI.EnableFunctionGroups(lv)
         currentProfile := ProfileManager.profiles[profileName]
@@ -223,8 +290,8 @@ class KeybindGUI {
         lv.OnEvent("DoubleClick", (ctrl, row) => row ? this.ChangeSelectedKeybind(ctrl) : 0)
         lv.OnEvent("ContextMenu", (ctrl, row, *) => this.ShowFunctionMenu(ctrl, row))
         lv.OnNotify(-155, (ctrl, lParam) => this.OnFunctionListKey(ctrl, lParam))  ; LVN_KEYDOWN
-        lv.OnNotify(-12, (ctrl, lParam) => KeybindGUI.OnFunctionListDraw(ctrl, lParam))  ; NM_CUSTOMDRAW
-        lv.OnNotify(-158, (ctrl, lParam) => this.OnFunctionListInfoTip(ctrl, lParam))  ; LVN_GETINFOTIPW
+        ; What the selected function does, and why its keybind is not active.
+        view.description := UITheme.AddNote(mainGui, "", "w10 h10")
 
         ; Footer: profile-wide settings at the left, Save at the right.
         view.rule := UITheme.AddSeparator(mainGui, "x0 w10 h1")
@@ -232,10 +299,15 @@ class KeybindGUI {
         view.settingsButton := this.AddMainButton(mainGui, "Settin&gs...", 104, (*) => Settings.ShowDialog())
         view.saveButton := this.AddMainButton(mainGui, "&Save Changes", 128, (*) => this.SaveCurrentProfile())
 
-        view.status := mainGui.Add("StatusBar")
-        scale := A_ScreenDPI / 96
-        view.status.SetParts(Round(220 * scale), Round(200 * scale))
-        view.status.OnEvent("DoubleClick", (bar, part) => part = 2 ? this.ShowStatus() : 0)
+        ; Status strip: saved state, keybind state (double-click for the Status
+        ; window) and the version. Not a StatusBar, which stays light in dark mode.
+        ; 0x200 (SS_CENTERIMAGE) centres each line vertically; 0x100 (SS_NOTIFY)
+        ; lets the keybind state take a double-click.
+        view.statusRule := UITheme.AddSeparator(mainGui, "x0 w10 h1")
+        view.statusSaved := UITheme.AddNote(mainGui, "", "w10 h10 0x200")
+        view.statusKeys := UITheme.AddNote(mainGui, "", "w10 h10 0x200 0x100")
+        view.statusKeys.OnEvent("DoubleClick", (*) => this.ShowStatus())
+        view.statusVersion := UITheme.AddNote(mainGui, AppVersion.current, "w10 h10 0x200 Right")
         return view
     }
 
@@ -246,7 +318,9 @@ class KeybindGUI {
      * @returns the row number
      */
     AddFunctionRow(listView, funcName, bindText, scopeText) {
-        row := listView.Add(, funcName, bindText, scopeText)
+        ; Without an icon option a row takes the warning icon, the image list's
+        ; first; RefreshMainView sets the icons from the registration state.
+        row := listView.Add(HasProp(listView, "warningIcons") ? KeybindGUI.RowIcon(false) : "", funcName, bindText, scopeText)
         if (row && HasProp(listView, "functionGroupsEnabled"))
             KeybindGUI.SetRowGroup(listView, row, KeybindGUI.FunctionGroupId(funcName))
         return row
@@ -319,39 +393,9 @@ class KeybindGUI {
         SendMessage(0x104C, 0, item.Ptr, listView)
     }
 
-    /**
-     * NM_CUSTOMDRAW for the keybind list: draws the default values, "Unassigned"
-     * and "Any window", in a muted color so the keybinds that are set stand out.
-     * Any failure leaves the default drawing.
-     */
-    static OnFunctionListDraw(listView, lParam) {
-        ; NMLVCUSTOMDRAW: dwDrawStage after the NMHDR header; dwItemSpec, clrText and
-        ; iSubItem at their x64 or x86 offsets.
-        stageOffset := 3 * A_PtrSize
-        itemOffset := A_PtrSize = 8 ? 56 : 36
-        textColorOffset := A_PtrSize = 8 ? 80 : 48
-        subItemOffset := A_PtrSize = 8 ? 88 : 56
-        try {
-            stage := NumGet(lParam, stageOffset, "UInt")
-            if (stage = 0x1)      ; CDDS_PREPAINT
-                return 0x20       ; CDRF_NOTIFYITEMDRAW
-            if (stage = 0x10001)  ; CDDS_ITEMPREPAINT
-                return 0x20       ; CDRF_NOTIFYSUBITEMDRAW
-            if (stage = 0x30001) {  ; CDDS_ITEMPREPAINT | CDDS_SUBITEM
-                row := NumGet(lParam, itemOffset, "UPtr") + 1
-                column := NumGet(lParam, subItemOffset, "Int") + 1
-                text := column > 1 ? listView.GetText(row, column) : ""
-                muted := (column = 2 && text == "Unassigned") || (column = 3 && text == "Any window")
-                inactive := column = 2 && this.runtimeFailures.Has(listView.GetText(row, 1))
-                ; Set for every cell: a color set for one cell carries into the next.
-                color := inactive ? this.inactiveTextColor
-                    : muted ? this.mutedTextColor
-                    : DllCall("GetSysColor", "Int", 8, "UInt")
-                NumPut("UInt", color, lParam, textColorOffset)
-            }
-        }
-        return 0
-    }
+    ; A row's icon option: the warning icon for a keybind that is set but not
+    ; registered, else an index past the image list's end, which draws nothing.
+    static RowIcon(inactive) => inactive ? "Icon1" : "Icon2"
 
     AddMainButton(mainGui, text, width, action) {
         button := mainGui.Add("Button", "w" width " h" UITheme.buttonHeight, text)
@@ -406,7 +450,7 @@ class KeybindGUI {
 
     /**
      * Turns every keybind off, or back on. Key capture and the background services
-     * are unaffected. The window's title, status bar and menu, and the tray menu
+     * are unaffected. The window's title, status line and menu, and the tray menu
      * (through onSuspendChanged), all show the state.
      * @returns whether keybinds are now suspended
      */
@@ -420,22 +464,27 @@ class KeybindGUI {
 
     ; Client height of the main window for a given keybind-list height.
     MainViewHeight(view, listHeight) {
-        view.status.GetPos(,,, &statusHeight)
-        return KeybindGUI.MainListTop() + listHeight + KeybindGUI.MainFooterHeight() + statusHeight
+        return KeybindGUI.MainListTop() + listHeight + KeybindGUI.MainFooterHeight() + KeybindGUI.mainStatusHeight
     }
 
     static MainListTop() => UITheme.margin + 62 + UITheme.buttonHeight + 10
 
-    static MainFooterHeight() => UITheme.sectionGap + 1 + 12 + UITheme.buttonHeight + 14
+    ; The description under the list, then the rule and the footer buttons.
+    static MainFooterHeight() => UITheme.gap + this.mainDescriptionHeight + UITheme.gap + 1 + 12 + UITheme.buttonHeight + 14
+
+    ; Two lines of the selected function's description.
+    static mainDescriptionHeight := 32
+
+    ; The status strip under the footer: its rule and one line of text.
+    static mainStatusHeight := 30
 
     ; The first list height, reduced so the whole window fits the primary monitor's
     ; work area (title bar, menu and borders take about 90 logical units).
     static FitListHeight(view) {
         try {
             MonitorGetWorkArea(MonitorGetPrimary(),, &top,, &bottom)
-            view.status.GetPos(,,, &statusHeight)
             available := (bottom - top) * 96 / A_ScreenDPI - 90
-                - this.MainListTop() - this.MainFooterHeight() - statusHeight
+                - this.MainListTop() - this.MainFooterHeight() - this.mainStatusHeight
             return Max(this.mainMinListHeight, Min(this.mainListHeight, Floor(available)))
         }
         return this.mainListHeight
@@ -464,23 +513,32 @@ class KeybindGUI {
             x += buttonWidth + gap
         }
 
-        view.status.GetPos(,,, &statusHeight)
+        statusHeight := KeybindGUI.mainStatusHeight
         listTop := KeybindGUI.MainListTop()
         listHeight := Max(40, height - statusHeight - KeybindGUI.MainFooterHeight() - listTop)
         view.list.Move(m, listTop, contentWidth, listHeight)
+        descriptionTop := listTop + listHeight + gap
+        view.description.Move(m, descriptionTop, contentWidth, KeybindGUI.mainDescriptionHeight)
 
-        ruleY := listTop + listHeight + UITheme.sectionGap
+        ruleY := descriptionTop + KeybindGUI.mainDescriptionHeight + gap
         view.rule.Move(0, ruleY, width, 1)
         buttonY := ruleY + 13
         view.attendingsButton.Move(m, buttonY, 160, buttonHeight)
         view.settingsButton.Move(m + 160 + gap, buttonY, 104, buttonHeight)
         view.saveButton.Move(m + contentWidth - 128, buttonY, 128, buttonHeight)
+
+        statusTop := height - statusHeight
+        view.statusRule.Move(0, statusTop, width, 1)
+        lineTop := statusTop + 1, lineHeight := statusHeight - 1
+        view.statusSaved.Move(m, lineTop, 200, lineHeight)
+        view.statusKeys.Move(m + 200 + UITheme.sectionGap, lineTop, 240, lineHeight)
+        view.statusVersion.Move(m + contentWidth - 140, lineTop, 140, lineHeight)
         this.ResizeColumns(view.list)
     }
 
     /**
      * Updates what the main window derives from state: the profile summary, which
-     * commands are available, and the status bar. Purely presentational, so a
+     * commands are available, and the status line. Purely presentational, so a
      * failure is logged instead of interrupting the profile operation that caused it.
      */
     RefreshMainView() {
@@ -505,18 +563,31 @@ class KeybindGUI {
                 else
                     view.profileMenu.Disable(item)
             }
-            view.status.SetText(" " (dirty ? "Unsaved changes" : "All changes saved"), 1)
-            view.status.SetText(" " this.CurrentKeybindStatusText(view.profileName), 2)
-            ; Repaint the list, so rows follow the registration state.
-            DllCall("InvalidateRect", "Ptr", view.list.Hwnd, "Ptr", 0, "Int", false)
+            view.statusSaved.SetFont("c" (dirty ? UITheme.warningColor : UITheme.secondaryColor))
+            view.statusSaved.Value := dirty ? "Unsaved changes" : "All changes saved"
+            view.statusKeys.Value := this.CurrentKeybindStatusText(view.profileName)
+            ; The warning icon on each keybind that is set but not registered, set
+            ; again only when the rows or their registration state changed.
+            inactiveRows := []
+            iconState := ""
+            loop view.list.GetCount() {
+                inactiveRows.Push(KeybindGUI.runtimeFailures.Has(view.list.GetText(A_Index, 1)))
+                iconState .= inactiveRows[A_Index] ? "1" : "0"
+            }
+            if (!HasProp(view, "iconState") || view.iconState != iconState) {
+                for row, inactive in inactiveRows
+                    view.list.Modify(row, KeybindGUI.RowIcon(inactive))
+                view.iconState := iconState
+            }
+            funcName := selected ? view.list.GetText(view.list.GetNext(0), 1) : ""
+            view.description.SetFont("c" (KeybindGUI.runtimeFailures.Has(funcName) ? UITheme.warningColor : UITheme.secondaryColor))
+            view.description.Value := selected ? this.FunctionDescription(funcName) : "Select a function to see what it does."
             ; Suspended keybinds do nothing when pressed, so the title says so too.
             view.gui.Title := "PACS Assistant - " view.profileName (A_IsSuspended ? " (keybinds suspended)" : "")
             if A_IsSuspended
                 view.menus["Tools"].Check(KeybindGUI.suspendMenuItem)
             else
                 view.menus["Tools"].Uncheck(KeybindGUI.suspendMenuItem)
-            ; Left-aligned: right-aligned text would sit under the size grip.
-            view.status.SetText(" " AppVersion.current, 3)
             return true
         } catch Any as err {
             AppLog.Write("The main window could not be refreshed: " ErrorText.Describe(err))
@@ -542,7 +613,7 @@ class KeybindGUI {
         return KeybindGUI.KeybindStatusText(configured, inactive, A_IsSuspended)
     }
 
-    ; The status bar's keybind state: how many of the set keybinds are live.
+    ; The status line's keybind state: how many of the set keybinds are live.
     static KeybindStatusText(configured, inactive, suspended) {
         if suspended
             return "Keybinds suspended"
@@ -554,9 +625,9 @@ class KeybindGUI {
         return (configured - inactive) " of " configured noun " active"
     }
 
-    ; Hover text for a function's row: what it does and, when its keybind is not
-    ; registered, why.
-    FunctionTip(funcName) {
+    ; The main window's description of a function: what it does and, when its
+    ; keybind is not registered, why.
+    FunctionDescription(funcName) {
         custom := 0
         if ProfileManager.profiles.Has(ProfileManager.currentProfile) {
             profile := ProfileManager.profiles[ProfileManager.currentProfile]
@@ -567,21 +638,6 @@ class KeybindGUI {
         if KeybindGUI.runtimeFailures.Has(funcName)
             text .= "`nNot active: " KeybindGUI.runtimeFailures[funcName]
         return text
-    }
-
-    ; LVN_GETINFOTIPW: fills the hover text of the row under the mouse.
-    OnFunctionListInfoTip(listView, lParam) {
-        ; NMLVGETINFOTIPW: pszText, cchTextMax and iItem after the NMHDR header.
-        textOffset := A_PtrSize = 8 ? 32 : 16
-        sizeOffset := A_PtrSize = 8 ? 40 : 20
-        itemOffset := A_PtrSize = 8 ? 44 : 24
-        try {
-            capacity := NumGet(lParam, sizeOffset, "Int")
-            text := this.FunctionTip(listView.GetText(NumGet(lParam, itemOffset, "Int") + 1, 1))
-            if (capacity > 1)
-                StrPut(SubStr(text, 1, capacity - 1), NumGet(lParam, textOffset, "Ptr"), "UTF-16")
-        }
-        return 0
     }
 
     ; The current profile's set keybinds, for the keybind card, in the main list's
@@ -605,7 +661,7 @@ class KeybindGUI {
         return rows
     }
 
-    ; Tools > Status, also opened by double-clicking the status bar's keybind part.
+    ; Tools > Status, also opened by double-clicking the status line's keybind state.
     ShowStatus() => StatusPanel.Show(() => this.CurrentKeybindStatusText(), this.HasMainWindow() ? this.gui : 0)
 
     ; Help > Keybind Card: the profile's keys at a glance, to copy or print.
@@ -3381,6 +3437,8 @@ class KeybindGUI {
         ; 0x200 (SS_CENTERIMAGE) centres the single line vertically in the well.
         promptGui.SetFont("s12", UITheme.headingFontName)
         promptGui.keyWell := promptGui.Add("Text", "xm y+14 w" width " h56 Center 0x200 Background" UITheme.panelColor, "")
+        ; Colored by the prompt's state, not by the theme.
+        promptGui.keyWell.themed := true
         UITheme.UseBodyFont(promptGui)
         ; One area for guidance, then for the captured key's warnings; four lines
         ; tall so the window keeps its size.

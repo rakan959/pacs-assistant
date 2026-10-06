@@ -57,6 +57,10 @@ kbGUI := KeybindGUI()
 UpdateChecker.shutdownCoordinator := kbGUI
 OnExit((exitReason, exitCode) => kbGUI.HandleProcessExit(exitReason, exitCode))
 AppTray.Install(kbGUI)
+; The main window follows the Theme setting, Windows' dark mode and high contrast
+; (WM_SETTINGCHANGE) while it runs.
+Settings.AddChangeListener(ObjBindMethod(kbGUI, "ApplyThemeChange"))
+OnMessage(0x1A, ObjBindMethod(kbGUI, "OnWindowsSettingChange"))
 
 ; Start background clinical services only after the shared automation and
 ; configuration gates are fully composed.

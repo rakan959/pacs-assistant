@@ -48,6 +48,7 @@ class Settings {
         "StartMinimized", false,       ; Start with only the tray icon showing
         "CloseToTray", false,          ; Closing the window hides it instead of exiting
         "ShowCommandFeedback", false,  ; A brief tooltip naming each command a key runs
+        "Theme", "Match Windows",      ; One of themeChoices (UITheme.ModeFor)
         ; Superseded by per-bind scopes, kept only so profiles written under the older
         ; [KeybindScopes] scheme migrate to the right scope. See
         ; ProfileManager.MigrateLegacyScope.
@@ -67,6 +68,9 @@ class Settings {
         "ShowCommandFeedback",
         "RestrictHotkeysByActiveWindow"
     ]
+
+    ; The Theme setting's values, in the order the settings dropdown shows them.
+    static themeChoices := ["Match Windows", "Light", "Dark"]
 
     /**
      * Alert sounds, in the order the settings dropdown shows them, each backed by a
@@ -117,6 +121,8 @@ class Settings {
             if (entry.file != "")
                 this.soundFiles[entry.name] := entry.file
         }
+        ; Windows are drawn in the theme this setting chooses.
+        UITheme.themeSetting := (*) => Settings.Get("Theme")
 
         try {
             AppStorage.Ensure()
@@ -185,6 +191,10 @@ class Settings {
             if (value = "0")
                 return false
             return fallback
+        }
+        if (settingName = "Theme") {
+            index := this.ChoiceIndex(this.themeChoices, value)
+            return index ? this.themeChoices[index] : fallback
         }
         return value
     }
@@ -328,7 +338,7 @@ class Settings {
             startWithWindows := settingsGui.Add("Checkbox", "x" x " y+8 w" column, "Start when I sign &in to Windows")
             startWithWindows.Value := StartupShortcut.IsEnabled()
             checkboxes["StartMinimized"] := settingsGui.Add("Checkbox", "x" x " y+6 w" column, "Start minimi&zed to the tray")
-            checkboxes["CloseToTray"] := settingsGui.Add("Checkbox", "x" x " y+6 w" column, "&Close to the tray instead of exiting")
+            checkboxes["CloseToTray"] := settingsGui.Add("Checkbox", "x" x " y+6 w" column, "C&lose to the tray instead of exiting")
 
             ; Second column: the PowerScribe microphone.
             x := columnX[2], column := widths[2]
@@ -346,6 +356,14 @@ class Settings {
             UITheme.AddSectionLabel(settingsGui, "Appearance", "x" x " y+22 w" column)
             checkboxes["ShowCommandFeedback"] := settingsGui.Add("Checkbox", "x" x " y+8 w" column, "Show which &command a keybind ran")
             UITheme.AddNote(settingsGui, "Its name appears briefly by the pointer.", "x" x " y+6 w" column)
+            settingsGui.Add("Text", "x" x " y+14 w" column, "T&heme")
+            themeDropDown := settingsGui.Add("DropDownList", "x" x " y+4 w160", this.themeChoices)
+            themeDropDown.Value := this.ChoiceIndex(this.themeChoices, this.Get("Theme"))
+            UITheme.AddNote(
+                settingsGui,
+                "Match Windows follows Windows' dark mode. A Windows contrast theme always applies.",
+                "x" x " y+6 w" column
+            )
 
             ; Third column: everything about new studies.
             right := columnX[3], column := widths[3]
@@ -372,7 +390,7 @@ class Settings {
             customSoundEdit := settingsGui.Add("Edit", "x" right " y+4 r1 w" fieldWidth " ReadOnly", this.Get("CustomSoundFile"))
             UITheme.ShowEnd(customSoundEdit)
             customSoundEdit.GetPos(,,, &fieldHeight)
-            browseButton := settingsGui.Add("Button", "x+" UITheme.gap " yp w" buttonWidth " h" fieldHeight, "Br&owse...")
+            browseButton := settingsGui.Add("Button", "x+" UITheme.gap " yp w" buttonWidth " h" fieldHeight, "Brows&e...")
             browseButton.OnEvent("Click", (*) => (
                 settingsGui.Opt("+OwnDialogs"),
                 this.BrowseSound(customSoundEdit)
@@ -404,6 +422,7 @@ class Settings {
                 micName: micNameEdit,
                 soundDropDown: soundDropDown,
                 customSound: customSoundEdit,
+                themeDropDown: themeDropDown,
                 startWithWindows: startWithWindows,
                 startWithWindowsWas: startWithWindows.Value
             }
@@ -423,6 +442,15 @@ class Settings {
             UITheme.ShowDialog(settingsGui)
             return settingsGui
         } finally this.dialogRelease.Call()
+    }
+
+    ; The position of a value in a list of choices, ignoring case; 0 if absent.
+    static ChoiceIndex(choices, value) {
+        for index, choice in choices {
+            if (choice = value)
+                return index
+        }
+        return 0
     }
 
     ; Find index of sound in alertSounds array
@@ -555,6 +583,8 @@ class Settings {
         values["MicrophoneName"] := micName
         values["AlertSound"] := controls.soundDropDown.Text
         values["CustomSoundFile"] := controls.customSound.Text
+        if HasProp(controls, "themeDropDown")
+            values["Theme"] := controls.themeDropDown.Text
 
         try this.SaveValuesAtRevision(values, settingsGui.settingsRevision)
         catch as err {

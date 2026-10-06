@@ -14,8 +14,8 @@ class LayoutAudit {
 
     /**
      * Every layout problem in a shown window: a control outside the client area,
-     * two controls overlapping, or a label that does not fit its control at one of
-     * the scalings.
+     * two controls overlapping, a label that does not fit its control at one of
+     * the scalings, or two controls or menus with the same access key.
      * @returns Array of descriptions, empty when the layout is sound
      */
     static Problems(window) {
@@ -26,10 +26,6 @@ class LayoutAudit {
             if !ctrl.Visible
                 continue
             ctrl.GetPos(&x, &y, &w, &h)
-            if (ctrl.Type = "StatusBar") {
-                clientHeight -= h
-                continue
-            }
             items.Push({ctrl: ctrl, x: x, y: y, w: w, h: h})
         }
 
@@ -69,7 +65,50 @@ class LayoutAudit {
                     problems.Push(this.Name(item) " is a multi-line box under five lines tall; a one-line field needs r1")
             }
         }
+        for problem in this.AccessKeyProblems(window, items)
+            problems.Push(problem)
         return problems
+    }
+
+    /**
+     * Access keys used twice in one window: Alt with the key reaches only the
+     * first control or menu that has it. The menu bar's menus count too. "&&" is
+     * a literal ampersand, not an access key.
+     */
+    static AccessKeyProblems(window, items) {
+        labels := []
+        for name in this.MenuBarNames(window)
+            labels.Push({name: "menu '" name "'", text: name})
+        for item in items {
+            if (item.ctrl.Type ~= "i)^(Button|CheckBox|Radio|Text|GroupBox)$")
+                labels.Push({name: this.Name(item), text: item.ctrl.Text})
+        }
+        problems := []
+        owners := Map()
+        for label in labels {
+            if !RegExMatch(StrReplace(label.text, "&&"), "&(.)", &match)
+                continue
+            key := StrLower(match[1])
+            if owners.Has(key)
+                problems.Push(label.name " and " owners[key] " both use Alt+" StrUpper(key))
+            else
+                owners[key] := label.name
+        }
+        return problems
+    }
+
+    ; The menu bar's top-level names, as Windows holds them (with their &).
+    static MenuBarNames(window) {
+        names := []
+        menuHandle := DllCall("GetMenu", "Ptr", window.Hwnd, "Ptr")
+        if !menuHandle
+            return names
+        loop DllCall("GetMenuItemCount", "Ptr", menuHandle, "Int") {
+            text := Buffer(256 * 2, 0)
+            DllCall("GetMenuStringW", "Ptr", menuHandle, "UInt", A_Index - 1, "Ptr", text, "Int", 256, "UInt", 0x400)  ; MF_BYPOSITION
+            names.Push(StrGet(text, "UTF-16"))
+        }
+        return names
     }
 
     /**
