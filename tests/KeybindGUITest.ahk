@@ -92,6 +92,7 @@ class KeybindGUITest {
         "TestDiscardChangesRestoresTheSavedProfile",
         "TestDiscardChangesWaitsForConfirmation",
         "TestAddAllAddsEveryMissingCommandUnassigned",
+        "TestKeybindCardListsOnlySetKeybindsInListOrder",
         "TestProfileSummaryCountsFunctionsAndNamesTheDefault",
         "TestScopeChoiceMapsTheDialogToFlags",
         "TestScopeWithNoWindowTickedIsRefused",
@@ -2396,6 +2397,29 @@ class KeybindGUITest {
         Assert.Equal(PACSCommands.commands.Count, listView.GetCount())
         Assert.True(editor.IsProfileDirty("Test"))
         Assert.True(dialog.destroyed)
+    }
+
+    ; The card lists only set keybinds, in the main list's groups and order.
+    TestKeybindCardListsOnlySetKeybindsInListOrder() {
+        profile := ProfileManager.NewProfile()
+        for name, bind in Map("Sign Report", "^F13", "Toggle Dictation", "^F15", "Next Series", "", "Custom: Hello", "^!F14") {
+            profile.binds[name] := bind
+            profile.scopes[name] := name = "Custom: Hello" ? "PACS" : "Any"
+        }
+        profile.customFuncs["Custom: Hello"] := {keys: "Hello", window: ""}
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+
+        rows := this.gui.KeybindCardRows()
+
+        Assert.Equal(3, rows.Length)
+        Assert.Equal("Toggle Dictation", rows[1].name)
+        Assert.Equal("Sign Report", rows[2].name)
+        Assert.Equal("PowerScribe", rows[2].group)
+        Assert.Equal("Ctrl + F13", rows[2].keybind)
+        Assert.Equal("Any window", rows[2].activeIn)
+        Assert.Equal("Custom", rows[3].group)
+        Assert.Equal("PACS", rows[3].activeIn)
     }
 
     TestProfileSummaryCountsFunctionsAndNamesTheDefault() {

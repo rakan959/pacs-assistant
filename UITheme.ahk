@@ -161,6 +161,29 @@ class UITheme {
         return window
     }
 
+    /**
+     * Sizes a report ListView's columns to their contents, each at least its
+     * minimum (logical units), and gives the last column the rest of the list's
+     * width inside any vertical scrollbar, so the list never scrolls sideways.
+     */
+    static FillColumns(listView, minimums) {
+        scale := A_ScreenDPI / 96
+        used := 0
+        for index, minimum in minimums {
+            listView.ModifyCol(index, "AutoHdr")
+            ; LVM_GETCOLUMNWIDTH and LVM_SETCOLUMNWIDTH work in pixels.
+            width := Max(SendMessage(0x101D, index - 1, 0, listView), Round(minimum * scale))
+            SendMessage(0x101E, index - 1, width, listView)
+            used += width
+        }
+        ; Not auto-sized first: a last column wider than the list adds a sideways
+        ; scrollbar that stays.
+        rect := Buffer(16, 0)
+        DllCall("GetClientRect", "Ptr", listView.Hwnd, "Ptr", rect)
+        fill := Max(NumGet(rect, 8, "Int") - used, Round(100 * scale))
+        SendMessage(0x101E, minimums.Length, fill, listView)
+    }
+
     ; The modern list look (hover highlight, rounded selection) used by Explorer.
     static UseExplorerTheme(ctrl) {
         DllCall("uxtheme\SetWindowTheme", "Ptr", ctrl.Hwnd, "Str", "Explorer", "Ptr", 0)

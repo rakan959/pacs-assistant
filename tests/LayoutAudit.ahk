@@ -55,6 +55,10 @@ class LayoutAudit {
             problem := this.TextProblem(item)
             if (problem != "")
                 problems.Push(problem)
+            ; A list's columns are sized to fit it (UITheme.FillColumns); a sideways
+            ; scrollbar means they do not.
+            if (item.ctrl.Type = "ListView" && ControlGetStyle(item.ctrl) & 0x100000)  ; WS_HSCROLL
+                problems.Push(this.Name(item) " scrolls sideways: its columns are wider than the list")
             ; An Edit given text longer than its width, without r1, is built as a
             ; wrapping multi-line box a few lines tall: a one-line field that turns
             ; into a scrolling block once its value is long. The app's only

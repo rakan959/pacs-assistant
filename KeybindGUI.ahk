@@ -15,6 +15,8 @@
 #Include UITheme.ahk
 #Include CommandInfo.ahk
 #Include WindowPlacement.ahk
+#Include KeybindCard.ahk
+#Include RecentErrors.ahk
 
 class KeybindGUI {
     gui := ""
@@ -378,6 +380,9 @@ class KeybindGUI {
         toolsMenu.Add("Open &Data Folder", (*) => this.OpenDataFolder())
 
         helpMenu := Menu()
+        helpMenu.Add("&Keybind Card...", (*) => this.ShowKeybindCard())
+        helpMenu.Add("Recent &Errors...", (*) => RecentErrors.Show(this.HasMainWindow() ? this.gui : 0))
+        helpMenu.Add()
         helpMenu.Add("Check for &Updates...", (*) => UpdateChecker.ShowUpdateDialog())
         helpMenu.Add()
         helpMenu.Add("&About PACS Assistant", (*) => this.ShowAbout())
@@ -566,6 +571,79 @@ class KeybindGUI {
                 StrPut(SubStr(text, 1, capacity - 1), NumGet(lParam, textOffset, "Ptr"), "UTF-16")
         }
         return 0
+    }
+
+    ; The current profile's set keybinds, for the keybind card, in the main list's
+    ; order and groups.
+    KeybindCardRows() {
+        rows := []
+        if !ProfileManager.profiles.Has(ProfileManager.currentProfile)
+            return rows
+        profile := ProfileManager.profiles[ProfileManager.currentProfile]
+        for funcName in KeybindGUI.FunctionDisplayOrder(profile.binds) {
+            bind := profile.binds[funcName]
+            if (bind = "")
+                continue
+            rows.Push({
+                group: KeybindGUI.functionGroups[KeybindGUI.FunctionGroupId(funcName)].name,
+                name: funcName,
+                keybind: this.PrettifyHotkey(bind),
+                activeIn: this.ScopeLabel(funcName)
+            })
+        }
+        return rows
+    }
+
+    ; Help > Keybind Card: the profile's keys at a glance, to copy or print.
+    ShowKeybindCard() {
+        profileName := ProfileManager.currentProfile
+        rows := this.KeybindCardRows()
+        owner := this.HasMainWindow() ? "+Owner" this.gui.Hwnd : ""
+        card := UITheme.NewWindow("PACS Assistant - Keybind Card", owner)
+        width := 520
+        UITheme.AddHeading(card, profileName " keybinds", "xm ym w" width)
+        UITheme.AddNote(
+            card,
+            rows.Length ? "The keys set in this profile. Print a copy to keep beside the keyboard."
+                : "No keybinds are set in this profile yet.",
+            "xm y+4 w" width
+        )
+        list := card.Add("ListView", "xm y+12 w" width " r14 -Multi NoSortHdr +LV0x10000", ["Keybind", "Function", "Active In"])
+        UITheme.UseExplorerTheme(list)
+        KeybindGUI.EnableFunctionGroups(list)
+        for row in rows {
+            index := list.Add(, row.keybind, row.name, row.activeIn)
+            KeybindGUI.SetRowGroup(list, index, KeybindGUI.FunctionGroupId(row.name))
+        }
+        UITheme.FillColumns(list, [130, 200])
+
+        close := (*) => card.Destroy()
+        footer := UITheme.AddFooter(
+            card,
+            width,
+            [{text: "Close", default: true, action: close}],
+            [
+                {text: "Copy as &Text", width: 120, action: (*) => (
+                    A_Clipboard := KeybindCard.Text(profileName, rows),
+                    this.NotifyNonModal("The keybind card is on the clipboard.", "Keybind Card", "Iconi")
+                )},
+                {text: "Open &Printable Page", width: 160, action: (*) => this.OpenPrintableCard(profileName, rows, card)}
+            ]
+        )
+        card.OnEvent("Close", close)
+        card.OnEvent("Escape", close)
+        UITheme.ShowDialog(card)
+        footer["Close"].Focus()
+        return card
+    }
+
+    OpenPrintableCard(profileName, rows, card) {
+        try KeybindCard.OpenPrintable(profileName, rows)
+        catch Any as err {
+            AppLog.Write("The printable keybind card could not be opened: " ErrorText.Describe(err))
+            card.Opt("+OwnDialogs")
+            MsgBox("The printable page could not be opened.`n`n" ErrorText.Message(err), "Keybind Card", "Icon!")
+        }
     }
 
     ; The line under the profile name.
@@ -3442,23 +3520,13 @@ class KeybindGUI {
     ; readable minimum) and gives the Active In column the rest of the list's width,
     ; measured inside any vertical scrollbar, so the list never scrolls sideways.
     ResizeColumns(listView) {
-        listView.ModifyCol(1, "AutoHdr")  ; Function column
-        listView.ModifyCol(2, "AutoHdr")  ; Keybind column
         if !HasProp(listView, "Hwnd") {
-            listView.ModifyCol(3, "AutoHdr")
+            ; A test's stand-in list has no window to measure.
+            loop 3
+                listView.ModifyCol(A_Index, "AutoHdr")
             return
         }
-        scale := A_ScreenDPI / 96
-        used := 0
-        for index, minimum in [200, 140] {
-            ; LVM_GETCOLUMNWIDTH and LVM_SETCOLUMNWIDTH work in pixels.
-            width := Max(SendMessage(0x101D, index - 1, 0, listView), Round(minimum * scale))
-            SendMessage(0x101E, index - 1, width, listView)
-            used += width
-        }
-        rect := Buffer(16, 0)
-        DllCall("GetClientRect", "Ptr", listView.Hwnd, "Ptr", rect)
-        SendMessage(0x101E, 2, Max(NumGet(rect, 8, "Int") - used, Round(120 * scale)), listView)
+        UITheme.FillColumns(listView, [200, 140])  ; Function, Keybind; Active In fills
     }
 
     ; How a bind's window scope reads in the ListView

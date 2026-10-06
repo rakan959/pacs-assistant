@@ -85,6 +85,11 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
   selector also has **Duplicate**, and the new-profile prompt has **Import**.
 - **Add All** in Add Function adds every built-in command the profile does not have
   yet, unassigned, so a new profile is a list of keys to set.
+- **Help > Keybind Card** shows the profile's set keys by group, copies them as text,
+  or opens a printable page (written to the temp folder) in your browser.
+- **Help > Recent Errors** shows the newest part of `error.log`. **Copy for Bug Report**
+  adds the version and Windows build; check the copy for anything private before you
+  send it.
 - **Suspend Keybinds** (Tools menu, or the tray menu) turns every keybind off until it
   is chosen again; the title bar and status bar say so while it is on.
 - The tray icon opens the window when double-clicked. Its menu also opens Settings and
@@ -293,6 +298,8 @@ if ($process.ExitCode -ne 0) {
 | `CommandInfo.ahk` | What each command does, and warnings about a key before it is bound |
 | `WindowPlacement.ahk` | The main window's last position, kept between runs |
 | `StartupShortcut.ahk` | The Startup folder shortcut behind "Start when I sign in to Windows" |
+| `KeybindCard.ahk` | The keybind card as text and as a printable page |
+| `RecentErrors.ahk` | Help > Recent Errors: the end of `error.log` |
 | `AppTray.ahk` | The tray icon's menu |
 | `pacs-assistant.ico` | App icon, compiled into the EXE and set for source runs |
 | `HotkeyManager.ahk` | Hotkey registration and window scoping |

@@ -76,6 +76,11 @@ Main() {
     AuditDialog("rename profile", "PACS Assistant - Rename Profile", () => kb.PromptRenameProfile("Neuro"))
     AuditDialog("duplicate profile", "PACS Assistant - Duplicate Profile", () => kb.DuplicateCurrentProfile())
 
+    AuditDialog("keybind card", "PACS Assistant - Keybind Card", () => kb.ShowKeybindCard())
+    loop 40
+        AppLog.Write("Sample failure " A_Index ": a long diagnostic line that is wider than the window, to show how the log scrolls sideways when it must.")
+    AuditDialog("recent errors", "PACS Assistant - Recent Errors", () => RecentErrors.Show(kb.gui))
+
     AuditSettings()
     AuditUpdateDialog()
 
