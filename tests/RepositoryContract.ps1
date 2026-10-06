@@ -97,7 +97,9 @@ $pacsMonitor = Get-Content -Raw (Join-Path $repoRoot 'PACSMonitor.ahk')
 $updateChecker = Get-Content -Raw (Join-Path $repoRoot 'UpdateChecker.ahk')
 $winHttpTransport = Get-Content -Raw (Join-Path $repoRoot 'WinHttpTransport.ahk')
 $winHttpTextRequest = Get-Content -Raw (Join-Path $repoRoot 'WinHttpTextRequest.ahk')
-$updateNetworking = $updateChecker + $winHttpTransport + $winHttpTextRequest
+$winHttpMetadataWorker = Get-Content -Raw (Join-Path $repoRoot 'WinHttpMetadataWorker.ahk')
+$winHttpWorkerProcess = Get-Content -Raw (Join-Path $repoRoot 'WinHttpWorkerProcess.ahk')
+$updateNetworking = $updateChecker + $winHttpTransport + $winHttpTextRequest + $winHttpMetadataWorker
 $appControl = Get-Content -Raw (Join-Path $repoRoot 'AppControl.ahk')
 $keybindGui = Get-Content -Raw (Join-Path $repoRoot 'KeybindGUI.ahk')
 $exclusiveOperations = Get-Content -Raw (Join-Path $repoRoot 'ExclusiveOperations.ahk')
@@ -492,7 +494,8 @@ Assert-NotMatches $powerScribe '\bProfileManager\b' 'PowerScribe automation must
 Assert-Matches $wetRead '(?m)^#Include\s+ProfileManager\.ahk\s*$' 'The wet-read composition layer must declare its profile dependency.'
 Assert-NotMatches $pacsMonitor '\btest(?:Mode|StudyRows|RefreshCalls|LastNewStudies)\b' 'Production PACS monitoring must use injected boundaries rather than compiled test-mode state.'
 Assert-NotMatches $updateNetworking '\.\s*Response(?:Text|Body)\b' 'Update responses must be streamed through explicit byte caps rather than materialized by a COM response property.'
-Assert-Matches $winHttpTextRequest 'WinHttpReadData' 'Update response bodies must use a bounded streaming WinHTTP read path.'
+Assert-Matches $winHttpMetadataWorker 'WinHttpReadData' 'Update response bodies must use a bounded streaming WinHTTP read path.'
+Assert-NotMatches ($winHttpTextRequest + $winHttpMetadataWorker) 'CallbackCreate|WinHttpSetStatusCallback' 'Metadata requests must never execute AutoHotkey on native WinHTTP worker threads.'
 Assert-Matches $main '(?m)^#SingleInstance\s+Ignore\s*$' 'A second launch must never force-terminate a dirty or in-flight clinical instance.'
 Assert-NotMatches $main '(?m)^#SingleInstance\s+Force\s*$' 'Force replacement bypasses shutdown and clinical transaction gates.'
 Assert-Matches $main 'OnExit\(\(exitReason, exitCode\) => kbGUI\.HandleProcessExit\(exitReason, exitCode\)\)' 'Tray and external exits must use the authoritative shutdown coordinator.'
@@ -545,8 +548,8 @@ if (-not $updaterMatch.Success) {
 foreach ($subscriber in @('UpdateChecker', 'PACSMonitor', 'MicrophoneManager')) {
     Assert-Matches $main ("Settings\.AddChangeListener\(ObjBindMethod\(" + $subscriber) ("main.ahk must explicitly subscribe " + $subscriber + " to settings changes.")
 }
-Assert-Matches $winHttpTransport 'static WINHTTP_FLAG_ASYNC := 0x10000000' 'WINHTTP_FLAG_ASYNC must keep its winhttp.h value.'
-Assert-Matches $winHttpTextRequest '(?s)WinHttpOpen.*?WinHttpTransport\.WINHTTP_FLAG_ASYNC' 'Automatic update metadata requests must use native WinHTTP asynchronous mode.'
+Assert-Matches $winHttpTextRequest '(?s)this\.worker\.Start.*?SetTimer\(this\.timeoutTimer, 50\)' 'Automatic metadata requests must run outside the UI process with nonblocking completion polling.'
+Assert-Matches $winHttpWorkerProcess '(?s)JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.*?CreateProcessW.*?AssignProcessToJobObject.*?ResumeThread' 'Metadata workers must be owned before they can execute, and end with their parent process.'
 Assert-Matches $main '(?s)PACSMonitor\.automationAcquire\s*:=.*MicrophoneManager\.automationAcquire\s*:=.*kbGUI\s*:=\s*KeybindGUI\(\).*PACSMonitor\.Start\(\).*MicrophoneManager\.Start\(\).*UpdateChecker\.Start\(\)' 'Every lease, the background automation gates included, must be wired before the GUI is shown, the GUI before clinical timers, and clinical timers before automatic network checks.'
 
 Assert-Matches $readme 'git clone --recurse-submodules' 'README must document cloning with submodules.'

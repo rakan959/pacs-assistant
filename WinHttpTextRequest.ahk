@@ -1,52 +1,34 @@
+﻿; = CONTENTS
+;   + Preamble
+;   + WinHttpTextRequest class (worker files, polling, completion and cleanup)
+
 #Requires AutoHotkey v2.0
 #Include WinHttpTransport.ahk
+#Include WinHttpMetadataWorker.ahk
+#Include WinHttpWorkerProcess.ahk
 #Include AppLog.ahk
 
 /**
- * One bounded asynchronous WinHTTP GET for GitHub release metadata. The response
- * body is streamed into a fixed-size buffer and the request has an overall deadline.
+ * Asynchronous metadata request for the UI process. A separate owned interpreter
+ * performs synchronous, bounded WinHTTP reads. Only the script timer invokes the
+ * completion callbacks; WinHTTP worker threads never enter AutoHotkey callbacks.
  */
 class WinHttpTextRequest {
-    ; WinHTTP invokes one process-lifetime callback on worker threads. Context and
-    ; handle maps keep each operation alive until HANDLE_CLOSING, the documented
-    ; final notification for a request. This avoids freeing callback state while a
-    ; worker can still reach it and avoids a per-hour callback allocation leak.
-    ; WINHTTP_CALLBACK_STATUS_* values (winhttp.h). Each status's notification
-    ; flag has the same bit value, so callbackFlags subscribes to exactly these.
-    static WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING := 0x00000800
-    static WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE := 0x00020000
-    static WINHTTP_CALLBACK_STATUS_READ_COMPLETE := 0x00080000
-    static WINHTTP_CALLBACK_STATUS_REQUEST_ERROR := 0x00200000
-    static WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE := 0x00400000
-    static operationsByContext := Map()
-    static operationsByHandle := Map()
-    static contextSequence := 0
-    static statusCallback := 0
-    static callbackFlags := this.WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING
-        | this.WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE
-        | this.WINHTTP_CALLBACK_STATUS_READ_COMPLETE
-        | this.WINHTTP_CALLBACK_STATUS_REQUEST_ERROR
-        | this.WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE
-
     __New(url, onComplete, onError, maximumSize) {
         if (Type(url) != "String"
-            || !RegExMatch(url, "i)^https://api\.github\.com(/.*)$", &urlMatch))
+            || !RegExMatch(url, "i)^https://api\.github\.com(/.*)$")
+            || RegExMatch(url, '[\x00-\x20"]'))
             throw ValueError("Update metadata URL is not a supported GitHub API URL")
-        if (!(maximumSize is Integer) || maximumSize <= 0)
-            throw ValueError("A positive metadata response limit is required")
-
-        this.path := urlMatch[1]
+        if (!(maximumSize is Integer) || maximumSize <= 0 || maximumSize > 16 * 1024 * 1024)
+            throw ValueError("A positive metadata response limit of at most 16 MiB is required")
+        this.url := url
         this.onComplete := onComplete
         this.onError := onError
         this.maximumSize := maximumSize
-        this.bodyBuffer := Buffer(maximumSize)
-        this.readBuffer := Buffer(64 * 1024)
-        this.totalBytes := 0
-        this.session := 0
-        this.connection := 0
-        this.request := 0
-        this.context := 0
+        this.worker := WinHttpWorkerProcess()
+        this.directory := ""
         this.timeoutTimer := 0
+        this.exitCallback := 0
         this.startedAt := 0
         this.state := "created"
         this.terminalKind := ""
@@ -54,280 +36,109 @@ class WinHttpTextRequest {
     }
 
     Start() {
+        if (this.state != "created")
+            throw Error("A metadata request can be started only once")
         try {
             this.state := "starting"
             this.startedAt := this.NowMilliseconds()
-            this.session := DllCall(
-                "winhttp\WinHttpOpen",
-                "WStr", "PACS-Assistant-Update-Checker",
-                "UInt", WinHttpTransport.WINHTTP_ACCESS_TYPE_NO_PROXY,
-                "Ptr", 0,
-                "Ptr", 0,
-                "UInt", WinHttpTransport.WINHTTP_FLAG_ASYNC,
-                "Ptr"
-            )
-            if !this.session
-                throw OSError(A_LastError, "WinHttpOpen")
-            this.connection := DllCall(
-                "winhttp\WinHttpConnect",
-                "Ptr", this.session,
-                "WStr", "api.github.com",
-                "UShort", WinHttpTransport.INTERNET_DEFAULT_HTTPS_PORT,
-                "UInt", 0,
-                "Ptr"
-            )
-            if !this.connection
-                throw OSError(A_LastError, "WinHttpConnect")
-            this.request := DllCall(
-                "winhttp\WinHttpOpenRequest",
-                "Ptr", this.connection,
-                "WStr", "GET",
-                "WStr", this.path,
-                "Ptr", 0,
-                "Ptr", 0,
-                "Ptr", 0,
-                "UInt", WinHttpTransport.WINHTTP_FLAG_SECURE,
-                "Ptr"
-            )
-            if !this.request
-                throw OSError(A_LastError, "WinHttpOpenRequest")
-            if !DllCall(
-                "winhttp\WinHttpSetTimeouts",
-                "Ptr", this.request,
-                "Int", WinHttpTransport.resolveTimeoutMs,
-                "Int", WinHttpTransport.connectTimeoutMs,
-                "Int", WinHttpTransport.sendTimeoutMs,
-                "Int", WinHttpTransport.receiveTimeoutMs
-            )
-                throw OSError(A_LastError, "WinHttpSetTimeouts")
-
-            callback := WinHttpTextRequest.CallbackPointer()
-            previous := DllCall(
-                "winhttp\WinHttpSetStatusCallback",
-                "Ptr", this.request,
-                "Ptr", callback,
-                "UInt", WinHttpTextRequest.callbackFlags,
-                "Ptr", 0,
-                "Ptr"
-            )
-            if (previous = -1)
-                throw OSError(A_LastError, "WinHttpSetStatusCallback")
-
-            this.context := WinHttpTextRequest.NextContext()
-            WinHttpTextRequest.operationsByContext[this.context] := this
-            WinHttpTextRequest.operationsByHandle[this.request] := this
-            this.timeoutTimer := ObjBindMethod(this, "CheckTimeout")
-            SetTimer(this.timeoutTimer, 250)
+            this.CreateWorkerFiles()
+            this.exitCallback := ObjBindMethod(this, "Cancel")
+            OnExit(this.exitCallback)
+            this.worker.Start(this.directory "\worker.ahk", this.directory)
             this.state := "sending"
-            sent := DllCall(
-                "winhttp\WinHttpSendRequest",
-                "Ptr", this.request,
-                "WStr", "User-Agent: PACS-Assistant-Update-Checker`r`n"
-                    . "Accept: application/vnd.github+json`r`n",
-                "UInt", -1,
-                "Ptr", 0,
-                "UInt", 0,
-                "UInt", 0,
-                "UPtr", this.context
-            )
-            sendError := A_LastError
-            if (!sent && sendError != WinHttpTransport.ERROR_IO_PENDING)
-                throw OSError(sendError, "WinHttpSendRequest")
+            this.timeoutTimer := ObjBindMethod(this, "Poll")
+            SetTimer(this.timeoutTimer, 50)
             return this
         } catch as err {
-            callback := this.onError
-            this.CleanupStartFailure()
-            try callback.Call(err)
-            catch Any as callbackError
-                AppLog.WriteError(callbackError)
+            this.Fail(err)
             return 0
         }
     }
 
-    static CallbackPointer() {
-        if !this.statusCallback
-            this.statusCallback := CallbackCreate(
-                ObjBindMethod(this, "DispatchStatus"),,
-                5
-            )
-        return this.statusCallback
-    }
-
-    static NextContext() {
-        this.contextSequence++
-        if !this.contextSequence
-            this.contextSequence := 1
-        return this.contextSequence
-    }
-
-    static DispatchStatus(handle, context, status, information, length) {
-        Critical("On")
-        ; CallbackCreate receives machine-word integers. WinHTTP supplies these two
-        ; fields as DWORDs, so ignore undefined upper bits on x64 before dispatch.
-        status &= 0xFFFFFFFF
-        length &= 0xFFFFFFFF
-        operation := 0
-        if context {
-            if !this.operationsByContext.Has(context)
-                return
-            operation := this.operationsByContext[context]
-        } else if (handle && this.operationsByHandle.Has(handle))
-            operation := this.operationsByHandle[handle]
-        if !operation
-            return
-
-        try {
-            operation.HandleNativeStatus(handle, status, information, length)
-        } catch as err {
-            operation.Schedule("Fail", err)
+    CreateWorkerFiles() {
+        guid := Buffer(16)
+        if DllCall("ole32\CoCreateGuid", "Ptr", guid, "Int")
+            throw Error("Could not allocate a metadata request identity")
+        name := ""
+        loop 4
+            name .= Format("{:08x}", NumGet(guid, (A_Index - 1) * 4, "UInt"))
+        directory := A_Temp "\pacs-metadata-" name
+        if DirExist(directory)
+            throw Error("Metadata request directory already exists")
+        DirCreate(directory)
+        this.directory := directory
+        destination := directory "\WinHttpMetadataWorker.ahk"
+        if A_IsCompiled
+            FileInstall("WinHttpMetadataWorker.ahk", destination)
+        else {
+            SplitPath(A_LineFile, , &sourceDirectory)
+            FileCopy(sourceDirectory "\WinHttpMetadataWorker.ahk", destination)
         }
+        FileAppend(this.WorkerScript(), directory "\worker.ahk", "UTF-8")
+        config := directory "\request.ini"
+        IniWrite(this.url, config, "Request", "Url")
+        IniWrite(this.maximumSize, config, "Request", "MaximumSize")
+        for entry in [
+            ["Resolve", WinHttpTransport.resolveTimeoutMs],
+            ["Connect", WinHttpTransport.connectTimeoutMs],
+            ["Send", WinHttpTransport.sendTimeoutMs],
+            ["Receive", WinHttpTransport.receiveTimeoutMs]
+        ]
+            IniWrite(entry[2], config, "Timeouts", entry[1])
     }
 
-    HandleNativeStatus(handle, status, information, length) {
-        if (status = WinHttpTextRequest.WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING) {
-            if (this.state = "closing" && handle = this.request)
-                this.Schedule("Finalize")
-            return
-        }
-        if (this.state = "closing" || this.state = "closed")
-            return
-
-        if (status = WinHttpTextRequest.WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE) {
-            this.Schedule("ReceiveResponse")
-        } else if (status = WinHttpTextRequest.WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE) {
-            this.Schedule("HandleHeaders")
-        } else if (status = WinHttpTextRequest.WINHTTP_CALLBACK_STATUS_READ_COMPLETE) {
-            if !length
-                this.Schedule("CompleteRead")
-            else {
-                this.ConsumeReadChunk(information, length)
-                this.Schedule("ReadNext")
-            }
-        } else if (status = WinHttpTextRequest.WINHTTP_CALLBACK_STATUS_REQUEST_ERROR) {
-            errorCode := information ? NumGet(information, A_PtrSize, "UInt") : 0
-            this.Schedule(
-                "Fail",
-                errorCode
-                    ? OSError(errorCode, "WinHTTP asynchronous request")
-                    : Error("WinHTTP asynchronous request failed")
-            )
-        }
+    WorkerScript() {
+        return '#Requires AutoHotkey v2.0`n'
+            . '#SingleInstance Off`n'
+            . '#ErrorStdOut`n'
+            . '#Warn All, StdOut`n'
+            . 'FileEncoding "UTF-8"`n'
+            . 'OnError((*) => ExitApp(10))`n'
+            . '#Include WinHttpMetadataWorker.ahk`n'
+            . 'WinHttpMetadataWorker.Main()`n'
     }
 
-    Schedule(methodName, params*) {
-        SetTimer(ObjBindMethod(this, methodName, params*), -1)
-    }
-
-    ReceiveResponse() {
+    Poll() {
         if (this.state != "sending")
             return
-        this.state := "receiving"
-        received := DllCall(
-            "winhttp\WinHttpReceiveResponse",
-            "Ptr", this.request,
-            "Ptr", 0
-        )
-        receiveError := A_LastError
-        if (!received && receiveError != WinHttpTransport.ERROR_IO_PENDING)
-            this.Fail(OSError(receiveError, "WinHttpReceiveResponse"))
-    }
-
-    HandleHeaders() {
-        if (this.state != "receiving")
+        this.CheckTimeout()
+        if (this.state != "sending")
             return
         try {
-            headers := this.ReadResponseHeaders()
-            status := headers.status
-            if (headers.hasContentLength && headers.contentLength > this.maximumSize)
-                throw Error("Update metadata response exceeded its byte limit")
-
-            if (status != 200) {
-                this.Succeed({status: status, body: ""})
+            if !this.worker.IsFinished()
                 return
+            if this.worker.ExitCode() {
+                errorPath := this.directory "\error.txt"
+                message := FileExist(errorPath) && FileGetSize(errorPath) <= 8192
+                    ? FileRead(errorPath, "UTF-8") : "The metadata worker failed before returning a response"
+                throw Error(message)
             }
-
-            this.responseStatus := status
-            this.state := "reading"
-            this.ReadNext()
+            this.Succeed(this.ReadWorkerResponse())
         } catch as err {
             this.Fail(err)
         }
     }
 
-    ReadResponseHeaders() {
-        status := 0
-        statusSize := 4
-        if !DllCall(
-            "winhttp\WinHttpQueryHeaders",
-            "Ptr", this.request,
-            "UInt", WinHttpTransport.WINHTTP_QUERY_STATUS_CODE | WinHttpTransport.WINHTTP_QUERY_FLAG_NUMBER,
-            "Ptr", 0,
-            "UInt*", &status,
-            "UInt*", &statusSize,
-            "Ptr", 0
-        )
-            throw OSError(A_LastError, "WinHttpQueryHeaders(status)")
-
-        contentLength := 0
-        contentLengthSize := 4
-        hasContentLength := DllCall(
-            "winhttp\WinHttpQueryHeaders",
-            "Ptr", this.request,
-            "UInt", WinHttpTransport.WINHTTP_QUERY_CONTENT_LENGTH | WinHttpTransport.WINHTTP_QUERY_FLAG_NUMBER,
-            "Ptr", 0,
-            "UInt*", &contentLength,
-            "UInt*", &contentLengthSize,
-            "Ptr", 0
-        )
-        headerError := A_LastError
-        if (!hasContentLength && headerError != WinHttpTransport.ERROR_WINHTTP_HEADER_NOT_FOUND)
-            throw OSError(headerError, "WinHttpQueryHeaders(Content-Length)")
-        return {status: status, hasContentLength: !!hasContentLength, contentLength: contentLength}
-    }
-
-    ReadNext() {
-        if (this.state != "reading")
-            return
-        readStarted := DllCall(
-            "winhttp\WinHttpReadData",
-            "Ptr", this.request,
-            "Ptr", this.readBuffer.Ptr,
-            "UInt", this.readBuffer.Size,
-            "Ptr", 0
-        )
-        readError := A_LastError
-        if (!readStarted && readError != WinHttpTransport.ERROR_IO_PENDING)
-            this.Fail(OSError(readError, "WinHttpReadData"))
-    }
-
-    ConsumeReadChunk(source, length) {
-        if (!(length is Integer) || length < 0)
-            throw ValueError("WinHTTP returned an invalid metadata byte count")
-        if (this.totalBytes + length > this.maximumSize)
-            throw Error("Update metadata response exceeded its byte limit")
-        if length {
-            DllCall(
-                "ntdll\RtlMoveMemory",
-                "Ptr", this.bodyBuffer.Ptr + this.totalBytes,
-                "Ptr", source,
-                "UPtr", length
-            )
-            this.totalBytes += length
-        }
-        return this.totalBytes
-    }
-
-    CompleteRead() {
-        if (this.state != "reading")
-            return
+    ReadWorkerResponse() {
+        input := FileOpen(this.directory "\response.bin", "r", "UTF-8-RAW")
         try {
-            body := this.totalBytes
-                ? StrGet(this.bodyBuffer.Ptr, this.totalBytes, "UTF-8")
-                : ""
-            this.Succeed({status: this.responseStatus, body: body})
-        } catch as err {
-            this.Fail(err)
-        }
+            if (input.Length < 4 || input.Length > this.maximumSize + 4)
+                throw Error("Update metadata response exceeded its byte limit or was truncated")
+            status := input.ReadUInt()
+            if (status < 100 || status > 599)
+                throw Error("The metadata worker returned an invalid HTTP status")
+            length := input.Length - 4
+            if (status != 200 && length)
+                throw Error("The metadata worker returned an unexpected error body")
+            body := ""
+            if length {
+                bodyBytes := Buffer(length)
+                if (input.RawRead(bodyBytes, length) != length)
+                    throw Error("The metadata worker response was truncated")
+                body := StrGet(bodyBytes.Ptr, length, "UTF-8")
+            }
+            return {status: status, body: body}
+        } finally input.Close()
     }
 
     Succeed(response) {
@@ -341,69 +152,80 @@ class WinHttpTextRequest {
     BeginClose(kind, value) {
         if (this.state = "closing" || this.state = "closed")
             return
-        if (this.state = "created") {
-            this.terminalKind := kind
-            this.terminalValue := value
-            this.Finalize()
-            return
-        }
-
         this.state := "closing"
         this.terminalKind := kind
         this.terminalValue := value
         this.StopTimeoutTimer()
-
-        request := this.request
-        closePending := false
-        if request
-            closePending := DllCall("winhttp\WinHttpCloseHandle", "Ptr", request)
-        if this.connection {
-            DllCall("winhttp\WinHttpCloseHandle", "Ptr", this.connection)
-            this.connection := 0
-        }
-        if this.session {
-            DllCall("winhttp\WinHttpCloseHandle", "Ptr", this.session)
-            this.session := 0
-        }
-        if !closePending
-            this.Schedule("Finalize")
+        this.Finalize()
     }
 
     Finalize() {
         if (this.state = "closed")
             return
-
-        this.StopTimeoutTimer()
-        this.Unregister()
-        this.request := 0
-        this.connection := 0
-        this.session := 0
+        ; A callback may immediately start another check. Reap this worker and
+        ; release its timers/files before publishing completion to that caller.
+        cleanupError := 0
+        try this.worker.Close()
+        catch as err {
+            cleanupError := err
+            AppLog.Write("Metadata worker cleanup failed: " ErrorText.Describe(err))
+        }
+        if (this.exitCallback && !cleanupError) {
+            OnExit(this.exitCallback, 0)
+            this.exitCallback := 0
+        }
+        if !cleanupError
+            this.CleanupFiles()
         this.state := "closed"
-
-        kind := this.terminalKind
-        value := this.terminalValue
+        kind := cleanupError ? "error" : this.terminalKind
+        value := cleanupError ? Error("Metadata worker cleanup failed: " cleanupError.Message) : this.terminalValue
         completeCallback := this.onComplete
         errorCallback := this.onError
         this.onComplete := 0
         this.onError := 0
-        this.bodyBuffer := 0
-        this.readBuffer := 0
         this.terminalValue := 0
-
-        if (kind = "complete") {
-            ; The callbacks handle their own failures; reaching these is a bug.
-            try completeCallback.Call(value)
-            catch Any as err
-                AppLog.WriteError(err)
-        } else if (kind = "error") {
-            try errorCallback.Call(value)
-            catch Any as err
-                AppLog.WriteError(err)
+        try {
+            if (kind = "complete")
+                completeCallback.Call(value)
+            else if (kind = "error")
+                errorCallback.Call(value)
+        } catch Any as err {
+            AppLog.WriteError(err)
         }
     }
 
-    Cancel() {
+    CleanupFiles() {
+        if (this.directory = "")
+            return
+        try {
+            for name in ["worker.ahk", "WinHttpMetadataWorker.ahk", "request.ini", "response.bin", "error.txt"] {
+                path := this.directory "\" name
+                if FileExist(path)
+                    FileDelete(path)
+            }
+            DirDelete(this.directory)
+            this.directory := ""
+        } catch as err {
+            AppLog.Write("Metadata temporary files could not be removed: " ErrorText.Describe(err))
+        }
+    }
+
+    Cancel(*) {
+        if (this.state = "closed" && this.exitCallback) {
+            ; A failed reap retains its exact handle and exit cleanup. Retry it
+            ; without permitting an OnExit callback to prevent shutdown.
+            try {
+                this.worker.Close()
+                this.CleanupFiles()
+                OnExit(this.exitCallback, 0)
+                this.exitCallback := 0
+            } catch as err {
+                AppLog.Write("Metadata worker exit cleanup failed: " ErrorText.Describe(err))
+            }
+            return 0
+        }
         this.BeginClose("cancel", 0)
+        return 0 ; OnExit must never veto the application's exit.
     }
 
     CheckTimeout() {
@@ -423,40 +245,6 @@ class WinHttpTextRequest {
             SetTimer(this.timeoutTimer, 0)
             this.timeoutTimer := 0
         }
-    }
-
-    CleanupStartFailure() {
-        this.StopTimeoutTimer()
-        if this.request {
-            DllCall(
-                "winhttp\WinHttpSetStatusCallback",
-                "Ptr", this.request,
-                "Ptr", 0,
-                "UInt", WinHttpTextRequest.callbackFlags,
-                "Ptr", 0,
-                "Ptr"
-            )
-        }
-        this.Unregister()
-        for propertyName in ["request", "connection", "session"] {
-            handle := this.%propertyName%
-            if handle
-                DllCall("winhttp\WinHttpCloseHandle", "Ptr", handle)
-            this.%propertyName% := 0
-        }
-        this.state := "closed"
-        this.onComplete := 0
-        this.onError := 0
-        this.bodyBuffer := 0
-        this.readBuffer := 0
-    }
-
-    Unregister() {
-        if (this.context && WinHttpTextRequest.operationsByContext.Has(this.context))
-            WinHttpTextRequest.operationsByContext.Delete(this.context)
-        if (this.request && WinHttpTextRequest.operationsByHandle.Has(this.request))
-            WinHttpTextRequest.operationsByHandle.Delete(this.request)
-        this.context := 0
     }
 
     NowMilliseconds() {

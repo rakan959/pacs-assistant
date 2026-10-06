@@ -1,8 +1,8 @@
-; = CONTENTS
+﻿; = CONTENTS
 ;   + Preamble
 ;   + UpdateVerificationTest class (artifact checks, release metadata, download URL,
-;       metadata request and WinHTTP callback guards)
-;   + Test doubles (recording metadata request, WinHTTP status operation)
+;       metadata request, streaming and worker ownership)
+;   + Test doubles (metadata process and streaming worker)
 
 #Requires AutoHotkey v2.0
 #Include ../UpdateChecker.ahk
@@ -32,15 +32,18 @@ class UpdateVerificationTest {
         "DownloadRejectsUntrustedArgumentsBeforeConnecting",
         "MetadataRequestRejectsInvalidConstruction",
         "MetadataRequestTimesOutOnlyPastItsBudget",
-        "MetadataRequestReportsAsyncWinHttpErrors",
-        "MetadataStatusesScheduleEachSuccessStep",
+        "MetadataDeadlineClosesPendingWorkerAndReportsOnce",
+        "MetadataRequestReportsWorkerErrors",
+        "MetadataStartFailureCleansUpAndReportsOnce",
+        "MetadataCleanupFailureReportsErrorAndRetainsExitCleanup",
+        "PendingMetadataWorkerLeavesTheScriptResponsive",
         "MetadataCompletionDeliversUtf8BodyOnce",
         "MetadataHeadersEnforceSizeAndStatusBeforeReading",
         "MetadataResponsesAreStreamBoundedBeforeParsing",
         "AsyncRequestCancelBreaksCallbackOwnership",
-        "StaleCallbackContextNeverFallsBackToReusedHandle",
-        "NativeCallbackMasksThirtyTwoBitParameters",
-        "CallbackSubscriptionCoversEveryHandledStatus"
+        "CancelledMetadataWorkerCannotDeliverLateCompletion",
+        "WorkerResponseRejectsInvalidSizeAndStatus",
+        "NativeWorkerCancellationReapsOnlyItsOwnedProcess"
     ]
 
     ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
@@ -271,95 +274,141 @@ class UpdateVerificationTest {
         Assert.Equal(1, request.failures.Length, "A closing request must not fail again")
     }
 
-    MetadataRequestReportsAsyncWinHttpErrors() {
-        request := RecordingMetadataRequest()
-        request.state := "receiving"
-        asyncResult := Buffer(A_PtrSize + 4, 0)
-        NumPut("UInt", 12002, asyncResult, A_PtrSize)
-
-        request.HandleNativeStatus(0, 0x00200000, asyncResult.Ptr, asyncResult.Size)
-        request.HandleNativeStatus(0, 0x00200000, 0, 0)
-
-        Assert.Equal(2, request.scheduled.Length)
-        Assert.Equal("Fail", request.scheduled[1].method)
-        Assert.True(request.scheduled[1].params[1] is OSError, "A WinHTTP error code must surface as OSError")
-        Assert.Equal(12002, request.scheduled[1].params[1].Number)
-        Assert.Equal("Fail", request.scheduled[2].method)
-        Assert.True(InStr(request.scheduled[2].params[1].Message, "asynchronous request failed"))
+    MetadataRequestReportsWorkerErrors() {
+        failed := []
+        request := WinHttpTextRequest("https://api.github.com/test", (*) => ThrowError("unexpected success"), (err) => failed.Push(err), 16)
+        request.worker := FakeMetadataWorkerProcess(200, "", 10)
+        Assert.True(IsObject(request.Start()))
+        request.Poll()
+        Assert.Equal(1, failed.Length)
+        Assert.True(InStr(failed[1].Message, "simulated worker failure"))
+        Assert.Equal("closed", request.state)
+        Assert.True(request.worker.closed)
     }
 
-    MetadataStatusesScheduleEachSuccessStep() {
-        request := RecordingMetadataRequest()
-        chunk := Buffer(4)
-        StrPut("abc", chunk, "UTF-8")
-        request.state := "sending"
-        request.HandleNativeStatus(0, 0x00400000, 0, 0)
-        request.state := "receiving"
-        request.HandleNativeStatus(0, 0x00020000, 0, 0)
-        request.state := "reading"
-        request.HandleNativeStatus(0, 0x00080000, chunk.Ptr, 3)
-        request.HandleNativeStatus(0, 0x00080000, chunk.Ptr, 0)
-        methods := ""
-        for call in request.scheduled
-            methods .= call.method "|"
-        Assert.Equal("ReceiveResponse|HandleHeaders|ReadNext|CompleteRead|", methods)
-        Assert.Equal(3, request.totalBytes)
+    MetadataStartFailureCleansUpAndReportsOnce() {
+        failures := []
+        request := WinHttpTextRequest("https://api.github.com/test", (*) => ThrowError("unexpected success"), (err) => failures.Push(err), 16)
+        request.worker := FailingStartMetadataProcess()
+        Assert.False(request.Start())
+        Assert.Equal(1, failures.Length)
+        Assert.Equal("closed", request.state)
+        Assert.Equal("", request.directory)
+        Assert.Equal(0, request.exitCallback)
+        Assert.True(request.worker.closed)
+    }
+
+    MetadataCleanupFailureReportsErrorAndRetainsExitCleanup() {
+        failures := []
+        request := WinHttpTextRequest("https://api.github.com/test", (*) => ThrowError("unexpected success"), (err) => failures.Push(err), 16)
+        request.worker := FailingCloseMetadataProcess()
+        capturedLog := LogCapture()
+        try {
+            Assert.True(IsObject(request.Start()))
+            request.Poll()
+            Assert.Equal(1, failures.Length)
+            Assert.Equal("closed", request.state)
+            Assert.True(IsObject(request.exitCallback))
+            Assert.True(DirExist(request.directory))
+        } finally {
+            request.Cancel()
+            capturedLog.Restore()
+        }
+        Assert.True(request.worker.closed)
+        Assert.Equal("", request.directory)
+        Assert.Equal(0, request.exitCallback)
+    }
+
+    PendingMetadataWorkerLeavesTheScriptResponsive() {
+        request := WinHttpTextRequest("https://api.github.com/test", (*) => ThrowError("unexpected completion"), (*) => ThrowError("unexpected failure"), 16)
+        request.worker := FakeMetadataWorkerProcess()
+        request.worker.finished := false
+        Assert.True(IsObject(request.Start()))
+        try {
+            request.Poll()
+            Assert.Equal("sending", request.state)
+            Assert.False(request.worker.closed)
+        } finally request.Cancel()
+        Assert.True(request.worker.closed)
+        Assert.Equal("closed", request.state)
+    }
+
+    MetadataDeadlineClosesPendingWorkerAndReportsOnce() {
+        failures := []
+        request := ClockMetadataRequest("https://api.github.com/test", (*) => ThrowError("unexpected completion"), (err) => failures.Push(err), 16)
+        request.worker := FakeMetadataWorkerProcess()
+        request.worker.finished := false
+        Assert.True(IsObject(request.Start()))
+        try {
+            request.now := WinHttpTransport.resolveTimeoutMs + WinHttpTransport.connectTimeoutMs
+                + WinHttpTransport.sendTimeoutMs + WinHttpTransport.receiveTimeoutMs + 2000
+            request.Poll()
+            Assert.Equal("sending", request.state)
+            Assert.False(request.worker.closed)
+            request.now++
+            request.Poll()
+            request.Poll()
+            Assert.Equal(1, failures.Length)
+            Assert.True(InStr(failures[1].Message, "timed out"))
+            Assert.Equal("closed", request.state)
+            Assert.True(request.worker.closed)
+            Assert.Equal("", request.directory)
+            Assert.Equal(0, request.exitCallback)
+            Assert.Equal(0, request.timeoutTimer)
+        } finally request.Cancel()
     }
 
     MetadataCompletionDeliversUtf8BodyOnce() {
         received := []
         failed := []
-        request := RecordingMetadataRequest()
-        request.onComplete := (response) => received.Push(response)
-        request.onError := (err) => failed.Push(err)
         text := '{"body":"' Chr(0x2192) '"}'
-        size := StrPut(text, "UTF-8") - 1
-        body := Buffer(size + 1)
-        StrPut(text, body, "UTF-8")
-        request.state := "reading"
-        request.responseStatus := 200
-        request.ConsumeReadChunk(body.Ptr, size)
-        request.CompleteRead()
-        Assert.Equal("closing", request.state)
-        Assert.Equal("Finalize", request.scheduled[1].method)
-        request.Finalize()
+        request := WinHttpTextRequest("https://api.github.com/test", (response) => received.Push(response), (err) => failed.Push(err), 64)
+        request.worker := FakeMetadataWorkerProcess(200, text)
+        Assert.True(IsObject(request.Start()))
+        request.Poll()
+        request.Poll()
         request.Finalize()
         Assert.Equal(0, failed.Length)
         Assert.Equal(1, received.Length)
         Assert.Equal(200, received[1].status)
         Assert.Equal(text, received[1].body)
+        Assert.Equal("closed", request.state)
+        Assert.Equal("", request.directory)
+        Assert.True(request.worker.closed)
         Assert.Equal(0, request.onComplete)
         Assert.Equal(0, request.onError)
     }
 
     MetadataHeadersEnforceSizeAndStatusBeforeReading() {
         for testCase in [
-            {status: 200, length: 16, hasLength: true, reads: 1, failures: 0, completions: 0},
-            {status: 200, length: 17, hasLength: true, reads: 0, failures: 1, completions: 0},
-            {status: 200, length: 99, hasLength: false, reads: 1, failures: 0, completions: 0},
-            {status: 404, length: 0, hasLength: true, reads: 0, failures: 0, completions: 1}
+            {status: 200, length: 16, hasLength: true, reads: 1, fails: false},
+            {status: 200, length: 17, hasLength: true, reads: 0, fails: true},
+            {status: 200, length: 99, hasLength: false, reads: 1, fails: false},
+            {status: 404, length: 0, hasLength: true, reads: 0, fails: false}
         ] {
-            request := HeaderMetadataRequest(testCase)
-            request.state := "receiving"
-            request.HandleHeaders()
-            Assert.Equal(testCase.reads, request.reads)
-            Assert.Equal(testCase.failures, request.failures.Length)
-            Assert.Equal(testCase.completions, request.responses.Length)
-            if testCase.reads {
-                Assert.Equal(200, request.responseStatus)
-                Assert.Equal("reading", request.state)
+            worker := HeaderMetadataWorker(testCase)
+            if testCase.fails
+                Assert.Throws(() => worker.ReadResponse(), "exceeded its byte limit")
+            else {
+                response := worker.ReadResponse()
+                Assert.Equal(testCase.status, response.status)
+                Assert.Equal("", response.body)
             }
-            if testCase.completions {
-                Assert.Equal(404, request.responses[1].status)
-                Assert.Equal("", request.responses[1].body)
-            }
+            Assert.Equal(testCase.reads, worker.reads)
         }
     }
 
-    CallbackSubscriptionCoversEveryHandledStatus() {
-        ; The mask is derived from the named statuses; pinning its value keeps a
-        ; dropped or renamed status from silently changing the subscription.
-        Assert.Equal(0x006A0800, WinHttpTextRequest.callbackFlags)
+    NativeWorkerCancellationReapsOnlyItsOwnedProcess() {
+        script := this.TrackTemp(TestTempPath("pacs-worker-cancel", ".ahk"))
+        FileAppend("#Requires AutoHotkey v2.0`n#SingleInstance Off`n#ErrorStdOut`nSleep(30000)`nExitApp()`n", script, "UTF-8")
+        worker := WinHttpWorkerProcess()
+        try {
+            worker.Start(script, A_Temp)
+            Assert.False(worker.IsFinished())
+        } finally worker.Close()
+        Assert.Equal(0, worker.process)
+        Assert.Equal(0, worker.job)
+        Assert.True(worker.IsFinished())
     }
 
     ReleaseParserKeepsAssetMetadataTogether() {
@@ -472,38 +521,37 @@ class UpdateVerificationTest {
         Assert.Equal(0, operation.onError)
     }
 
-    StaleCallbackContextNeverFallsBackToReusedHandle() {
-        operation := FakeWinHttpStatusOperation()
-        WinHttpTextRequest.operationsByHandle[42] := operation
-        try WinHttpTextRequest.DispatchStatus(42, 999, 0x00400000, 0, 0)
-        finally WinHttpTextRequest.operationsByHandle.Delete(42)
-
-        Assert.Equal(0, operation.statusCalls)
+    CancelledMetadataWorkerCannotDeliverLateCompletion() {
+        received := []
+        failed := []
+        request := WinHttpTextRequest("https://api.github.com/test", (value) => received.Push(value), (err) => failed.Push(err), 16)
+        request.worker := FakeMetadataWorkerProcess(200, "late response")
+        request.worker.finished := false
+        Assert.True(IsObject(request.Start()))
+        request.Cancel()
+        request.worker.finished := true
+        request.Poll()
+        Assert.Equal(0, received.Length)
+        Assert.Equal(0, failed.Length)
+        Assert.True(request.worker.closed)
+        Assert.Equal("", request.directory)
     }
 
-    NativeCallbackMasksThirtyTwoBitParameters() {
-        operation := FakeWinHttpStatusOperation()
-        WinHttpTextRequest.operationsByHandle[42] := operation
-        try WinHttpTextRequest.DispatchStatus(
-            42,
-            0,
-            0x100000000 + 0x00400000,
-            0,
-            0x100000000
-        )
-        finally WinHttpTextRequest.operationsByHandle.Delete(42)
-
-        Assert.Equal(0x00400000, operation.lastStatus)
-        Assert.Equal(0, operation.lastLength)
+    WorkerResponseRejectsInvalidSizeAndStatus() {
+        for entry in [{status: 200, body: "too many response bytes"}, {status: 99, body: ""}, {status: 404, body: "unexpected"}] {
+            failures := []
+            request := WinHttpTextRequest("https://api.github.com/test", (*) => ThrowError("unexpected success"), (err) => failures.Push(err), 16)
+            request.worker := FakeMetadataWorkerProcess(entry.status, entry.body)
+            Assert.True(IsObject(request.Start()))
+            request.Poll()
+            Assert.Equal(1, failures.Length)
+            Assert.Equal("closed", request.state)
+            Assert.Equal("", request.directory)
+        }
     }
 
     MetadataResponsesAreStreamBoundedBeforeParsing() {
-        operation := WinHttpTextRequest(
-            "https://api.github.com/test",
-            (*) => 0,
-            (*) => 0,
-            5
-        )
+        operation := WinHttpMetadataWorker(5, [2000, 3000, 5000, 10000])
         firstChunk := Buffer(4)
         NumPut("UInt", 0x64636261, firstChunk)
         operation.ConsumeReadChunk(firstChunk.Ptr, firstChunk.Size)
@@ -517,7 +565,6 @@ class UpdateVerificationTest {
             "exceeded its byte limit"
         )
         Assert.Equal(4, operation.totalBytes)
-        operation.Cancel()
     }
 
     NewMetadataRequest(maximumSize) {
@@ -563,7 +610,6 @@ class RecordingMetadataRequest extends WinHttpTextRequest {
         super.__New("https://api.github.com/test", (*) => 0, (*) => 0, 16)
         this.now := 0
         this.failures := []
-        this.scheduled := []
     }
 
     NowMilliseconds() {
@@ -574,45 +620,70 @@ class RecordingMetadataRequest extends WinHttpTextRequest {
         this.failures.Push(err)
     }
 
-    Schedule(methodName, params*) {
-        this.scheduled.Push({method: methodName, params: params})
+}
+
+class ClockMetadataRequest extends WinHttpTextRequest {
+    now := 0
+    NowMilliseconds() => this.now
+}
+
+class FakeMetadataWorkerProcess {
+    __New(status := 200, body := "", code := 0) {
+        this.status := status
+        this.body := body
+        this.code := code
+        this.finished := true
+        this.closed := false
+    }
+
+    Start(scriptPath, directory) {
+        if this.code {
+            FileAppend("simulated worker failure", directory "\error.txt", "UTF-8")
+            return
+        }
+        output := FileOpen(directory "\response.bin", "w", "UTF-8-RAW")
+        try {
+            output.WriteUInt(this.status)
+            output.Write(this.body)
+        } finally output.Close()
+    }
+
+    IsFinished() => this.finished
+    ExitCode() => this.code
+    Close() {
+        this.closed := true
     }
 }
 
-class FakeWinHttpStatusOperation {
-    __New() {
-        this.statusCalls := 0
-        this.lastStatus := 0
-        this.lastLength := 0
-    }
-
-    HandleNativeStatus(handle, status, information, length) {
-        this.statusCalls++
-        this.lastStatus := status
-        this.lastLength := length
-    }
-
-    Schedule(*) {
-    }
-}
-
-class HeaderMetadataRequest extends RecordingMetadataRequest {
+class HeaderMetadataWorker extends WinHttpMetadataWorker {
     __New(headers) {
-        super.__New()
+        super.__New(16, [2000, 3000, 5000, 10000])
         this.headers := headers
         this.reads := 0
-        this.responses := []
     }
 
     ReadResponseHeaders() {
         return {status: this.headers.status, contentLength: this.headers.length, hasContentLength: this.headers.hasLength}
     }
 
-    ReadNext() {
+    ReadChunk() {
         this.reads++
+        return 0
     }
+}
 
-    Succeed(response) {
-        this.responses.Push(response)
+class FailingStartMetadataProcess extends FakeMetadataWorkerProcess {
+    Start(*) {
+        throw Error("simulated launch failure")
+    }
+}
+
+class FailingCloseMetadataProcess extends FakeMetadataWorkerProcess {
+    Close() {
+        if !HasProp(this, "closeFailed") {
+            this.closeFailed := true
+            throw Error("simulated reap failure")
+        }
+        super.Close()
     }
 }

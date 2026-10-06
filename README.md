@@ -242,7 +242,9 @@ if ($process.ExitCode -ne 0) {
 | `AppStorage.ahk` | Data-directory resolution and one-time settings migration |
 | `UpdateChecker.ahk` | Release checks and self-update |
 | `WinHttpTransport.ahk` | Bounded HTTPS download for self-update, and shared WinHTTP constants |
-| `WinHttpTextRequest.ahk` | Bounded asynchronous request for release metadata |
+| `WinHttpTextRequest.ahk` | Asynchronous metadata request, deadline and completion polling |
+| `WinHttpMetadataWorker.ahk` | Stream-bounded HTTPS metadata reads in an isolated worker |
+| `WinHttpWorkerProcess.ahk` | Worker process ownership and cancellation |
 | `JsonParser.ahk` | JSON parsing for GitHub release metadata |
 | `ErrorText.ahk` | Text for thrown values in logs, notifications and test output |
 | `AppLog.ahk` | The `error.log` diagnostic record |
