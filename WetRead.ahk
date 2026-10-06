@@ -147,6 +147,11 @@ class NativeStickyNoteWindowDriver {
         SendText(text)
     }
 
+    ClipboardText() {
+        try return A_Clipboard
+        return ""
+    }
+
     ; Reads a text field through UIA Value, the legacy accessible value, the text
     ; pattern, or the field's own window, in that order.
     ReadText(element) {
@@ -261,6 +266,9 @@ class StickyNoteOpener {
  * sequence, with one change: Save is pressed only after the note reads back with
  * the whole text. Save is a UIA action, outside the keyboard queue, so v2.0b7's
  * fixed pause could press it while typed keys were still waiting to be processed.
+ *
+ * The text is typed ("type") or pasted with one Ctrl+V ("paste"). A paste is sent
+ * only while the clipboard still holds exactly the text the wet read started with.
  */
 class StickyNoteWriter {
     ; UIA-v2 paths in the Sticky Notes window, as v2.0b7 used them.
@@ -273,9 +281,12 @@ class StickyNoteWriter {
     static pollMs := 100
     static buttonsLogged := false
 
-    __New(session) {
+    __New(session, entry := "type") {
+        if (entry != "type" && entry != "paste")
+            throw ValueError("Unknown wet-read entry: " entry)
         this.driver := session.driver
         this.stickyHwnd := session.stickyHwnd
+        this.entry := entry
     }
 
     /**
@@ -314,10 +325,15 @@ class StickyNoteWriter {
         if !driver.IsActive(this.stickyHwnd)
             return this.NotTyped("The Sticky Notes window lost focus")
 
-        driver.TypeText(text)
+        if (this.entry = "paste") {
+            if !(driver.ClipboardText() == text)
+                return this.NotTyped("The clipboard changed after the wet read started")
+            driver.SendKey("^v")
+        } else
+            driver.TypeText(text)
         if !baseline.supported {
             return this.TypedNotSaved("unreadable",
-                "PACS Assistant typed the wet read but cannot read this note back, so it did not click Save")
+                "PACS Assistant entered the wet read but cannot read this note back, so it did not click Save")
         }
         if !this.WaitForText(field, baseline.value, text) {
             return this.TypedNotSaved("incomplete",
@@ -489,9 +505,13 @@ RunPinnedWetReadWorkflow(
     }
 }
 
-WetRead() {
-    text := PrepareWetReadText(A_Clipboard)
-    if (text = "") {
+; entry "type" types the prepared text; "paste" pastes the clipboard as copied with
+; one Ctrl+V (Paste Wet Read (Clipboard)), where tabs and line breaks are inserted
+; as text rather than pressed as keys.
+WetRead(entry := "type") {
+    clipboard := A_Clipboard
+    text := entry = "paste" ? clipboard : PrepareWetReadText(clipboard)
+    if (PrepareWetReadText(clipboard) = "") {
         ClinicalNotices.Show("No text in clipboard to paste as wet read.", "No Clipboard Text", "Icon!")
         return false
     }
@@ -501,7 +521,7 @@ WetRead() {
         (*) => StickyNoteOpener().Open(),
         (*) => PowerScribe.CaptureReport(),
         (reportText, session) => CheckAttending(reportText, session),
-        PerformWetReadPaste
+        (noteText, session) => PerformWetReadPaste(noteText, session, entry)
     )
 }
 
@@ -513,12 +533,12 @@ PrepareWetReadText(text) {
     return RTrim(StrReplace(text, "`t", " "), " `n")
 }
 
-PerformWetReadPaste(text, stickySession) {
+PerformWetReadPaste(text, stickySession, entry := "type") {
     if (!IsObject(stickySession)
         || !HasProp(stickySession, "driver")
         || !HasProp(stickySession, "stickyHwnd"))
         return StopWetRead("The Sticky Notes window was not opened. Nothing was typed.")
-    result := StickyNoteWriter(stickySession).Write(text)
+    result := StickyNoteWriter(stickySession, entry).Write(text)
     if result.saved
         return true
     if !result.typed

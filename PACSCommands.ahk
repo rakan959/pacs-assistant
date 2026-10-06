@@ -24,6 +24,7 @@ class PACSCommands {
         ["Sign Report", (*) => PowerScribe.SendKeys("{F12}")],
         ["Open/Force Restart PACS", (*) => RestartPACS()],
         ["Paste Wet Read", (*) => WetRead()],
+        ["Paste Wet Read (Clipboard)", (*) => WetRead("paste")],
         ["Toggle PowerScribe Window", (*) => AppControl.ToggleExactWindow(AppControl.PowerScribeWindowSpec())],
         ["Toggle EPIC Window", (*) => PACSCommands.ToggleEpicWindow()],
         ["Next Series", (*) => AppControl.SendKeysToExactWindow(AppControl.VuePacsClientWindowSpec(), "{Right}")],

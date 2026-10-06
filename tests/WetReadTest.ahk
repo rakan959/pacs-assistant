@@ -31,6 +31,9 @@ class WetReadTest {
         "MissingTextFieldStopsBeforeTyping",
         "MissingOrUnresponsiveSaveLeavesTheNoteUnsaved",
         "ButtonIdentitiesAreLoggedOncePerRun",
+        "PasteEntrySendsOneCtrlVAndSavesAfterTheReadback",
+        "PasteKeepsTabsAndTrailingBreaksAsText",
+        "PasteStopsWhenTheClipboardChanged",
         "PreparedTextTypesEachLineBreakOnceAndKeepsSymbols",
         "UnsavedWetReadIsReportedWithoutItsText",
         "AttendingFailureMessagesReadAsOneSentence",
@@ -254,6 +257,40 @@ class WetReadTest {
         } finally capturedLog.Restore()
         Assert.Equal(1, entries, logged)
         Assert.False(InStr(logged, "Private note text"), logged)
+    }
+
+    ; Paste Wet Read (Clipboard): the same sequence with one Ctrl+V in place of
+    ; typing, and the same readback before Save.
+    PasteEntrySendsOneCtrlVAndSavesAfterTheReadback() {
+        text := "Small left pleural effusion.`r`nNo pneumothorax."
+        driver := FakeWriterDriver()
+        driver.clipboard := text
+        driver.readLineBreak := "`n"
+        driver.charsPerPoll := 6
+        result := StickyNoteWriter(driver.Session(), "paste").Write(text)
+        Assert.True(result.saved, result.message)
+        Assert.Equal("activate|invoke YY0|mouse 87K/|key r|controlclick V|key ^v|invoke YY0/", driver.Log())
+        Assert.Equal(StrLen(text), driver.visibleAtSave)
+    }
+
+    ; Pasted, a tab cannot move focus and a trailing break cannot press a button.
+    PasteKeepsTabsAndTrailingBreaksAsText() {
+        text := "Liver:`tnormal.`r`n`r`n"
+        driver := FakeWriterDriver()
+        driver.clipboard := text
+        driver.readLineBreak := "`n"
+        result := StickyNoteWriter(driver.Session(), "paste").Write(text)
+        Assert.True(result.saved, result.message)
+    }
+
+    PasteStopsWhenTheClipboardChanged() {
+        driver := FakeWriterDriver()
+        driver.clipboard := "Something copied since"
+        result := StickyNoteWriter(driver.Session(), "paste").Write("The wet read")
+        Assert.False(result.typed)
+        Assert.True(InStr(result.message, "clipboard changed"), result.message)
+        Assert.False(InStr(driver.Log(), "^v"), driver.Log())
+        Assert.Throws(() => StickyNoteWriter(driver.Session(), "drag"), "Unknown wet-read entry")
     }
 
     ; SendText types + ^ ! # { } as themselves; v2.0b7's Send read them as keys.
@@ -630,6 +667,7 @@ class FakeWriterDriver {
         this.reads := 0
         this.saveResponds := true
         this.visibleAtSave := -1
+        this.clipboard := ""
         this.clock := 0
     }
 
@@ -663,11 +701,22 @@ class FakeWriterDriver {
 
     DescribeButton(element) => "button " element.path
     MouseClick(element) => this.Record("mouse " element.path)
-    SendKey(keys) => this.Record("key " keys)
     ControlClick(element) => this.Record("controlclick " element.path)
+    ClipboardText() => this.clipboard
+
+    SendKey(keys) {
+        this.Record("key " keys)
+        if (keys = "^v")
+            this.Land(this.clipboard)
+    }
 
     TypeText(text) {
         this.Record("type " text)
+        this.Land(text)
+    }
+
+    ; The entered text reaches the note, all at once or charsPerPoll per read.
+    Land(text) {
         this.typed := text
         this.visible := this.charsPerPoll ? 0 : StrLen(text)
         if (this.maxVisible >= 0)

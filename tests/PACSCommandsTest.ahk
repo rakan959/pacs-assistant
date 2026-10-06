@@ -26,6 +26,7 @@ class PACSCommandsTest {
             "Sign Report",
             "Open/Force Restart PACS",
             "Paste Wet Read",
+            "Paste Wet Read (Clipboard)",
             "Toggle PowerScribe Window",
             "Toggle EPIC Window",
             "Next Series",

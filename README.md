@@ -9,7 +9,8 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - Select Next/Previous Field, Delete Previous/Next Word
 - Open/Force Restart PACS (legacy command name): asks PowerScribe to close, requires any save prompt to be completed manually, and closes only revalidated PACS/portal windows. It never force-kills a process by executable basename; an unverified or stuck close cancels the restart.
 - Paste Wet Read: types the clipboard into a new Vue PACS sticky note and saves it once
-  the whole note has landed
+  the whole note has landed. **Paste Wet Read (Clipboard)** does the same with one
+  Ctrl+V instead of typing, which is faster for long notes
 - Toggle PowerScribe, Next/Previous Series. The legacy **Toggle EPIC Window**
   command remains loadable for profile compatibility but deliberately performs no
   window action until a stable exact Hyperspace title/executable identity is captured.
