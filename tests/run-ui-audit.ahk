@@ -74,6 +74,7 @@ Main() {
         (window) => kb.ShowCapturedKey("Sign Report", lv, window, "^F14"))
     AuditDialog("modality attendings", "PACS Assistant - Modality Attendings", () => kb.ShowModalityAttendingsDialog())
     AuditDialog("rename profile", "PACS Assistant - Rename Profile", () => kb.PromptRenameProfile("Neuro"))
+    AuditDialog("duplicate profile", "PACS Assistant - Duplicate Profile", () => kb.DuplicateCurrentProfile())
 
     AuditSettings()
     AuditUpdateDialog()

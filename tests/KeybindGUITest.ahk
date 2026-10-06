@@ -86,6 +86,12 @@ class KeybindGUITest {
         "TestKeybindStatusTextCountsLiveKeybinds",
         "TestApplyRecordsWhyEachKeybindIsNotActive",
         "TestFunctionTipAddsWhyAKeybindIsNotActive",
+        "TestUniqueProfileNameAvoidsTakenNames",
+        "TestProfileCopyIsCreatedUnderItsNewName",
+        "TestProfileCopyRefusesATakenName",
+        "TestDiscardChangesRestoresTheSavedProfile",
+        "TestDiscardChangesWaitsForConfirmation",
+        "TestAddAllAddsEveryMissingCommandUnassigned",
         "TestProfileSummaryCountsFunctionsAndNamesTheDefault",
         "TestScopeChoiceMapsTheDialogToFlags",
         "TestScopeWithNoWindowTickedIsRefused",
@@ -2292,6 +2298,104 @@ class KeybindGUITest {
         Assert.Equal(CommandInfo.Describe("Draft Report"), this.gui.FunctionTip("Draft Report"))
         Assert.Equal("Sends Hello to whichever window is active.", this.gui.FunctionTip("Custom: Hello"))
         Assert.True(InStr(this.gui.FunctionTip("Sign Report"), "`nNot active: AutoHotkey does not accept") > 0)
+    }
+
+    TestUniqueProfileNameAvoidsTakenNames() {
+        this.UseTempProfilesFolder()
+        ProfileManager.profiles := Map("Night", ProfileManager.NewProfile())
+        FileAppend("not loaded", ProfileManager.ProfilePath("Day"))
+        Assert.Equal("Night 2", this.gui.UniqueProfileName("Night"))
+        ; Windows file names ignore case, so neither may a new profile's.
+        Assert.Equal("night 2", this.gui.UniqueProfileName("night"))
+        Assert.Equal("Day 2", this.gui.UniqueProfileName("Day"))
+        Assert.Equal("Evening", this.gui.UniqueProfileName(" Evening "))
+        Assert.Equal("New profile", this.gui.UniqueProfileName("bad|name"))
+    }
+
+    TestProfileCopyIsCreatedUnderItsNewName() {
+        this.UseTempProfilesFolder()
+        source := ProfileManager.NewProfile()
+        source.binds["Sign Report"] := "^F13"
+        source.scopes["Sign Report"] := "PACS"
+        ProfileManager.profiles := Map("Night", source)
+        ProfileManager.currentProfile := "Night"
+        notifications := []
+        editor := {base: FakeWindowKeybindGUI.Prototype}
+        editor.notificationDriver := ArrayNotificationDriver(notifications)
+        dialog := FakeProfileDialog()
+
+        Assert.True(editor.CreateProfileCopy(" Night copy ", ProfileManager.CloneProfile(source), dialog))
+
+        copy := ProfileManager.profiles["Night copy"]
+        Assert.Equal("^F13", copy.binds["Sign Report"])
+        Assert.Equal("PACS", ProfileManager.LoadProfile(ProfileManager.ProfilePath("Night copy")).scopes["Sign Report"])
+        Assert.False(copy == source)
+        Assert.True(dialog.destroyed)
+        Assert.Equal("Profile Created", notifications[1].title)
+    }
+
+    TestProfileCopyRefusesATakenName() {
+        this.UseTempProfilesFolder()
+        ProfileManager.profiles := Map("Night", ProfileManager.NewProfile())
+        ProfileManager.SaveProfile("Night", ProfileManager.profiles["Night"])
+        notifications := []
+        editor := {base: FakeWindowKeybindGUI.Prototype}
+        editor.notificationDriver := ArrayNotificationDriver(notifications)
+        dialog := FakeProfileDialog()
+
+        Assert.False(editor.CreateProfileCopy("Night", ProfileManager.NewProfile(), dialog))
+
+        Assert.Equal(1, ProfileManager.profiles.Count)
+        Assert.False(dialog.destroyed)
+        Assert.Equal(1, notifications.Length)
+    }
+
+    TestDiscardChangesRestoresTheSavedProfile() {
+        state := this.PrepareDiscardRenameState()
+        editor := state.gui
+        editor.confirmationDriver := AlwaysConfirmDriver()
+
+        Assert.True(editor.DiscardCurrentChanges())
+
+        Assert.Equal("^F13", ProfileManager.profiles["Night"].binds["Sign Report"])
+        Assert.Equal("^F13", HotkeyManager.activeHotkeys["Sign Report"].hotkey)
+        Assert.Equal("^F13", editor.visibleBind)
+        Assert.False(editor.IsProfileDirty("Night"))
+    }
+
+    TestDiscardChangesWaitsForConfirmation() {
+        state := this.PrepareDiscardRenameState()
+        editor := state.gui
+        confirmation := CountingRejectConfirmationDriver()
+        editor.confirmationDriver := confirmation
+
+        Assert.False(editor.DiscardCurrentChanges())
+
+        Assert.Equal(1, confirmation.calls)
+        Assert.Equal("^F14", ProfileManager.profiles["Night"].binds["Sign Report"])
+        Assert.True(editor.IsProfileDirty("Night"))
+    }
+
+    TestAddAllAddsEveryMissingCommandUnassigned() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "PACS"
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        editor := {base: FakeWindowKeybindGUI.Prototype}
+        dialog := ProfileBoundFakeDialog("Test")
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "PACS")
+
+        Assert.True(editor.AddAllFunctions(listView, dialog))
+
+        Assert.Equal(PACSCommands.commands.Count, profile.binds.Count)
+        Assert.Equal("^F13", profile.binds["Sign Report"])
+        Assert.Equal("PACS", profile.scopes["Sign Report"])
+        Assert.Equal("", profile.binds["Draft Report"])
+        Assert.Equal("Any", profile.scopes["Draft Report"])
+        Assert.Equal(PACSCommands.commands.Count, listView.GetCount())
+        Assert.True(editor.IsProfileDirty("Test"))
+        Assert.True(dialog.destroyed)
     }
 
     TestProfileSummaryCountsFunctionsAndNamesTheDefault() {

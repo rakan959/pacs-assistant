@@ -359,8 +359,13 @@ class KeybindGUI {
         profileMenu := Menu()
         profileMenu.Add("&Switch Profile...", (*) => this.OpenProfileSelector())
         profileMenu.Add("&Rename Profile...", (*) => this.PromptRenameProfile(ProfileManager.currentProfile))
+        profileMenu.Add("D&uplicate Profile...", (*) => this.DuplicateCurrentProfile())
         profileMenu.Add()
         profileMenu.Add(KeybindGUI.saveMenuItem, (*) => this.SaveCurrentProfile())
+        profileMenu.Add(KeybindGUI.discardMenuItem, (*) => this.DiscardCurrentChanges())
+        profileMenu.Add()
+        profileMenu.Add("&Import Profile...", (*) => this.ImportProfile())
+        profileMenu.Add("Ex&port Profile...", (*) => this.ExportCurrentProfile())
         profileMenu.Add()
         profileMenu.Add("E&xit", (*) => this.RequestExit())
 
@@ -387,6 +392,7 @@ class KeybindGUI {
     }
 
     static saveMenuItem := "&Save Changes"
+    static discardMenuItem := "&Discard Changes..."
     static suspendMenuItem := "S&uspend Keybinds"
 
     /**
@@ -484,10 +490,12 @@ class KeybindGUI {
             for button in [view.keybindButton, view.scopeButton, view.removeButton]
                 button.Enabled := selected
             view.saveButton.Enabled := dirty
-            if dirty
-                view.profileMenu.Enable(KeybindGUI.saveMenuItem)
-            else
-                view.profileMenu.Disable(KeybindGUI.saveMenuItem)
+            for item in [KeybindGUI.saveMenuItem, KeybindGUI.discardMenuItem] {
+                if dirty
+                    view.profileMenu.Enable(item)
+                else
+                    view.profileMenu.Disable(item)
+            }
             configured := 0
             inactive := 0
             if ProfileManager.profiles.Has(view.profileName) {
@@ -902,7 +910,7 @@ class KeybindGUI {
         for name, _ in ProfileManager.profiles
             profileNames.Push(name)
         ; -Hdr: a plain list of names, with the default profile labelled beside its name.
-        lv := selectorGui.Add("ListView", "xm y+14 w" listWidth " h216 -Multi -Hdr +LV0x10000", ["Profile", "Default"])
+        lv := selectorGui.Add("ListView", "xm y+14 w" listWidth " h244 -Multi -Hdr +LV0x10000", ["Profile", "Default"])
         UITheme.UseExplorerTheme(lv)
         for name in profileNames
             lv.Add(, name, name = ProfileManager.defaultProfile ? "Default" : "")
@@ -926,6 +934,8 @@ class KeybindGUI {
         buttons.open.OnEvent("Click", (*) => this.SelectProfile(selected(), selectorGui))
         newButton := selectorGui.Add("Button", "x" buttonX " y+" UITheme.gap " w" buttonWidth " h" UITheme.buttonHeight, "&New Profile...")
         newButton.OnEvent("Click", (*) => this.OpenNewProfilePrompt(selectorGui))
+        buttons.duplicate := selectorGui.Add("Button", "x" buttonX " y+" UITheme.gap " w" buttonWidth " h" UITheme.buttonHeight, "D&uplicate...")
+        buttons.duplicate.OnEvent("Click", (*) => this.DuplicateSelectedProfile(selected(), selectorGui))
         buttons.rename := selectorGui.Add("Button", "x" buttonX " y+" UITheme.gap " w" buttonWidth " h" UITheme.buttonHeight, "&Rename...")
         buttons.rename.OnEvent("Click", (*) => this.PromptRenameProfile(selected(), selectorGui))
         buttons.setDefault := selectorGui.Add("Button", "x" buttonX " y+" UITheme.gap " w" buttonWidth " h" UITheme.buttonHeight, "Set as &Default")
@@ -1003,6 +1013,7 @@ class KeybindGUI {
     RefreshProfileSelectorButtons(listView, buttons) {
         name := this.SelectedProfileName(listView)
         buttons.open.Enabled := name != ""
+        buttons.duplicate.Enabled := name != ""
         buttons.rename.Enabled := name != ""
         buttons.delete.Enabled := name != ""
         buttons.setDefault.Enabled := name != "" && name != ProfileManager.defaultProfile
@@ -1046,19 +1057,25 @@ class KeybindGUI {
         ; With no profile to return to, closing this prompt exits the app.
         firstProfile := ProfileManager.profiles.Count = 0
         UITheme.AddHeading(inputGui, firstProfile ? "Create your first profile" : "Create a profile", "xm ym w" width)
-        UITheme.AddNote(
+        ; Two lines tall: Import replaces it with the file it will create from.
+        inputGui.importNote := UITheme.AddNote(
             inputGui,
             "A profile is a set of keybinds and modality attendings, such as one per rotation or shift.",
-            "xm y+4 w" width
+            "xm y+4 w" width " r2"
         )
         inputGui.Add("Text", "xm y+14 w" width, "Profile &name")
         nameEdit := inputGui.Add("Edit", "xm y+4 r1 w" width)
         UITheme.SetPlaceholder(nameEdit, "For example, Neuro or Night Float")
         close := (*) => (this.CloseNewProfilePrompt(inputGui), true)
-        UITheme.AddFooter(inputGui, width, [
-            {text: "Create", action: (*) => this.CreateProfile(nameEdit.Value, inputGui), default: true},
-            {text: firstProfile ? "Exit" : "Cancel", action: close}
-        ])
+        UITheme.AddFooter(
+            inputGui,
+            width,
+            [
+                {text: "Create", action: (*) => this.CreateProfile(nameEdit.Value, inputGui), default: true},
+                {text: firstProfile ? "Exit" : "Cancel", action: close}
+            ],
+            [{text: "&Import...", action: (*) => this.ChooseImportForNewProfile(inputGui, nameEdit)}]
+        )
         ; Return true so a refused close keeps the prompt visible (see CreateMainGUI).
         inputGui.OnEvent("Close", close)
         if !firstProfile
@@ -1107,7 +1124,10 @@ class KeybindGUI {
             }
             if !this.GuiIsLive(inputGui)
                 return false
-            if this.CreateProfileRecord(name) {
+            created := HasProp(inputGui, "importSource")
+                ? ProfileManager.CreateProfile(name, inputGui.importSource)
+                : this.CreateProfileRecord(name)
+            if created {
                 ProfileManager.currentProfile := name
                 inputGui.Destroy()
                 this.CreateMainGUI()
@@ -1129,6 +1149,188 @@ class KeybindGUI {
     }
 
     CreateProfileRecord(name) => ProfileManager.CreateProfile(name)
+
+    ; The new-profile prompt's Import: reads a profile file, then Create makes the
+    ; new profile from it under the name in the box, which starts as the file's.
+    ChooseImportForNewProfile(inputGui, nameEdit) {
+        chosen := this.ChooseProfileFile(inputGui)
+        if !chosen
+            return false
+        inputGui.importSource := chosen.source
+        nameEdit.Value := chosen.name
+        inputGui.importNote.Value := "Create adds the keybinds and modality attendings in " chosen.fileName "."
+        return true
+    }
+
+    ; A name for a new profile based on base: base itself when free, else base 2,
+    ; base 3 and so on. Names are compared as Windows compares file names.
+    UniqueProfileName(base) {
+        base := Trim(base)
+        if !ProfileManager.IsValidProfileName(base)
+            base := "New profile"
+        candidate := base
+        suffix := 2
+        while this.ProfileNameTaken(candidate)
+            candidate := base " " suffix++
+        return candidate
+    }
+
+    ProfileNameTaken(name) {
+        for existing, _ in ProfileManager.profiles {
+            if (existing = name)
+                return true
+        }
+        return !!FileExist(ProfileManager.ProfilePath(name))
+    }
+
+    /**
+     * Asks for the name of a new profile made from source (a copy of a profile, or
+     * one read from a file), and creates it on Create. parentGui is the profile
+     * selector when it was asked from there.
+     */
+    PromptProfileCopy(title, heading, note, source, suggestedName, parentGui := 0) {
+        owner := parentGui ? parentGui : (this.HasMainWindow() ? this.gui : 0)
+        dialog := UITheme.NewWindow(title, this.GuiIsLive(owner) ? "+Owner" owner.Hwnd : "")
+        width := 340
+        UITheme.AddHeading(dialog, heading, "xm ym w" width)
+        UITheme.AddNote(dialog, note, "xm y+4 w" width)
+        dialog.Add("Text", "xm y+14 w" width, "&Name for the new profile")
+        nameEdit := dialog.Add("Edit", "xm y+4 r1 w" width, suggestedName)
+        cancel := (*) => dialog.Destroy()
+        UITheme.AddFooter(dialog, width, [
+            {text: "Create", default: true, action: (*) => this.CreateProfileCopy(nameEdit.Value, source, dialog, parentGui)},
+            {text: "Cancel", action: cancel}
+        ])
+        dialog.OnEvent("Close", cancel)
+        dialog.OnEvent("Escape", cancel)
+        UITheme.ShowDialog(dialog)
+        return dialog
+    }
+
+    CreateProfileCopy(name, source, dialog, parentGui := 0) {
+        name := Trim(name)
+        if !this.GuiIsLive(dialog)
+            return false
+        if (parentGui && !this.RequireCurrentProfileSelector(parentGui)) {
+            try dialog.Destroy()
+            return false
+        }
+        if !this.BeginProfileMutationTransaction("create a profile")
+            return false
+        try {
+            if !ProfileManager.CreateProfile(name, source) {
+                this.NotifyUser(
+                    this.ProfileStorageFailureText(
+                        "Enter a unique profile name without file-system characters or reserved Windows device names."
+                    ),
+                    ProfileManager.lastError != "" ? "Profile Not Created" : "Invalid Profile Name",
+                    "Icon!"
+                )
+                return false
+            }
+            dialog.Destroy()
+            if parentGui {
+                this.RetireProfileSelector(parentGui)
+                this.ShowProfileSelector()
+            } else {
+                this.NotifyNonModal("'" name "' was created. Open it with Switch Profile.", "Profile Created", "Iconi")
+            }
+            return true
+        } finally this.EndProfileMutationTransaction()
+    }
+
+    ; Profile > Duplicate Profile: copies the current profile as it is shown,
+    ; unsaved changes included.
+    DuplicateCurrentProfile() {
+        name := ProfileManager.currentProfile
+        if !ProfileManager.profiles.Has(name)
+            return false
+        return this.PromptProfileCopy(
+            "PACS Assistant - Duplicate Profile",
+            "Duplicate profile",
+            "A new profile with the keybinds and modality attendings of '" name "'.",
+            ProfileManager.CloneProfile(ProfileManager.profiles[name]),
+            this.UniqueProfileName(name " copy")
+        )
+    }
+
+    DuplicateSelectedProfile(name, selectorGui) {
+        if !this.RequireCurrentProfileSelector(selectorGui)
+            return false
+        if (name = "" || !ProfileManager.profiles.Has(name)) {
+            MsgBox("Please select a profile first.", "No Profile Selected", "Icon!")
+            return false
+        }
+        return this.PromptProfileCopy(
+            "PACS Assistant - Duplicate Profile",
+            "Duplicate profile",
+            "A new profile with the keybinds and modality attendings of '" name "'.",
+            ProfileManager.CloneProfile(ProfileManager.profiles[name]),
+            this.UniqueProfileName(name " copy"),
+            selectorGui
+        )
+    }
+
+    /**
+     * Reads a profile file chosen by the user. The file must load and validate as
+     * a profile; nothing is created until its new name is confirmed.
+     * @returns {source, name} with a free name based on the file's, or 0
+     */
+    ChooseProfileFile(ownerGui := 0) {
+        if this.GuiIsLive(ownerGui)
+            ownerGui.Opt("+OwnDialogs")
+        path := FileSelect(3, A_MyDocuments, "Import Profile", "PACS Assistant profiles (*.ini)")
+        if (path = "")
+            return 0
+        try source := ProfileManager.LoadProfile(path)
+        catch Any as err {
+            this.ShowNotice(
+                "This file is not a PACS Assistant profile, so nothing was imported.`n`n" ErrorText.Message(err),
+                "Profile Not Imported",
+                "Icon!"
+            )
+            return 0
+        }
+        SplitPath(path,,,, &stem)
+        return {source: source, name: this.UniqueProfileName(stem), fileName: stem ".ini"}
+    }
+
+    ; Profile > Import Profile.
+    ImportProfile() {
+        chosen := this.ChooseProfileFile(this.HasMainWindow() ? this.gui : 0)
+        if !chosen
+            return false
+        return this.PromptProfileCopy(
+            "PACS Assistant - Import Profile",
+            "Import profile",
+            "A new profile with the keybinds and modality attendings in " chosen.fileName ".",
+            chosen.source,
+            chosen.name
+        )
+    }
+
+    ; Profile > Export Profile: copies the saved profile file. Unsaved changes are
+    ; saved or discarded first, so the file has what the window shows.
+    ExportCurrentProfile() {
+        name := ProfileManager.currentProfile
+        if !this.ResolveDirtyProfileBeforeLeaving(true)
+            return false
+        if this.HasMainWindow()
+            this.gui.Opt("+OwnDialogs")
+        path := FileSelect("S16", A_MyDocuments "\" name ".ini", "Export Profile", "PACS Assistant profiles (*.ini)")
+        if (path = "")
+            return false
+        if !RegExMatch(path, "i)\.ini$")
+            path .= ".ini"
+        try FileCopy(ProfileManager.ProfilePath(name), path, true)
+        catch Any as err {
+            AppLog.Write("Profile '" name "' could not be exported: " ErrorText.Describe(err))
+            this.ShowNotice("The profile could not be exported.`n`n" ErrorText.Message(err), "Export Failed", "Icon!")
+            return false
+        }
+        this.NotifyNonModal("'" name "' was exported to " path ".", "Profile Exported", "Iconi")
+        return true
+    }
 
     SelectProfile(name, selectorGui) {
         if !this.RequireCurrentProfileSelector(selectorGui)
@@ -1766,7 +1968,29 @@ class KeybindGUI {
             return this.SaveCurrentProfile(allowDuringShutdown, mutationState)
         if !(choice == "No")
             return false
+        return this.DiscardProfileChanges(profileName, mutationState, refreshMainWindow, allowDuringShutdown)
+    }
 
+    ; Profile > Discard Changes: after a confirmation, restores the saved profile.
+    DiscardCurrentChanges() {
+        profileName := ProfileManager.currentProfile
+        if !this.IsProfileDirty(profileName)
+            return false
+        mutationState := this.CaptureProfileMutationState(profileName)
+        if !this.ConfirmDestructiveAction(
+            "Discard the unsaved changes to '" profileName "'? Its saved keybinds are restored.",
+            "Discard Changes"
+        )
+            return false
+        return this.DiscardProfileChanges(profileName, mutationState, true)
+    }
+
+    /**
+     * Restores a dirty profile from its file: the runtime keybinds first, then the
+     * profile, then (with refreshMainWindow) the main window. Refused when the
+     * profile changed since mutationState was captured, as while a prompt was open.
+     */
+    DiscardProfileChanges(profileName, mutationState, refreshMainWindow, allowDuringShutdown := false) {
         if !this.BeginProfileMutationTransaction("discard unsaved profile changes", allowDuringShutdown)
             return false
         try {
@@ -2540,11 +2764,14 @@ class KeybindGUI {
 
         ; Each list exists only when it has something to add. A list left out stays
         ; "", which SelectedFunction accepts.
-        selectorGui.Add("Text", "xm y+14 w" width, "&Built-in commands")
+        selectorGui.Add("Text", "xm y+14 w" (width - 130), "&Built-in commands")
         lbBuiltIn := ""
-        if (builtInFunctions.Length > 0)
-            lbBuiltIn := selectorGui.Add("ListBox", "xm y+4 w" width " r7", builtInFunctions)
-        else
+        if (builtInFunctions.Length > 0) {
+            ; Add All, on the label's row: every command left, each unassigned.
+            selectorGui.Add("Button", "x" (UITheme.margin + width - 120) " yp-6 w120 h26", "Add &All (" builtInFunctions.Length ")")
+                .OnEvent("Click", (*) => this.AddAllFunctions(listView, selectorGui))
+            lbBuiltIn := selectorGui.Add("ListBox", "xm y+4 w" width " r6", builtInFunctions)
+        } else
             UITheme.AddNote(selectorGui, "Every built-in command is already in this profile.", "xm y+4 w" width)
 
         lbCustom := ""
@@ -2858,6 +3085,54 @@ class KeybindGUI {
     CustomFunctionNameAvailable(profile, funcName) {
         return !ProfileManager.HasIniKeyIdentity(profile.binds, funcName)
             && !ProfileManager.HasIniKeyIdentity(profile.customFuncs, funcName)
+    }
+
+    /**
+     * Add Function's Add All: adds every built-in command the profile does not
+     * have, unassigned and active in any window, in one change. Nothing is bound,
+     * so no key capture follows; the keys are set from the list.
+     * @returns whether any command was added
+     */
+    AddAllFunctions(listView, selectorGui) {
+        if !this.ProfileMutationAllowed("add functions")
+            return false
+        if !this.DialogProfileIsCurrent(selectorGui)
+            return false
+        if !this.BeginProfileMutationTransaction("add functions")
+            return false
+        added := []
+        rows := []
+        try {
+            if !this.DialogProfileIsCurrent(selectorGui)
+                return false
+            profileName := selectorGui.profileName
+            profile := ProfileManager.profiles[profileName]
+            try {
+                for funcName, _ in PACSCommands.commands {
+                    if ProfileManager.HasIniKeyIdentity(profile.binds, funcName)
+                        continue
+                    profile.binds[funcName] := ""
+                    profile.scopes[funcName] := "Any"
+                    added.Push(funcName)
+                    rows.Push(this.AddFunctionRow(listView, funcName, "Unassigned", "Any window"))
+                }
+                if added.Length {
+                    this.ResizeColumns(listView)
+                    this.MarkProfileDirty(profileName)
+                }
+            } catch Any {
+                for funcName in added {
+                    profile.binds.Delete(funcName)
+                    profile.scopes.Delete(funcName)
+                }
+                ; Newest first, so earlier row numbers stay valid.
+                loop rows.Length
+                    try listView.Delete(rows[rows.Length - A_Index + 1])
+                throw
+            }
+        } finally this.EndProfileMutationTransaction()
+        selectorGui.Destroy()
+        return added.Length > 0
     }
 
     AddFunction(funcName, listView, selectorGui) {

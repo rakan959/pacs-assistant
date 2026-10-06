@@ -78,6 +78,13 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - The **Profile**, **Tools** and **Help** menus hold the rest: switching and renaming
   profiles, Settings, modality attendings, the data folder (settings, profiles and
   `error.log`), update checks and the version.
+- **Profile** also duplicates the current profile (unsaved changes included), discards
+  unsaved changes after a confirmation, and imports or exports a profile file to share
+  a set of keybinds. An imported file must load as a valid profile, and it becomes a
+  new profile under a name you confirm; nothing existing is replaced. The profile
+  selector also has **Duplicate**, and the new-profile prompt has **Import**.
+- **Add All** in Add Function adds every built-in command the profile does not have
+  yet, unassigned, so a new profile is a list of keys to set.
 - **Suspend Keybinds** (Tools menu, or the tray menu) turns every keybind off until it
   is chosen again; the title bar and status bar say so while it is on.
 - The tray icon opens the window when double-clicked. Its menu also opens Settings and
