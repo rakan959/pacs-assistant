@@ -14,6 +14,7 @@
 #Include Settings.ahk
 #Include UITheme.ahk
 #Include CommandInfo.ahk
+#Include WindowPlacement.ahk
 
 class KeybindGUI {
     gui := ""
@@ -77,9 +78,11 @@ class KeybindGUI {
         if ProfileManager.profiles.Count = 0 {
             this.PromptNewProfile()
         } else if (ProfileManager.defaultProfile != "" && ProfileManager.profiles.Has(ProfileManager.defaultProfile)) {
-            ; If there's a valid default profile, load it directly
+            ; If there's a valid default profile, load it directly, minimized to the
+            ; tray when Settings asks for that. A window the user opens later always
+            ; shows.
             ProfileManager.currentProfile := ProfileManager.defaultProfile
-            this.CreateMainGUI()
+            this.CreateMainGUI(true, Settings.Get("StartMinimized"))
         } else {
             this.ShowProfileSelector()
         }
@@ -90,32 +93,98 @@ class KeybindGUI {
      * the commands that edit it, and a status bar that says whether there are
      * unsaved changes and whether keybinds are suspended.
      */
-    CreateMainGUI(applyBinds := true) {
+    CreateMainGUI(applyBinds := true, startHidden := false) {
         profileName := ProfileManager.currentProfile
         this.gui := UITheme.NewWindow("PACS Assistant - " profileName, "+Resize")
         view := this.BuildMainView(this.gui, profileName)
         this.mainView := view
 
         ; Close hides the window after any callback that does not return true. Every
-        ; successful path destroys the window or exits, so a refused close must keep
-        ; it visible rather than strand the app with no window.
-        this.gui.OnEvent("Close", (*) => (this.RequestExit(), true))
-        this.gui.OnEvent("Size", (window, minMax, *) => minMax = -1 ? 0 : this.LayoutMainView(view))
+        ; successful path destroys or hides the window, or exits, so a refused close
+        ; must keep it visible rather than strand the app with no window.
+        this.gui.OnEvent("Close", (*) => (this.CloseMainWindow(), true))
+        this.gui.OnEvent("Size", (window, minMax, *) => this.OnMainWindowSize(view, minMax))
 
         width := KeybindGUI.mainContentWidth + 2 * UITheme.margin
         height := this.MainViewHeight(view, KeybindGUI.FitListHeight(view))
         this.LayoutMainView(view, width, height)
         this.RefreshMainView()
-        this.gui.Show("w" width " h" height)
-        ; Start in the list, so the arrow keys, F2 and Delete work at once.
-        view.list.Focus()
+        ; Built hidden, then moved to where it was last left, then shown.
+        this.gui.Show("Hide w" width " h" height)
         ; Logical units, like the layout: Gui scales MinSize for the display itself.
         this.gui.Opt("+MinSize" width "x" this.MainViewHeight(view, KeybindGUI.mainMinListHeight))
+        maximize := this.RestoreMainWindowPlacement()
+        this.WatchMainWindowMoves()
+        if startHidden {
+            this.pendingMaximize := maximize
+        } else {
+            this.gui.Show(maximize ? "Maximize" : "")
+            ; Start in the list, so the arrow keys, F2 and Delete work at once.
+            view.list.Focus()
+        }
         A_IconTip := "PACS Assistant - " profileName
 
         if applyBinds
             this.ApplyBinds()
     }
+
+    ; Moves the hidden main window to its saved place when that is still on a
+    ; monitor. @returns whether it was last maximized
+    RestoreMainWindowPlacement() {
+        saved := WindowPlacement.Load()
+        if !WindowPlacement.IsReachable(saved, WindowPlacement.WorkAreas())
+            return false
+        WinMove(saved.x, saved.y, saved.w, saved.h, this.gui)
+        return saved.maximized
+    }
+
+    ; Saves the window's place when the user finishes moving or resizing it
+    ; (WM_EXITSIZEMOVE). Registered once; it acts only for the current main window.
+    WatchMainWindowMoves() {
+        if this.HasOwnProp("watchingMoves")
+            return
+        this.watchingMoves := true
+        OnMessage(0x232, ObjBindMethod(this, "OnWindowMoved"))
+    }
+
+    OnWindowMoved(wParam, lParam, msg, hwnd) {
+        if !(this.HasMainWindow() && hwnd = this.gui.Hwnd)
+            return
+        if (WinGetMinMax("ahk_id " hwnd) != 0)
+            return
+        WinGetPos(&x, &y, &w, &h, "ahk_id " hwnd)
+        WindowPlacement.SaveRect(x, y, w, h)
+    }
+
+    OnMainWindowSize(view, minMax) {
+        if (minMax = -1)
+            return
+        ; Remember maximizing and restoring, the changes WM_EXITSIZEMOVE misses.
+        if (!HasProp(view, "lastMinMax") || view.lastMinMax != minMax) {
+            if HasProp(view, "lastMinMax")
+                WindowPlacement.SaveMaximized(minMax = 1)
+            view.lastMinMax := minMax
+        }
+        this.LayoutMainView(view)
+    }
+
+    ; The window's X button: exits, or with Close to the tray only hides the window.
+    CloseMainWindow() {
+        if !Settings.Get("CloseToTray")
+            return this.RequestExit()
+        this.gui.Hide()
+        if !KeybindGUI.closedToTrayNoticeShown {
+            KeybindGUI.closedToTrayNoticeShown := true
+            this.NotifyNonModal(
+                "PACS Assistant is still running. Double-click its tray icon to open it; exit from the tray menu.",
+                "Still Running",
+                "Iconi"
+            )
+        }
+        return false
+    }
+
+    static closedToTrayNoticeShown := false
 
     BuildMainView(mainGui, profileName) {
         view := {gui: mainGui, profileName: profileName}
@@ -530,7 +599,14 @@ class KeybindGUI {
     ; no profile is open.
     ShowMainWindow() {
         if this.HasMainWindow() {
-            if (WinGetMinMax("ahk_id " this.gui.Hwnd) = -1)
+            hwnd := this.gui.Hwnd
+            if !DllCall("IsWindowVisible", "Ptr", hwnd) {
+                ; Hidden: started minimized to the tray, or closed to it.
+                maximize := this.HasOwnProp("pendingMaximize") && this.pendingMaximize
+                this.pendingMaximize := false
+                this.gui.Show(maximize ? "Maximize" : "")
+                try this.mainView.list.Focus()
+            } else if (WinGetMinMax("ahk_id " hwnd) = -1)
                 this.gui.Show("Restore")
             else
                 this.gui.Show()

@@ -8,6 +8,7 @@
 #Include AppLog.ahk
 #Include Version.ahk
 #Include UITheme.ahk
+#Include StartupShortcut.ahk
 
 class Settings {
     static settingsFile := AppStorage.DataRoot() "\settings.ini"
@@ -26,9 +27,10 @@ class Settings {
     ; logical units); the window is as tall as its content. Both fit a 1366x768
     ; screen at 150% scaling (SettingsTest), and the layout audit checks the content
     ; stays within the height.
-    static dialogLogicalWidth := 680
-    static dialogLogicalHeight := 420
-    static dialogColumnWidth := 300
+    static dialogColumnWidths := [250, 250, 300]
+    static dialogGutter := 28
+    static dialogLogicalWidth := 896
+    static dialogLogicalHeight := 470
     ; Keys are PascalCase, unlike other map keys (style guide s4), because each one is
     ; also the persisted settings.ini key name.
     static defaultSettings := Map(
@@ -43,6 +45,8 @@ class Settings {
         "CustomSoundFile", "",         ; Path to custom sound file
         "SwapMicrophoneOnLogin", false,
         "MicrophoneName", "",          ; Blank = leave PowerScribe's selection alone
+        "StartMinimized", false,       ; Start with only the tray icon showing
+        "CloseToTray", false,          ; Closing the window hides it instead of exiting
         ; Superseded by per-bind scopes, kept only so profiles written under the older
         ; [KeybindScopes] scheme migrate to the right scope. See
         ; ProfileManager.MigrateLegacyScope.
@@ -57,6 +61,8 @@ class Settings {
         "AudioAlertNewCase",
         "MessageBoxNewCase",
         "SwapMicrophoneOnLogin",
+        "StartMinimized",
+        "CloseToTray",
         "RestrictHotkeysByActiveWindow"
     ]
 
@@ -296,36 +302,48 @@ class Settings {
             settingsGui := UITheme.NewWindow("PACS Assistant - Settings")
             settingsGui.settingsRevision := this.revision
             checkboxes := Map()
-            ; One page, two columns, every position relative to the control above it,
-            ; and a height that follows the content, so no control can land on
+            ; One page in three columns, every position relative to the control above
+            ; it, and a height that follows the content, so no control can land on
             ; another or below the buttons at any display scaling.
-            column := this.dialogColumnWidth
-            gutter := this.dialogLogicalWidth - 2 * UITheme.margin - 2 * column
-            left := UITheme.margin
-            right := left + column + gutter
+            widths := this.dialogColumnWidths
+            gutter := this.dialogGutter
             top := UITheme.margin
+            columnX := [UITheme.margin]
+            loop widths.Length - 1
+                columnX.Push(columnX[A_Index] + widths[A_Index] + gutter)
             buttonWidth := UITheme.buttonWidth
-            fieldWidth := column - buttonWidth - UITheme.gap
 
-            ; Left column: updates, then the PowerScribe microphone.
-            UITheme.AddSectionLabel(settingsGui, "Updates", "x" left " y" top " w" column)
-            checkboxes["AutoUpdate"] := settingsGui.Add("Checkbox", "x" left " y+8 w" column, "Check for updates &automatically")
-            checkboxes["SkipBetaVersions"] := settingsGui.Add("Checkbox", "x" left " y+6 w" column, "Skip &beta versions")
+            ; First column: updates and startup.
+            x := columnX[1], column := widths[1]
+            UITheme.AddSectionLabel(settingsGui, "Updates", "x" x " y" top " w" column)
+            checkboxes["AutoUpdate"] := settingsGui.Add("Checkbox", "x" x " y+8 w" column, "Check for updates &automatically")
+            checkboxes["SkipBetaVersions"] := settingsGui.Add("Checkbox", "x" x " y+6 w" column, "Skip &beta versions")
             if AppVersion.isDevBuild
-                UITheme.AddNote(settingsGui, "This development build never checks for updates.", "x" left " y+6 w" column)
+                UITheme.AddNote(settingsGui, "This development build never checks for updates.", "x" x " y+6 w" column)
 
-            UITheme.AddSectionLabel(settingsGui, "PowerScribe microphone", "x" left " y+22 w" column)
-            checkboxes["SwapMicrophoneOnLogin"] := settingsGui.Add("Checkbox", "x" left " y+8 w" column, "Select a &microphone when PowerScribe logs in")
-            settingsGui.Add("Text", "x" left " y+12 w" column, "Microphone &name")
-            micNameEdit := settingsGui.Add("Edit", "x" left " y+4 r1 w" column, this.Get("MicrophoneName"))
+            UITheme.AddSectionLabel(settingsGui, "Startup", "x" x " y+22 w" column)
+            ; Not a settings.ini value: the Startup folder shortcut is the setting.
+            startWithWindows := settingsGui.Add("Checkbox", "x" x " y+8 w" column, "Start when I sign &in to Windows")
+            startWithWindows.Value := StartupShortcut.IsEnabled()
+            checkboxes["StartMinimized"] := settingsGui.Add("Checkbox", "x" x " y+6 w" column, "Start minimi&zed to the tray")
+            checkboxes["CloseToTray"] := settingsGui.Add("Checkbox", "x" x " y+6 w" column, "&Close to the tray instead of exiting")
+
+            ; Second column: the PowerScribe microphone.
+            x := columnX[2], column := widths[2]
+            UITheme.AddSectionLabel(settingsGui, "PowerScribe microphone", "x" x " y" top " w" column)
+            checkboxes["SwapMicrophoneOnLogin"] := settingsGui.Add("Checkbox", "x" x " y+8 w" column, "Select a &microphone at login")
+            settingsGui.Add("Text", "x" x " y+12 w" column, "Microphone &name")
+            micNameEdit := settingsGui.Add("Edit", "x" x " y+4 r1 w" column, this.Get("MicrophoneName"))
             UITheme.SetPlaceholder(micNameEdit, "For example, PowerMic")
             UITheme.AddNote(
                 settingsGui,
                 "An exact device name is best. A partial name such as PowerMic works when it matches only one device.",
-                "x" left " y+6 w" column
+                "x" x " y+6 w" column
             )
 
-            ; Right column: everything about new studies.
+            ; Third column: everything about new studies.
+            right := columnX[3], column := widths[3]
+            fieldWidth := column - buttonWidth - UITheme.gap
             UITheme.AddSectionLabel(settingsGui, "New studies", "x" right " y" top " w" column)
             checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x" right " y+8 w" column, "Auto-&refresh PACS and scan for new studies")
             settingsGui.Add("Text", "x" right " y+12", "Every")
@@ -355,11 +373,12 @@ class Settings {
             ))
             UITheme.AddNote(settingsGui, "A .wav or .mp3 file, for the Custom File sound.", "x" right " y+6 w" column)
 
-            ; A rule down the gutter, as tall as the taller column.
-            UITheme.AddSeparator(
-                settingsGui,
-                "x" (left + column + gutter // 2) " y" top " w1 h" (UITheme.ContentBottom(settingsGui) - top)
-            )
+            ; A rule down each gutter, as tall as the tallest column.
+            ruleHeight := UITheme.ContentBottom(settingsGui) - top
+            loop widths.Length - 1 {
+                ruleX := columnX[A_Index] + widths[A_Index] + gutter // 2
+                UITheme.AddSeparator(settingsGui, "x" ruleX " y" top " w1 h" ruleHeight)
+            }
 
             for setting, checkbox in checkboxes {
                 checkbox.Value := this.Get(setting)
@@ -378,7 +397,9 @@ class Settings {
                 refreshInterval: refreshIntervalEdit,
                 micName: micNameEdit,
                 soundDropDown: soundDropDown,
-                customSound: customSoundEdit
+                customSound: customSoundEdit,
+                startWithWindows: startWithWindows,
+                startWithWindowsWas: startWithWindows.Value
             }
             cancel := (*) => settingsGui.Destroy()
             UITheme.AddFooter(settingsGui, this.dialogLogicalWidth - 2 * UITheme.margin, [
@@ -549,7 +570,26 @@ class Settings {
             return false
         }
 
+        ; The sign-in shortcut is touched only when its box changed, so a save that
+        ; did not change it never creates or deletes a shortcut.
+        startupError := ""
+        if (HasProp(controls, "startWithWindows")
+            && !!controls.startWithWindows.Value != !!controls.startWithWindowsWas) {
+            try StartupShortcut.Set(controls.startWithWindows.Value)
+            catch Any as err {
+                startupError := ErrorText.Message(err)
+                AppLog.Write("The Startup folder shortcut could not be changed: " ErrorText.Describe(err))
+            }
+        }
+
         settingsGui.Destroy()
+        if (startupError != "")
+            MsgBox(
+                "The settings were saved, but starting with Windows could not be "
+                    . (controls.startWithWindows.Value ? "turned on" : "turned off") ".`n`n" startupError,
+                "Startup Not Changed",
+                "Icon!"
+            )
         listenerErrors := this.NotifyChanged()
         if listenerErrors.Length {
             details := ""

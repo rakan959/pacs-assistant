@@ -245,7 +245,40 @@ Main() {
         Assert(HotkeyManager.activeHotkeys.Count = registeredBeforeCapture, "closing the keybind prompt restores profile hotkeys")
     }
 
+    CheckWindowBehaviour(kb)
     return DesktopChecks.Finish("checks")
+}
+
+; The main window reopens where it was left, can start hidden behind the tray
+; icon, and with Close to the tray hides rather than exits. Last, because it
+; rebuilds the main window.
+CheckWindowBehaviour(kb) {
+    hwnd := kb.gui.Hwnd
+    WinMove(140, 120,,, "ahk_id " hwnd)
+    SendMessage(0x232, 0, 0,, "ahk_id " hwnd)  ; WM_EXITSIZEMOVE, as a drag ends
+    WinGetPos(&x, &y, &w, &h, "ahk_id " hwnd)
+    kb.gui.Destroy()
+    kb.CreateMainGUI(false)
+    WinGetPos(&x2, &y2, &w2, &h2, "ahk_id " kb.gui.Hwnd)
+    Assert(x2 = x && y2 = y && w2 = w && h2 = h, "the main window reopens where it was left")
+
+    kb.gui.Destroy()
+    kb.CreateMainGUI(false, true)
+    Assert(!DllCall("IsWindowVisible", "Ptr", kb.gui.Hwnd), "starting minimized shows only the tray icon")
+    kb.ShowMainWindow()
+    Assert(DllCall("IsWindowVisible", "Ptr", kb.gui.Hwnd), "the tray brings a minimized start forward")
+
+    Settings.SaveValues(Map("CloseToTray", true))
+    try {
+        WinClose("ahk_id " kb.gui.Hwnd)
+        Sleep(200)
+        Assert(
+            DllCall("IsWindow", "Ptr", kb.gui.Hwnd) && !DllCall("IsWindowVisible", "Ptr", kb.gui.Hwnd),
+            "with Close to the tray, closing hides the window and keeps running"
+        )
+        kb.ShowMainWindow()
+        Assert(DllCall("IsWindowVisible", "Ptr", kb.gui.Hwnd), "the tray brings a closed window back")
+    } finally Settings.SaveValues(Map("CloseToTray", false))
 }
 
 ; The main window's derived state and keyboard paths: Save and the status bar

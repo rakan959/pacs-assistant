@@ -578,7 +578,7 @@ class MicrophoneManager {
     static ApplyNow() {
         micName := Trim(Settings.Get("MicrophoneName"))
         if (micName = "")
-            return this.ApplyNowFailed("No microphone is configured. Set one under Settings > PowerScribe.", "No Microphone Configured")
+            return this.ApplyNowFailed("No microphone is configured. Set one in Settings, under PowerScribe microphone.", "No Microphone Configured")
 
         resolution := this.sessionDriver.CaptureResult()
         status := IsObject(resolution) && HasProp(resolution, "status") ? resolution.status : ""

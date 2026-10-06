@@ -81,7 +81,11 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - **Suspend Keybinds** (Tools menu, or the tray menu) turns every keybind off until it
   is chosen again; the title bar and status bar say so while it is on.
 - The tray icon opens the window when double-clicked. Its menu also opens Settings and
-  the update check, suspends keybinds, and exits. Closing the window exits too.
+  the update check, suspends keybinds, and exits. Closing the window exits too, unless
+  **Close to the tray instead of exiting** is on in Settings.
+- The window reopens where it was last left, maximized if it was, unless that place is
+  no longer on any monitor; then it opens centred. The position is kept in
+  `window.ini` in the data folder.
 
 3) **Wet read workflow**
 - Copy your wet read text to clipboard.
@@ -116,8 +120,13 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - Assignments are per profile, so a call shift assigned by modality can be its own profile.
 
 ## Settings
-Settings is one page: updates and the PowerScribe microphone on the left, new-study
-scanning, alerts and their sound on the right.
+Settings is one page in three columns: updates and startup; the PowerScribe
+microphone; new-study scanning, alerts and their sound.
+
+- Startup: **Start when I sign in to Windows** adds a shortcut to your Startup folder
+  (removing it there turns the option off). **Start minimized to the tray** opens the
+  default profile with only the tray icon showing. **Close to the tray instead of
+  exiting** makes the window's X hide it; exit from the tray menu or Profile > Exit.
 
 - Refresh PACS and scan for new studies automatically: turns on new-study scanning at
   the set interval, and the refresh click before each scan (semantic refresh clicking
@@ -275,6 +284,8 @@ if ($process.ExitCode -ne 0) {
 | `KeybindGUI.ahk` | Main window (menus, keybind list, status bar) and its dialogs |
 | `UITheme.ahk` | Shared window style: font, colors, spacing, headings and footer buttons |
 | `CommandInfo.ahk` | What each command does, and warnings about a key before it is bound |
+| `WindowPlacement.ahk` | The main window's last position, kept between runs |
+| `StartupShortcut.ahk` | The Startup folder shortcut behind "Start when I sign in to Windows" |
 | `AppTray.ahk` | The tray icon's menu |
 | `pacs-assistant.ico` | App icon, compiled into the EXE and set for source runs |
 | `HotkeyManager.ahk` | Hotkey registration and window scoping |
