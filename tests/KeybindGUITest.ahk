@@ -83,6 +83,9 @@ class KeybindGUITest {
         "TestEveryBuiltInCommandHasANamedGroup",
         "TestFunctionDisplayOrderFollowsTheGroups",
         "TestFunctionRowsOutsideTheGroupedListAreOnlyAdded",
+        "TestKeybindStatusTextCountsLiveKeybinds",
+        "TestApplyRecordsWhyEachKeybindIsNotActive",
+        "TestFunctionTipAddsWhyAKeybindIsNotActive",
         "TestProfileSummaryCountsFunctionsAndNamesTheDefault",
         "TestScopeChoiceMapsTheDialogToFlags",
         "TestScopeWithNoWindowTickedIsRefused",
@@ -135,6 +138,8 @@ class KeybindGUITest {
         this.originalProfileMutationRevisions := KeybindGUI.profileMutationRevisions
         this.originalShutdownAuthorized := KeybindGUI.shutdownAuthorized
         this.originalDeferredNotices := KeybindGUI.deferredNotices
+        this.originalRuntimeFailures := KeybindGUI.runtimeFailures
+        KeybindGUI.runtimeFailures := Map()
         this.originalCommandAvailabilityProbe := PACSCommands.commandAvailabilityProbe
         KeybindGUI.captureRuntimeProfile := 0
         KeybindGUI.captureOwnerGui := 0
@@ -179,6 +184,7 @@ class KeybindGUITest {
         KeybindGUI.profileMutationRevisions := this.originalProfileMutationRevisions
         KeybindGUI.shutdownAuthorized := this.originalShutdownAuthorized
         KeybindGUI.deferredNotices := this.originalDeferredNotices
+        KeybindGUI.runtimeFailures := this.originalRuntimeFailures
         PACSCommands.commandAvailabilityProbe := this.originalCommandAvailabilityProbe
         ProfileManager.profiles := this.originalProfiles
         ProfileManager.currentProfile := this.originalCurrentProfile
@@ -2234,6 +2240,58 @@ class KeybindGUITest {
         listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
         Assert.Equal(2, this.gui.AddFunctionRow(listView, "Draft Report", "Unassigned", "Any window"))
         Assert.Equal("Draft Report", listView.GetText(2, 1))
+    }
+
+    TestKeybindStatusTextCountsLiveKeybinds() {
+        Assert.Equal("3 keybinds active", KeybindGUI.KeybindStatusText(3, 0, false))
+        Assert.Equal("1 keybind active", KeybindGUI.KeybindStatusText(1, 0, false))
+        Assert.Equal("2 of 3 keybinds active", KeybindGUI.KeybindStatusText(3, 1, false))
+        Assert.Equal("No keybinds set", KeybindGUI.KeybindStatusText(0, 0, false))
+        Assert.Equal("Keybinds suspended", KeybindGUI.KeybindStatusText(3, 1, true))
+    }
+
+    ; Each apply records, per set keybind, why it is not live, so the main window
+    ; can mark that row instead of only reporting it once.
+    TestApplyRecordsWhyEachKeybindIsNotActive() {
+        HotkeyManager.hotkeyFunctions := Map("Sign Report", (*) => 0, "Draft Report", (*) => 0)
+        HotkeyManager.hotkeyDriver.invalidKeys["^NoSuchKey"] := true
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        profile.binds["Draft Report"] := "^NoSuchKey"
+        profile.scopes["Draft Report"] := "Any"
+        profile.binds["Retired Command"] := "^F14"
+        profile.scopes["Retired Command"] := "Any"
+        profile.binds["Unbound Command"] := ""
+        profile.scopes["Unbound Command"] := "Any"
+
+        capturedLog := LogCapture()
+        try this.gui.ApplyProfileBinds(profile, false)
+        finally capturedLog.Restore()
+        failures := KeybindGUI.runtimeFailures
+
+        Assert.False(failures.Has("Sign Report"))
+        Assert.True(InStr(failures["Draft Report"], "does not accept this key") > 0)
+        Assert.True(InStr(failures["Retired Command"], "no command with this name") > 0)
+        Assert.False(failures.Has("Unbound Command"))
+
+        ; A later apply replaces the record rather than adding to it.
+        profile.binds.Delete("Retired Command")
+        profile.binds["Draft Report"] := "^F15"
+        this.gui.ApplyProfileBinds(profile, false)
+        Assert.Equal(0, KeybindGUI.runtimeFailures.Count)
+    }
+
+    TestFunctionTipAddsWhyAKeybindIsNotActive() {
+        profile := ProfileManager.NewProfile()
+        profile.customFuncs["Custom: Hello"] := {keys: "Hello", window: ""}
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        KeybindGUI.runtimeFailures := Map("Sign Report", "AutoHotkey does not accept this key on this computer.")
+
+        Assert.Equal(CommandInfo.Describe("Draft Report"), this.gui.FunctionTip("Draft Report"))
+        Assert.Equal("Sends Hello to whichever window is active.", this.gui.FunctionTip("Custom: Hello"))
+        Assert.True(InStr(this.gui.FunctionTip("Sign Report"), "`nNot active: AutoHotkey does not accept") > 0)
     }
 
     TestProfileSummaryCountsFunctionsAndNamesTheDefault() {

@@ -45,6 +45,12 @@ Main() {
     kb := KeybindGUI()
     auditKB := kb
     AppTray.Install(kb)
+    ; A set keybind for a command this version lacks cannot register: the list
+    ; shows that row as not active. Its notice is swallowed instead of shown.
+    kb.notificationDriver := {Notify: (*) => 0}
+    ProfileManager.profiles["Neuro"].binds["Retired Command"] := "^!F15"
+    kb.ApplyBinds()
+    SwitchMainProfile(kb, "Neuro")
 
     AuditMainWindow(kb)
     AuditMainWindowProfile(kb, "Empty", "main window, profile with no functions")
@@ -60,6 +66,12 @@ Main() {
     SelectFunction(lv, "Paste Wet Read")
     AuditDialog("keybind scope, PACS only", "PACS Assistant - Keybind Scope", () => kb.ShowScopeDialog(lv))
     AuditDialog("set keybind", "PACS Assistant - Set Keybind", () => kb.PromptKeybind("Sign Report", lv))
+    AuditDialog("set keybind, a key with two warnings", "PACS Assistant - Set Keybind",
+        () => kb.PromptKeybind("Sign Report", lv), true,
+        (window) => kb.ShowCapturedKey("Sign Report", lv, window, "Tab"))
+    AuditDialog("set keybind, a key another function has", "PACS Assistant - Set Keybind",
+        () => kb.PromptKeybind("Sign Report", lv), true,
+        (window) => kb.ShowCapturedKey("Sign Report", lv, window, "^F14"))
     AuditDialog("modality attendings", "PACS Assistant - Modality Attendings", () => kb.ShowModalityAttendingsDialog())
     AuditDialog("rename profile", "PACS Assistant - Rename Profile", () => kb.PromptRenameProfile("Neuro"))
 
@@ -178,8 +190,24 @@ SwitchMainProfile(kb, profileName) {
     Sleep(150)
 }
 
+; Selects the first command, as a click does, so the description shows.
 AuditAddFunction(kb, label) {
-    AuditDialog(label, "PACS Assistant - Add Function", () => kb.ShowAddFunctionDialog(kb.mainView.list))
+    AuditDialog(label, "PACS Assistant - Add Function", () => kb.ShowAddFunctionDialog(kb.mainView.list), true,
+        (window) => SelectFirstListBoxItem(window))
+}
+
+; ControlChooseIndex also reports a double-click, which would add the command, so
+; the selection is made and only LBN_SELCHANGE is sent.
+SelectFirstListBoxItem(window) {
+    for ctrl in window {
+        if (ctrl.Type = "ListBox" && ControlGetItems(ctrl).Length) {
+            ctrl.Choose(1)
+            id := DllCall("GetDlgCtrlID", "Ptr", ctrl.Hwnd, "Int")
+            SendMessage(0x111, (1 << 16) | id, ctrl.Hwnd, window)  ; WM_COMMAND, LBN_SELCHANGE
+            Sleep(100)
+            return
+        }
+    }
 }
 
 AuditSettings() {
@@ -247,14 +275,18 @@ SelectFunction(listView, funcName) {
     throw Error("No '" funcName "' row")
 }
 
-; Opens a view, audits it, and closes it with its title-bar X unless told not to.
-AuditDialog(label, title, action, close := true) {
+; Opens a view, puts it in a state when given prepare, audits it, and closes it
+; with its title-bar X unless told not to.
+AuditDialog(label, title, action, close := true, prepare := 0) {
     window := 0
     try window := OpenView(title, action)
     catch Any as err
         return DesktopChecks.Record(false, label, ErrorText.Describe(err))
-    try AuditView(label, window)
-    finally {
+    try {
+        if prepare
+            prepare.Call(window)
+        AuditView(label, window)
+    } finally {
         if close
             CloseView(window)
     }

@@ -256,7 +256,7 @@ CheckMainWindowState(kb, lv) {
     mainHwnd := kb.gui.Hwnd
     Assert(!view.saveButton.Enabled, "Save Changes starts disabled with nothing to save")
     Assert(StatusBarGetText(1, "ahk_id " mainHwnd) = " All changes saved", "the status bar says the profile is saved")
-    Assert(StatusBarGetText(2, "ahk_id " mainHwnd) = " Keybinds active", "the status bar says keybinds are active")
+    Assert(StatusBarGetText(2, "ahk_id " mainHwnd) = " 3 keybinds active", "the status bar counts the live keybinds")
 
     kb.MarkProfileDirty(ProfileManager.currentProfile)
     Assert(view.saveButton.Enabled, "an unsaved change enables Save Changes")
@@ -318,6 +318,46 @@ CheckMainWindowState(kb, lv) {
     Assert(Abs(saveX + saveWidth + UITheme.margin - clientWidth) <= 1, "Save Changes stays at the right edge after a resize")
     WinMove(,, width, height, "ahk_id " mainHwnd)
     Sleep(150)
+    CheckCaptureConfirmation(kb, lv)
+}
+
+; Key capture shows the captured key and any warning, and binds it only on Use
+; Keybind. A key is "captured" here by handing OnInputEnd what an ended InputHook
+; reports, since this run cannot press keys into its own hook.
+CheckCaptureConfirmation(kb, lv) {
+    promptHwnd := 0
+    Check("key capture opens", () => (
+        promptHwnd := OpenAndCaptureWindow("PACS Assistant - Set Keybind", () => kb.PromptKeybind("Sign Report", lv))
+    ))
+    if !promptHwnd
+        return
+    prompt := GuiFromHwnd(promptHwnd)
+    profile := ProfileManager.profiles[ProfileManager.currentProfile]
+    before := profile.binds["Sign Report"]
+
+    kb.OnInputEnd("Sign Report", lv, prompt, {EndReason: "EndKey", EndKey: "F14", EndMods: "^"})
+    Assert(!prompt.useButton.Enabled && InStr(prompt.message.Value, "Draft Report"), "a key another function has cannot be used")
+    Assert(profile.binds["Sign Report"] == before, "showing a captured key does not bind it")
+
+    SendMessage(0xF5, 0, 0, prompt.retryButton)  ; BM_CLICK
+    Sleep(100)
+    Assert(
+        KeybindGUI.isListening && !prompt.retryButton.Enabled && prompt.keyWell.Value = "Waiting for a key...",
+        "Try Again listens for another key"
+    )
+
+    kb.OnInputEnd("Sign Report", lv, prompt, {EndReason: "EndKey", EndKey: "F16", EndMods: "^"})
+    Assert(prompt.useButton.Enabled && prompt.keyWell.Value = "Ctrl + F16", "a free key is shown and can be used")
+    SendMessage(0xF5, 0, 0, prompt.useButton)
+    Sleep(200)
+    Assert(profile.binds["Sign Report"] == "^F16", "Use Keybind binds the captured key")
+    Assert(!WindowIsAlive(promptHwnd), "Use Keybind closes the prompt")
+    Assert(
+        !KeybindGUI.isListening && HotkeyManager.activeHotkeys.Has("Sign Report"),
+        "the new keybind is live after Use Keybind"
+    )
+    ; Saved, so the dialogs opened next do not stop to ask about unsaved changes.
+    Assert(kb.SaveCurrentProfile(), "the new keybind saves")
 }
 
 PressListKey(listView, virtualKey) {

@@ -25,6 +25,8 @@ class UITheme {
     static windowColor := "FFFFFF"
     static textColor := "1B1B1B"
     static secondaryColor := "5E5E5E"
+    ; Amber for advice that needs attention: 5.6:1 against white.
+    static warningColor := "A35200"
     static separatorColor := "E1E1E1"
     static panelColor := "F5F5F5"
 

@@ -64,6 +64,13 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
   not have is listed under "Not in this version". Select a function and use
   **Set Keybind**, **Set Scope** or **Remove**; or double-click it or press F2 to set
   its keybind, press Delete to remove it, or right-click it for the same commands.
+- Hover a function to see what it does. A keybind that is set but could not be
+  registered is shown in red, its hover text says why, and the status bar counts the
+  keybinds that are live ("8 of 9 keybinds active").
+- When you set a keybind, the window shows the key you pressed with any warning (a
+  key that would stop typing, one PowerScribe uses itself, a common shortcut) and
+  binds it only when you choose **Use Keybind**; **Try Again** listens for another.
+  A key another function already has cannot be used.
 - Keybind edits become active immediately. **Save Changes** persists them; it is enabled
   only while there are unsaved changes, and the status bar says whether there are any.
   Closing the app or switching profiles prompts to save, discard, or keep editing when
@@ -267,6 +274,7 @@ if ($process.ExitCode -ne 0) {
 | `MicrophoneManager.ahk` | Microphone selection on the PowerScribe login screen |
 | `KeybindGUI.ahk` | Main window (menus, keybind list, status bar) and its dialogs |
 | `UITheme.ahk` | Shared window style: font, colors, spacing, headings and footer buttons |
+| `CommandInfo.ahk` | What each command does, and warnings about a key before it is bound |
 | `AppTray.ahk` | The tray icon's menu |
 | `pacs-assistant.ico` | App icon, compiled into the EXE and set for source runs |
 | `HotkeyManager.ahk` | Hotkey registration and window scoping |

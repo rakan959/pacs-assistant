@@ -13,6 +13,7 @@
 #Include UpdateChecker.ahk
 #Include Settings.ahk
 #Include UITheme.ahk
+#Include CommandInfo.ahk
 
 class KeybindGUI {
     gui := ""
@@ -62,6 +63,12 @@ class KeybindGUI {
     ; Default values ("Unassigned", "Any window") are drawn in this color
     ; (COLORREF, 0xBBGGRR): 4.5:1 against white, so still readable.
     static mutedTextColor := 0x767676
+    ; A keybind that is set but not registered is drawn in Windows' error red
+    ; (#C42B1C), 5.9:1 against white.
+    static inactiveTextColor := 0x1C2BC4
+    ; Why each set keybind of the last applied profile is not registered, by
+    ; function name. Replaced by every ApplyProfileBinds.
+    static runtimeFailures := Map()
 
     __New() {
         ProfileManager.LoadProfiles()
@@ -128,7 +135,8 @@ class KeybindGUI {
 
         ; The keybind list: function, its key, and the window it is restricted to.
         ; LV0x10000 (double buffering) keeps it from flickering while resized.
-        lv := mainGui.Add("ListView", "w600 h200 -Multi +LV0x10000", ["Function", "Keybind", "Active In"])
+        ; LV0x10000 double-buffers against flicker; LV0x400 asks for hover text.
+        lv := mainGui.Add("ListView", "w600 h200 -Multi +LV0x10000 +LV0x400", ["Function", "Keybind", "Active In"])
         view.list := lv
         UITheme.UseExplorerTheme(lv)
         KeybindGUI.EnableFunctionGroups(lv)
@@ -144,6 +152,7 @@ class KeybindGUI {
         lv.OnEvent("ContextMenu", (ctrl, row, *) => this.ShowFunctionMenu(ctrl, row))
         lv.OnNotify(-155, (ctrl, lParam) => this.OnFunctionListKey(ctrl, lParam))  ; LVN_KEYDOWN
         lv.OnNotify(-12, (ctrl, lParam) => KeybindGUI.OnFunctionListDraw(ctrl, lParam))  ; NM_CUSTOMDRAW
+        lv.OnNotify(-158, (ctrl, lParam) => this.OnFunctionListInfoTip(ctrl, lParam))  ; LVN_GETINFOTIPW
 
         ; Footer: profile-wide settings at the left, Save at the right.
         view.rule := UITheme.AddSeparator(mainGui, "x0 w10 h1")
@@ -260,8 +269,11 @@ class KeybindGUI {
                 column := NumGet(lParam, subItemOffset, "Int") + 1
                 text := column > 1 ? listView.GetText(row, column) : ""
                 muted := (column = 2 && text == "Unassigned") || (column = 3 && text == "Any window")
+                inactive := column = 2 && this.runtimeFailures.Has(listView.GetText(row, 1))
                 ; Set for every cell: a color set for one cell carries into the next.
-                color := muted ? this.mutedTextColor : DllCall("GetSysColor", "Int", 8, "UInt")
+                color := inactive ? this.inactiveTextColor
+                    : muted ? this.mutedTextColor
+                    : DllCall("GetSysColor", "Int", 8, "UInt")
                 NumPut("UInt", color, lParam, textColorOffset)
             }
         }
@@ -407,8 +419,21 @@ class KeybindGUI {
                 view.profileMenu.Enable(KeybindGUI.saveMenuItem)
             else
                 view.profileMenu.Disable(KeybindGUI.saveMenuItem)
+            configured := 0
+            inactive := 0
+            if ProfileManager.profiles.Has(view.profileName) {
+                for funcName, bind in ProfileManager.profiles[view.profileName].binds {
+                    if (bind = "")
+                        continue
+                    configured++
+                    if KeybindGUI.runtimeFailures.Has(funcName)
+                        inactive++
+                }
+            }
             view.status.SetText(" " (dirty ? "Unsaved changes" : "All changes saved"), 1)
-            view.status.SetText(" " (A_IsSuspended ? "Keybinds suspended" : "Keybinds active"), 2)
+            view.status.SetText(" " KeybindGUI.KeybindStatusText(configured, inactive, A_IsSuspended), 2)
+            ; Repaint the list, so rows follow the registration state.
+            DllCall("InvalidateRect", "Ptr", view.list.Hwnd, "Ptr", 0, "Int", false)
             ; Suspended keybinds do nothing when pressed, so the title says so too.
             view.gui.Title := "PACS Assistant - " view.profileName (A_IsSuspended ? " (keybinds suspended)" : "")
             if A_IsSuspended
@@ -422,6 +447,48 @@ class KeybindGUI {
             AppLog.Write("The main window could not be refreshed: " ErrorText.Describe(err))
             return false
         }
+    }
+
+    ; The status bar's keybind state: how many of the set keybinds are live.
+    static KeybindStatusText(configured, inactive, suspended) {
+        if suspended
+            return "Keybinds suspended"
+        if (configured = 0)
+            return "No keybinds set"
+        noun := configured = 1 ? " keybind" : " keybinds"
+        if (inactive = 0)
+            return configured noun " active"
+        return (configured - inactive) " of " configured noun " active"
+    }
+
+    ; Hover text for a function's row: what it does and, when its keybind is not
+    ; registered, why.
+    FunctionTip(funcName) {
+        custom := 0
+        if ProfileManager.profiles.Has(ProfileManager.currentProfile) {
+            profile := ProfileManager.profiles[ProfileManager.currentProfile]
+            if profile.customFuncs.Has(funcName)
+                custom := profile.customFuncs[funcName]
+        }
+        text := CommandInfo.Describe(funcName, custom)
+        if KeybindGUI.runtimeFailures.Has(funcName)
+            text .= "`nNot active: " KeybindGUI.runtimeFailures[funcName]
+        return text
+    }
+
+    ; LVN_GETINFOTIPW: fills the hover text of the row under the mouse.
+    OnFunctionListInfoTip(listView, lParam) {
+        ; NMLVGETINFOTIPW: pszText, cchTextMax and iItem after the NMHDR header.
+        textOffset := A_PtrSize = 8 ? 32 : 16
+        sizeOffset := A_PtrSize = 8 ? 40 : 20
+        itemOffset := A_PtrSize = 8 ? 44 : 24
+        try {
+            capacity := NumGet(lParam, sizeOffset, "Int")
+            text := this.FunctionTip(listView.GetText(NumGet(lParam, itemOffset, "Int") + 1, 1))
+            if (capacity > 1)
+                StrPut(SubStr(text, 1, capacity - 1), NumGet(lParam, textOffset, "Ptr"), "UTF-16")
+        }
+        return 0
     }
 
     ; The line under the profile name.
@@ -1271,7 +1338,19 @@ class KeybindGUI {
         }
 
         newBind := this.CapturedHotkey(ih)
+        ; The key-capture window shows the key and any warning about it, and binds
+        ; it only on Use Keybind. A caller without that window binds it at once.
+        if HasProp(promptGui, "showCapturedKey")
+            return promptGui.showCapturedKey.Call(newBind)
+        return this.CommitCapturedKey(funcName, control, promptGui, newBind)
+    }
 
+    /**
+     * Binds a captured key to the function: refuses a key another function has,
+     * then applies the profile and keeps the change only if the key registers.
+     * Ends the capture either way.
+     */
+    CommitCapturedKey(funcName, control, promptGui, newBind) {
         currentProfile := ProfileManager.profiles[promptGui.profileName]
         hadBinding := currentProfile.binds.Has(funcName)
         oldBind := hadBinding ? currentProfile.binds[funcName] : ""
@@ -1706,12 +1785,16 @@ class KeybindGUI {
         failed := []
         unavailable := ""
         rejected := ""
+        ; Why each set keybind is not live, for the main window to show per row.
+        failureReasons := Map()
 
         for funcName, bind in currentProfile.binds {
             if (!currentProfile.customFuncs.Has(funcName)
                 && !HotkeyManager.hotkeyFunctions.Has(funcName)) {
-                if (bind != "")
+                if (bind != "") {
                     unavailable .= (unavailable = "" ? "" : ", ") funcName
+                    failureReasons[funcName] := "this version of PACS Assistant has no command with this name."
+                }
                 continue
             }
             scope := currentProfile.scopes.Has(funcName) ? currentProfile.scopes[funcName] : "Any"
@@ -1724,14 +1807,20 @@ class KeybindGUI {
                     result := HotkeyManager.RegisterHotkey(funcName, bind, scope)
                 }
 
-                if (!result && HotkeyManager.lastErrorKind == "invalidHotkey")
+                if (!result && HotkeyManager.lastErrorKind == "invalidHotkey") {
                     rejected .= (rejected = "" ? "" : ", ") funcName " (" bind ")"
-                else if !result
+                    failureReasons[funcName] := "AutoHotkey does not accept this key on this computer."
+                } else if !result {
                     failed.Push(funcName (HotkeyManager.lastError != "" ? " (" HotkeyManager.lastError ")" : ""))
+                    failureReasons[funcName] := HotkeyManager.lastError != "" ? HotkeyManager.lastError : "it could not be registered."
+                }
             } catch as err {
                 failed.Push(funcName " (" err.Message ")")
+                failureReasons[funcName] := err.Message
             }
         }
+        KeybindGUI.runtimeFailures := failureReasons
+        this.RefreshMainView()
 
         if (showErrors && (unavailable != "" || rejected != "")) {
             reasons := []
@@ -2378,24 +2467,37 @@ class KeybindGUI {
         selectorGui.Add("Text", "xm y+14 w" width, "&Built-in commands")
         lbBuiltIn := ""
         if (builtInFunctions.Length > 0)
-            lbBuiltIn := selectorGui.Add("ListBox", "xm y+4 w" width " r9", builtInFunctions)
+            lbBuiltIn := selectorGui.Add("ListBox", "xm y+4 w" width " r7", builtInFunctions)
         else
             UITheme.AddNote(selectorGui, "Every built-in command is already in this profile.", "xm y+4 w" width)
 
         lbCustom := ""
         if (customFunctions.Length > 0) {
             selectorGui.Add("Text", "xm y+14 w" width, "&Custom keybinds")
-            lbCustom := selectorGui.Add("ListBox", "xm y+4 w" width " r4", customFunctions)
+            lbCustom := selectorGui.Add("ListBox", "xm y+4 w" width " r3", customFunctions)
             selectorGui.Add("Button", "x" (UITheme.margin + width - 180) " y+" UITheme.gap " w180 h" UITheme.buttonHeight, "&Delete Custom Keybind...")
                 .OnEvent("Click", (*) => this.DeleteCustomFunction(lbCustom.Text, selectorGui))
             if lbBuiltIn
                 this.LinkFunctionLists(lbBuiltIn, lbCustom)
         }
 
+        ; What the selected command does, three lines tall so the window keeps its
+        ; size as the selection changes.
+        description := UITheme.AddNote(selectorGui, "Select a command to see what it does.", "xm y+12 w" width " r3")
+        profile := ProfileManager.profiles[ProfileManager.currentProfile]
+        describe := (*) => (
+            selected := this.SelectedFunction(lbBuiltIn, lbCustom),
+            description.Value := selected = ""
+                ? "Select a command to see what it does."
+                : CommandInfo.Describe(selected, profile.customFuncs.Has(selected) ? profile.customFuncs[selected] : 0)
+        )
+
         add := (*) => this.AddFunction(this.SelectedFunction(lbBuiltIn, lbCustom), listView, selectorGui)
         for functionList in [lbBuiltIn, lbCustom] {
-            if functionList
+            if functionList {
                 functionList.OnEvent("DoubleClick", add)
+                functionList.OnEvent("Change", describe)
+            }
         }
         cancel := (*) => selectorGui.Destroy()
         footer := UITheme.AddFooter(
@@ -2826,7 +2928,7 @@ class KeybindGUI {
         }
 
         promptGui := this.NewProfileDialog("PACS Assistant - Set Keybind", profileName)
-        width := 320
+        width := 380
         UITheme.AddHeading(promptGui, "Press the new keybind", "xm ym w" width)
         UITheme.AddNote(
             promptGui,
@@ -2834,17 +2936,25 @@ class KeybindGUI {
             "xm y+4 w" width
         )
         ; 0x200 (SS_CENTERIMAGE) centres the single line vertically in the well.
-        promptGui.SetFont("s11 c" UITheme.secondaryColor, UITheme.fontName)
-        promptGui.Add("Text", "xm y+14 w" width " h56 Center 0x200 Background" UITheme.panelColor, "Waiting for a key...")
+        promptGui.SetFont("s12", UITheme.headingFontName)
+        promptGui.keyWell := promptGui.Add("Text", "xm y+14 w" width " h56 Center 0x200 Background" UITheme.panelColor, "")
         UITheme.UseBodyFont(promptGui)
-        UITheme.AddNote(
-            promptGui,
-            "Hold Ctrl, Alt, Shift or Win, then press the key. Esc cancels.",
-            "xm y+10 w" width
-        )
-        UITheme.AddFooter(promptGui, width, [
-            {text: "Cancel", action: (*) => this.CancelKeybindPrompt(promptGui)}
+        ; One area for guidance, then for the captured key's warnings; four lines
+        ; tall so the window keeps its size.
+        promptGui.message := UITheme.AddNote(promptGui, "", "xm y+10 w" width " r4")
+        cancel := (*) => this.CancelKeybindPrompt(promptGui)
+        footer := UITheme.AddFooter(promptGui, width, [
+            {text: "&Use Keybind", width: 112, default: true, action: (*) => this.UseCapturedKey(funcName, listView, promptGui)},
+            {text: "&Try Again", action: (*) => this.RetryCapture(funcName, listView, promptGui)},
+            {text: "Cancel", action: cancel}
         ])
+        promptGui.useButton := footer["&Use Keybind"]
+        promptGui.retryButton := footer["&Try Again"]
+        promptGui.showCapturedKey := (newBind) => this.ShowCapturedKey(funcName, listView, promptGui, newBind)
+        this.ResetCapturePrompt(promptGui)
+        ; While a key is being captured the hook takes Esc itself; afterwards Esc
+        ; reaches the window.
+        promptGui.OnEvent("Escape", cancel)
 
         ; Closing with the X has to tear the hook down as well, otherwise it keeps
         ; capturing and rebinds the next key pressed anywhere
@@ -2869,6 +2979,85 @@ class KeybindGUI {
         }
 
         return this.ShowStartedCapturePrompt(promptGui)
+    }
+
+    ; The capture prompt waiting for a key: nothing to use yet.
+    ResetCapturePrompt(promptGui) {
+        promptGui.keyWell.SetFont("c" UITheme.secondaryColor)
+        promptGui.keyWell.Value := "Waiting for a key..."
+        this.SetCaptureMessage(promptGui, "Hold Ctrl, Alt, Shift or Win, then press the key. Esc cancels.", false)
+        promptGui.useButton.Enabled := false
+        promptGui.retryButton.Enabled := false
+    }
+
+    SetCaptureMessage(promptGui, text, isWarning) {
+        promptGui.message.SetFont("c" (isWarning ? UITheme.warningColor : UITheme.secondaryColor))
+        promptGui.message.Value := text
+    }
+
+    /**
+     * Shows a captured key and waits for Use Keybind or Try Again. A key another
+     * function already has cannot be used; any other warning (a key that types,
+     * one PowerScribe uses, a common shortcut) is advice.
+     */
+    ShowCapturedKey(funcName, listView, promptGui, newBind) {
+        if !this.FunctionDialogIsCurrent(promptGui, funcName, listView)
+            return false
+        profile := ProfileManager.profiles[promptGui.profileName]
+        owner := this.FindProfileBindingOwner(profile, newBind, funcName)
+        if (owner != "")
+            warnings := ["'" owner "' already uses this keybind. Try another key."]
+        else
+            warnings := CommandInfo.KeyWarnings(newBind, profile.scopes.Has(funcName) ? profile.scopes[funcName] : "Any")
+        message := ""
+        for warning in warnings {
+            if (A_Index <= 2)
+                message .= (message = "" ? "" : " ") warning
+        }
+        promptGui.capturedBind := newBind
+        promptGui.keyWell.SetFont("c" UITheme.textColor)
+        promptGui.keyWell.Value := this.PrettifyHotkey(newBind)
+        if (message = "")
+            this.SetCaptureMessage(promptGui, "Use this keybind, or press Try Again for a different one.", false)
+        else
+            this.SetCaptureMessage(promptGui, message, true)
+        promptGui.useButton.Enabled := owner = ""
+        promptGui.retryButton.Enabled := true
+        (owner = "" ? promptGui.useButton : promptGui.retryButton).Focus()
+        return true
+    }
+
+    UseCapturedKey(funcName, listView, promptGui) {
+        if !HasProp(promptGui, "capturedBind")
+            return false
+        if !this.FunctionDialogIsCurrent(promptGui, funcName, listView)
+            return false
+        return this.CommitCapturedKey(funcName, listView, promptGui, promptGui.capturedBind)
+    }
+
+    ; Discards the captured key and listens for another.
+    RetryCapture(funcName, listView, promptGui) {
+        if !this.FunctionDialogIsCurrent(promptGui, funcName, listView)
+            return false
+        try this.StopListening()
+        catch as err {
+            this.NotifyUser(
+                "Key capture could not be restarted, and may still be active. Keep this dialog open and restart PACS Assistant before relying on its shortcuts.`n`n" err.Message,
+                "Capture Stop Failed - Restart Required",
+                "Icon!"
+            )
+            return false
+        }
+        KeybindGUI.isListening := true
+        try this.StartInputHook(funcName, listView, promptGui)
+        catch Any as err {
+            this.CancelKeybindPrompt(promptGui)
+            throw err
+        }
+        if HasProp(promptGui, "capturedBind")
+            promptGui.DeleteProp("capturedBind")
+        this.ResetCapturePrompt(promptGui)
+        return true
     }
 
     ; Display form of a function's current keybind, for the capture prompt.
