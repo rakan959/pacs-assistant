@@ -1,4 +1,4 @@
-﻿; = CONTENTS
+; = CONTENTS
 ;   + Preamble
 ;   + UpdateVerificationTest class (artifact checks, release metadata, download URL,
 ;       metadata request, streaming and worker ownership)
@@ -35,7 +35,10 @@ class UpdateVerificationTest {
         "MetadataDeadlineClosesPendingWorkerAndReportsOnce",
         "MetadataRequestReportsWorkerErrors",
         "MetadataStartFailureCleansUpAndReportsOnce",
-        "MetadataCleanupFailureReportsErrorAndRetainsExitCleanup",
+        "MetadataCleanupFailureKeepsTheOutcomeAndRetainsExitCleanup",
+        "CancelledRequestWithAFailedReapStaysSilent",
+        "AbandonedRequestDirectoriesAreSweptByNameAndAge",
+        "SourceRunStartsTheWorkerScriptBesideTheRequest",
         "PendingMetadataWorkerLeavesTheScriptResponsive",
         "MetadataCompletionDeliversUtf8BodyOnce",
         "MetadataHeadersEnforceSizeAndStatusBeforeReading",
@@ -43,7 +46,8 @@ class UpdateVerificationTest {
         "AsyncRequestCancelBreaksCallbackOwnership",
         "CancelledMetadataWorkerCannotDeliverLateCompletion",
         "WorkerResponseRejectsInvalidSizeAndStatus",
-        "NativeWorkerCancellationReapsOnlyItsOwnedProcess"
+        "NativeWorkerCancellationReapsOnlyItsOwnedProcess",
+        "NativeWorkerScriptRefusesAnUnsupportedUrl"
     ]
 
     ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
@@ -251,10 +255,10 @@ class UpdateVerificationTest {
     }
 
     MetadataRequestTimesOutOnlyPastItsBudget() {
-        budget := WinHttpTransport.resolveTimeoutMs
-            + WinHttpTransport.connectTimeoutMs
-            + WinHttpTransport.sendTimeoutMs
-            + WinHttpTransport.receiveTimeoutMs
+        budget := WinHttpConstants.resolveTimeoutMs
+            + WinHttpConstants.connectTimeoutMs
+            + WinHttpConstants.sendTimeoutMs
+            + WinHttpConstants.receiveTimeoutMs
             + 2000
         request := RecordingMetadataRequest()
         request.state := "sending"
@@ -298,15 +302,21 @@ class UpdateVerificationTest {
         Assert.True(request.worker.closed)
     }
 
-    MetadataCleanupFailureReportsErrorAndRetainsExitCleanup() {
+    ; A failed reap is a resource fault, retried at exit. It must not turn a
+    ; delivered response into a failure.
+    MetadataCleanupFailureKeepsTheOutcomeAndRetainsExitCleanup() {
+        received := []
         failures := []
-        request := WinHttpTextRequest("https://api.github.com/test", (*) => ThrowError("unexpected success"), (err) => failures.Push(err), 16)
-        request.worker := FailingCloseMetadataProcess()
+        request := WinHttpTextRequest("https://api.github.com/test", (response) => received.Push(response), (err) => failures.Push(err), 16)
+        request.worker := FailingCloseMetadataProcess(200, "{}")
         capturedLog := LogCapture()
         try {
             Assert.True(IsObject(request.Start()))
             request.Poll()
-            Assert.Equal(1, failures.Length)
+            Assert.Equal(1, received.Length)
+            Assert.Equal("{}", received[1].body)
+            Assert.Equal(0, failures.Length)
+            Assert.Equal(1, capturedLog.Count("Metadata worker cleanup failed"))
             Assert.Equal("closed", request.state)
             Assert.True(IsObject(request.exitCallback))
             Assert.True(DirExist(request.directory))
@@ -317,6 +327,72 @@ class UpdateVerificationTest {
         Assert.True(request.worker.closed)
         Assert.Equal("", request.directory)
         Assert.Equal(0, request.exitCallback)
+    }
+
+    CancelledRequestWithAFailedReapStaysSilent() {
+        received := []
+        failures := []
+        request := WinHttpTextRequest("https://api.github.com/test", (response) => received.Push(response), (err) => failures.Push(err), 16)
+        request.worker := FailingCloseMetadataProcess()
+        request.worker.finished := false
+        capturedLog := LogCapture()
+        try {
+            Assert.True(IsObject(request.Start()))
+            request.Cancel()
+            Assert.Equal("closed", request.state)
+            Assert.Equal(0, received.Length)
+            Assert.Equal(0, failures.Length, "A cancelled request must never call back")
+            Assert.True(IsObject(request.exitCallback), "The failed reap must be retried at exit")
+        } finally {
+            request.Cancel()
+            capturedLog.Restore()
+        }
+        Assert.True(request.worker.closed)
+        Assert.Equal(0, request.exitCallback)
+        Assert.Equal(0, failures.Length)
+    }
+
+    AbandonedRequestDirectoriesAreSweptByNameAndAge() {
+        root := TestTempPath("pacs-metadata-sweep")
+        stale := root "\pacs-metadata-" this.Repeat("a", 32)
+        fresh := root "\pacs-metadata-" this.Repeat("b", 32)
+        withUnknownFile := root "\pacs-metadata-" this.Repeat("c", 32)
+        otherName := root "\pacs-metadata-notarequest"
+        capturedLog := LogCapture()
+        try {
+            for directory in [stale, fresh, withUnknownFile, otherName] {
+                DirCreate(directory)
+                IniWrite(16, directory "\request.ini", "Request", "MaximumSize")
+            }
+            FileAppend("partial", stale "\response.bin", "UTF-8-RAW")
+            FileAppend("not a request file", withUnknownFile "\notes.txt", "UTF-8")
+            twoHoursAgo := DateAdd(A_Now, -2, "Hours")
+            for directory in [stale, withUnknownFile, otherName]
+                FileSetTime(twoHoursAgo, directory, "M", "D")
+
+            WinHttpTextRequest.SweepAbandonedDirectories(root)
+
+            Assert.False(DirExist(stale), "An hour-old request directory must be removed")
+            Assert.True(DirExist(fresh), "A recent request directory may belong to a live request")
+            Assert.True(DirExist(withUnknownFile), "A directory holding other files must be kept")
+            Assert.True(FileExist(withUnknownFile "\notes.txt") != "")
+            Assert.True(DirExist(otherName), "Only request-shaped names are swept")
+            Assert.Equal(1, capturedLog.Count("abandoned metadata request directory could not be removed"))
+        } finally {
+            capturedLog.Restore()
+            DirDelete(root, true)
+        }
+    }
+
+    SourceRunStartsTheWorkerScriptBesideTheRequest() {
+        request := WinHttpTextRequest("https://api.github.com/test", (*) => 0, (*) => 0, 16)
+        request.directory := A_Temp "\pacs-metadata-" this.Repeat("d", 32)
+        arguments := request.WorkerArguments()
+        Assert.True(RegExMatch(arguments, '^/script /ErrorStdOut "([^"]+)" "([^"]+)"$', &parts), arguments)
+        SplitPath(parts[1], &scriptName)
+        Assert.Equal("WinHttpMetadataWorkerMain.ahk", scriptName)
+        Assert.True(FileExist(parts[1]) != "", parts[1])
+        Assert.Equal(request.directory, parts[2])
     }
 
     PendingMetadataWorkerLeavesTheScriptResponsive() {
@@ -340,8 +416,8 @@ class UpdateVerificationTest {
         request.worker.finished := false
         Assert.True(IsObject(request.Start()))
         try {
-            request.now := WinHttpTransport.resolveTimeoutMs + WinHttpTransport.connectTimeoutMs
-                + WinHttpTransport.sendTimeoutMs + WinHttpTransport.receiveTimeoutMs + 2000
+            request.now := WinHttpConstants.resolveTimeoutMs + WinHttpConstants.connectTimeoutMs
+                + WinHttpConstants.sendTimeoutMs + WinHttpConstants.receiveTimeoutMs + 2000
             request.Poll()
             Assert.Equal("sending", request.state)
             Assert.False(request.worker.closed)
@@ -403,12 +479,38 @@ class UpdateVerificationTest {
         FileAppend("#Requires AutoHotkey v2.0`n#SingleInstance Off`n#ErrorStdOut`nSleep(30000)`nExitApp()`n", script, "UTF-8")
         worker := WinHttpWorkerProcess()
         try {
-            worker.Start(script, A_Temp)
+            worker.Start('/script /ErrorStdOut "' script '"', A_Temp)
             Assert.False(worker.IsFinished())
         } finally worker.Close()
         Assert.Equal(0, worker.process)
         Assert.Equal(0, worker.job)
         Assert.True(worker.IsFinished())
+    }
+
+    ; Runs the real worker script in its own process, network-free: the URL is
+    ; refused before any connection, and the refusal comes back through error.txt.
+    NativeWorkerScriptRefusesAnUnsupportedUrl() {
+        name := ""
+        loop 32
+            name .= Format("{:x}", Random(0, 15))
+        directory := A_Temp "\pacs-metadata-" name
+        DirCreate(directory)
+        worker := WinHttpWorkerProcess()
+        try {
+            IniWrite("https://example.invalid/", directory "\request.ini", "Request", "Url")
+            IniWrite(16, directory "\request.ini", "Request", "MaximumSize")
+            request := WinHttpTextRequest("https://api.github.com/test", (*) => 0, (*) => 0, 16)
+            request.directory := directory
+            worker.Start(request.WorkerArguments(), directory)
+            Assert.Equal(0, DllCall("WaitForSingleObject", "Ptr", worker.process, "UInt", 15000, "UInt"),
+                "The worker must exit on its own")
+            Assert.Equal(10, worker.ExitCode())
+            Assert.True(InStr(FileRead(directory "\error.txt", "UTF-8"), "Unsupported update metadata URL"))
+            Assert.False(FileExist(directory "\response.bin"))
+        } finally {
+            worker.Close()
+            DirDelete(directory, true)
+        }
     }
 
     ReleaseParserKeepsAssetMetadataTogether() {
@@ -636,7 +738,7 @@ class FakeMetadataWorkerProcess {
         this.closed := false
     }
 
-    Start(scriptPath, directory) {
+    Start(arguments, directory) {
         if this.code {
             FileAppend("simulated worker failure", directory "\error.txt", "UTF-8")
             return

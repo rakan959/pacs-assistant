@@ -173,6 +173,7 @@ function Invoke-AutoHotkeyChecked {
 
 # Syntax and deterministic unit tests; both run in CI.
 Invoke-AutoHotkeyChecked @('/validate', '/ErrorStdOut', 'main.ahk')
+Invoke-AutoHotkeyChecked @('/validate', '/ErrorStdOut', 'WinHttpMetadataWorkerMain.ahk')
 Invoke-AutoHotkeyChecked @('/ErrorStdOut', 'tests/RunTests.ahk')
 
 # Desktop integration checks; these register hotkeys and open real windows, so run locally.
@@ -241,9 +242,11 @@ if ($process.ExitCode -ne 0) {
 | `Settings.ahk` | Settings storage and the settings dialog |
 | `AppStorage.ahk` | Data-directory resolution and one-time settings migration |
 | `UpdateChecker.ahk` | Release checks and self-update |
-| `WinHttpTransport.ahk` | Bounded HTTPS download for self-update, and shared WinHTTP constants |
+| `WinHttpTransport.ahk` | Bounded HTTPS download for self-update, and the metadata-request entry point |
+| `WinHttpConstants.ahk` | WinHTTP constants, user agent and timeouts shared with the worker |
 | `WinHttpTextRequest.ahk` | Asynchronous metadata request, deadline and completion polling |
 | `WinHttpMetadataWorker.ahk` | Stream-bounded HTTPS metadata reads in an isolated worker |
+| `WinHttpMetadataWorkerMain.ahk` | Worker process entry point, embedded in compiled builds |
 | `WinHttpWorkerProcess.ahk` | Worker process ownership and cancellation |
 | `JsonParser.ahk` | JSON parsing for GitHub release metadata |
 | `ErrorText.ahk` | Text for thrown values in logs, notifications and test output |

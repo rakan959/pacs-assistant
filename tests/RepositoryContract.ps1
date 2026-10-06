@@ -99,7 +99,8 @@ $winHttpTransport = Get-Content -Raw (Join-Path $repoRoot 'WinHttpTransport.ahk'
 $winHttpTextRequest = Get-Content -Raw (Join-Path $repoRoot 'WinHttpTextRequest.ahk')
 $winHttpMetadataWorker = Get-Content -Raw (Join-Path $repoRoot 'WinHttpMetadataWorker.ahk')
 $winHttpWorkerProcess = Get-Content -Raw (Join-Path $repoRoot 'WinHttpWorkerProcess.ahk')
-$updateNetworking = $updateChecker + $winHttpTransport + $winHttpTextRequest + $winHttpMetadataWorker
+$winHttpMetadataWorkerMain = Get-Content -Raw (Join-Path $repoRoot 'WinHttpMetadataWorkerMain.ahk')
+$updateNetworking = $updateChecker + $winHttpTransport + $winHttpTextRequest + $winHttpMetadataWorker + $winHttpMetadataWorkerMain
 $appControl = Get-Content -Raw (Join-Path $repoRoot 'AppControl.ahk')
 $keybindGui = Get-Content -Raw (Join-Path $repoRoot 'KeybindGUI.ahk')
 $exclusiveOperations = Get-Content -Raw (Join-Path $repoRoot 'ExclusiveOperations.ahk')
@@ -147,7 +148,7 @@ $unitStep = [regex]::Match($workflow, '(?ms)^\s*- name: Run unit tests\s*$.*?(?=
 Assert-Matches $unitStep "'tests\\RunTests\.ahk'" 'The unit-test step must run tests\RunTests.ahk.'
 Assert-Matches $unitStep '(?s)if \(\$process\.ExitCode -ne 0\)\s*\{\s*throw' 'The unit-test step must fail when the suite exits non-zero.'
 $syntaxStep = [regex]::Match($workflow, '(?ms)^\s*- name: Validate syntax\s*$.*?(?=^\s*- name:|\z)').Value
-foreach ($validatedScript in @("'main.ahk'", "'tests\\run-hotkey-tests\.ahk'", "'tests\\run-gui-smoke\.ahk'")) {
+foreach ($validatedScript in @("'main.ahk'", "'WinHttpMetadataWorkerMain\.ahk'", "'tests\\run-hotkey-tests\.ahk'", "'tests\\run-gui-smoke\.ahk'")) {
     Assert-Matches $syntaxStep $validatedScript "CI must /validate $validatedScript."
 }
 Assert-Matches $runTests 'ExitApp\(TestRunner\.failures > 0 \? 1 : 0\)' 'RunTests.ahk must exit non-zero when any test fails.'
@@ -554,7 +555,15 @@ foreach ($subscriber in @('UpdateChecker', 'PACSMonitor', 'MicrophoneManager')) 
     Assert-Matches $main ("Settings\.AddChangeListener\(ObjBindMethod\(" + $subscriber) ("main.ahk must explicitly subscribe " + $subscriber + " to settings changes.")
 }
 Assert-Matches $winHttpTextRequest '(?s)this\.worker\.Start.*?SetTimer\(this\.timeoutTimer, 50\)' 'Automatic metadata requests must run outside the UI process with nonblocking completion polling.'
-Assert-Matches $winHttpWorkerProcess '(?s)JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.*?CreateProcessW.*?AssignProcessToJobObject.*?ResumeThread' 'Metadata workers must be owned before they can execute, and end with their parent process.'
+Assert-Matches $winHttpWorkerProcess '(?s)JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.*?PROC_THREAD_ATTRIBUTE_JOB_LIST.*?CreateProcessW' 'Metadata workers must be created inside their kill-on-close job, and end with their parent process.'
+# A suspended self-launch followed by ResumeThread is an injection-shaped pattern to
+# behavior-monitoring antivirus, which the hospital deployment cannot afford.
+Assert-NotMatches $winHttpWorkerProcess 'ResumeThread|AssignProcessToJobObject|0x0800000[4-7]\b|CREATE_SUSPENDED' 'Metadata workers must never start suspended.'
+Assert-Matches $winHttpTextRequest '(?m)^;@Ahk2Exe-AddResource WinHttpMetadataWorkerMain\.ahk, WINHTTPMETADATAWORKER\s*$' 'Compiled builds must embed the metadata worker script.'
+Assert-Matches $winHttpTextRequest 'workerResourceName := "WINHTTPMETADATAWORKER"' 'The embedded worker must be launched by the resource name it is compiled under.'
+Assert-NotMatches $winHttpTextRequest '\b(?:FileInstall|FileCopy|FileAppend)\b' 'Metadata requests must never write a script file to run.'
+Assert-Matches $winHttpMetadataWorkerMain '(?m)^#NoTrayIcon\s*$' 'The metadata worker must not show a second tray icon.'
+Assert-Matches $workflow '(?s)- name: Compile.*?- name: Smoke-test the embedded metadata worker.*?\*WINHTTPMETADATAWORKER' 'CI must run the metadata worker embedded in the compiled executable.'
 Assert-Matches $main '(?s)PACSMonitor\.automationAcquire\s*:=.*MicrophoneManager\.automationAcquire\s*:=.*kbGUI\s*:=\s*KeybindGUI\(\).*PACSMonitor\.Start\(\).*MicrophoneManager\.Start\(\).*UpdateChecker\.Start\(\)' 'Every lease, the background automation gates included, must be wired before the GUI is shown, the GUI before clinical timers, and clinical timers before automatic network checks.'
 
 Assert-Matches $readme 'git clone --recurse-submodules' 'README must document cloning with submodules.'

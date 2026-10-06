@@ -1,22 +1,9 @@
 #Requires AutoHotkey v2.0
+#Include WinHttpConstants.ahk
+#Include WinHttpTextRequest.ahk
 
 /** Bounded WinHTTP transport for asynchronous checks and interactive downloads. */
 class WinHttpTransport {
-    ; Win32 constants from winhttp.h and winerror.h, in their native spelling.
-    ; Requests bypass any configured proxy (NO_PROXY), as they always have.
-    static WINHTTP_ACCESS_TYPE_NO_PROXY := 1
-    static WINHTTP_FLAG_SECURE := 0x00800000
-    static WINHTTP_QUERY_CONTENT_LENGTH := 5
-    static WINHTTP_QUERY_STATUS_CODE := 19
-    static WINHTTP_QUERY_FLAG_NUMBER := 0x20000000
-    static INTERNET_DEFAULT_HTTPS_PORT := 443
-    static ERROR_WINHTTP_HEADER_NOT_FOUND := 12150
-
-    static resolveTimeoutMs := 2000
-    static connectTimeoutMs := 3000
-    static sendTimeoutMs := 5000
-    static receiveTimeoutMs := 10000
-
     GetTextAsync(url, onComplete, onError, maximumSize) {
         operation := WinHttpTextRequest(url, onComplete, onError, maximumSize)
         return operation.Start()
@@ -38,8 +25,8 @@ class WinHttpTransport {
         try {
             session := DllCall(
                 "winhttp\WinHttpOpen",
-                "WStr", "PACS-Assistant-Update-Checker",
-                "UInt", WinHttpTransport.WINHTTP_ACCESS_TYPE_NO_PROXY,
+                "WStr", WinHttpConstants.userAgent,
+                "UInt", WinHttpConstants.WINHTTP_ACCESS_TYPE_NO_PROXY,
                 "Ptr", 0,
                 "Ptr", 0,
                 "UInt", 0,
@@ -51,7 +38,7 @@ class WinHttpTransport {
                 "winhttp\WinHttpConnect",
                 "Ptr", session,
                 "WStr", "github.com",
-                "UShort", WinHttpTransport.INTERNET_DEFAULT_HTTPS_PORT,
+                "UShort", WinHttpConstants.INTERNET_DEFAULT_HTTPS_PORT,
                 "UInt", 0,
                 "Ptr"
             )
@@ -65,7 +52,7 @@ class WinHttpTransport {
                 "Ptr", 0,
                 "Ptr", 0,
                 "Ptr", 0,
-                "UInt", WinHttpTransport.WINHTTP_FLAG_SECURE,
+                "UInt", WinHttpConstants.WINHTTP_FLAG_SECURE,
                 "Ptr"
             )
             if !request
@@ -73,10 +60,10 @@ class WinHttpTransport {
             if !DllCall(
                 "winhttp\WinHttpSetTimeouts",
                 "Ptr", request,
-                "Int", WinHttpTransport.resolveTimeoutMs,
-                "Int", WinHttpTransport.connectTimeoutMs,
-                "Int", WinHttpTransport.sendTimeoutMs,
-                "Int", WinHttpTransport.receiveTimeoutMs
+                "Int", WinHttpConstants.resolveTimeoutMs,
+                "Int", WinHttpConstants.connectTimeoutMs,
+                "Int", WinHttpConstants.sendTimeoutMs,
+                "Int", WinHttpConstants.receiveTimeoutMs
             )
                 throw OSError(A_LastError, "WinHttpSetTimeouts")
             if !DllCall(
@@ -98,7 +85,7 @@ class WinHttpTransport {
             if !DllCall(
                 "winhttp\WinHttpQueryHeaders",
                 "Ptr", request,
-                "UInt", WinHttpTransport.WINHTTP_QUERY_STATUS_CODE | WinHttpTransport.WINHTTP_QUERY_FLAG_NUMBER,
+                "UInt", WinHttpConstants.WINHTTP_QUERY_STATUS_CODE | WinHttpConstants.WINHTTP_QUERY_FLAG_NUMBER,
                 "Ptr", 0,
                 "UInt*", &status,
                 "UInt*", &statusSize,
@@ -113,7 +100,7 @@ class WinHttpTransport {
             if !DllCall(
                 "winhttp\WinHttpQueryHeaders",
                 "Ptr", request,
-                "UInt", WinHttpTransport.WINHTTP_QUERY_CONTENT_LENGTH | WinHttpTransport.WINHTTP_QUERY_FLAG_NUMBER,
+                "UInt", WinHttpConstants.WINHTTP_QUERY_CONTENT_LENGTH | WinHttpConstants.WINHTTP_QUERY_FLAG_NUMBER,
                 "Ptr", 0,
                 "UInt*", &contentLength,
                 "UInt*", &contentLengthSize,

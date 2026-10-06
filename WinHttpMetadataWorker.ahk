@@ -1,8 +1,9 @@
-﻿; = CONTENTS
+; = CONTENTS
 ;   + Preamble
 ;   + WinHttpMetadataWorker class (bounded synchronous GET and worker entry point)
 
 #Requires AutoHotkey v2.0
+#Include WinHttpConstants.ahk
 
 /** Synchronous, stream-bounded metadata GET, executed in an owned child process. */
 class WinHttpMetadataWorker {
@@ -24,17 +25,19 @@ class WinHttpMetadataWorker {
         connection := 0
         try {
             ; Synchronous WinHTTP: no native callback ever enters the interpreter.
-            session := DllCall("winhttp\WinHttpOpen", "WStr", "PACS-Assistant-Update-Checker",
-                "UInt", 1, "Ptr", 0, "Ptr", 0, "UInt", 0, "Ptr") ; NO_PROXY
+            session := DllCall("winhttp\WinHttpOpen", "WStr", WinHttpConstants.userAgent,
+                "UInt", WinHttpConstants.WINHTTP_ACCESS_TYPE_NO_PROXY,
+                "Ptr", 0, "Ptr", 0, "UInt", 0, "Ptr")
             if !session
                 throw OSError(A_LastError, "WinHttpOpen")
             connection := DllCall("winhttp\WinHttpConnect", "Ptr", session,
-                "WStr", "api.github.com", "UShort", 443, "UInt", 0, "Ptr")
+                "WStr", "api.github.com", "UShort", WinHttpConstants.INTERNET_DEFAULT_HTTPS_PORT,
+                "UInt", 0, "Ptr")
             if !connection
                 throw OSError(A_LastError, "WinHttpConnect")
             this.request := DllCall("winhttp\WinHttpOpenRequest", "Ptr", connection,
                 "WStr", "GET", "WStr", match[1], "Ptr", 0, "Ptr", 0, "Ptr", 0,
-                "UInt", 0x00800000, "Ptr") ; WINHTTP_FLAG_SECURE
+                "UInt", WinHttpConstants.WINHTTP_FLAG_SECURE, "Ptr")
             if !this.request
                 throw OSError(A_LastError, "WinHttpOpenRequest")
             if !DllCall("winhttp\WinHttpSetTimeouts", "Ptr", this.request,
@@ -60,8 +63,8 @@ class WinHttpMetadataWorker {
     }
 
     ReadResponseHeaders() {
-        status := this.QueryHeaderNumber(19).value ; WINHTTP_QUERY_STATUS_CODE
-        length := this.QueryHeaderNumber(5, true) ; WINHTTP_QUERY_CONTENT_LENGTH
+        status := this.QueryHeaderNumber(WinHttpConstants.WINHTTP_QUERY_STATUS_CODE).value
+        length := this.QueryHeaderNumber(WinHttpConstants.WINHTTP_QUERY_CONTENT_LENGTH, true)
         return {status: status, hasContentLength: length.found, contentLength: length.value}
     }
 
@@ -69,10 +72,10 @@ class WinHttpMetadataWorker {
         value := 0
         size := 4
         found := DllCall("winhttp\WinHttpQueryHeaders", "Ptr", this.request,
-            "UInt", header | 0x20000000, "Ptr", 0, "UInt*", &value,
-            "UInt*", &size, "Ptr", 0) ; WINHTTP_QUERY_FLAG_NUMBER
+            "UInt", header | WinHttpConstants.WINHTTP_QUERY_FLAG_NUMBER, "Ptr", 0,
+            "UInt*", &value, "UInt*", &size, "Ptr", 0)
         errorCode := A_LastError
-        if (!found && !(optional && errorCode = 12150))
+        if (!found && !(optional && errorCode = WinHttpConstants.ERROR_WINHTTP_HEADER_NOT_FOUND))
             throw OSError(errorCode, "WinHttpQueryHeaders")
         return {found: !!found, value: value}
     }
@@ -114,20 +117,25 @@ class WinHttpMetadataWorker {
         return this.totalBytes
     }
 
-    static Main() {
+    ; Runs the request described by request.ini in the directory named by the only
+    ; argument, and writes response.bin (or error.txt) back into that directory.
+    static Main(args) {
+        directory := ""
         try {
-            config := A_ScriptDir "\request.ini"
-            maximumSize := Integer(IniRead(config, "Request", "MaximumSize"))
-            timeouts := []
-            for name in ["Resolve", "Connect", "Send", "Receive"] {
-                value := Integer(IniRead(config, "Timeouts", name))
-                if (value <= 0 || value > 60000)
-                    throw ValueError("Invalid metadata timeout")
-                timeouts.Push(value)
-            }
-            worker := this(maximumSize, timeouts)
+            if (args.Length != 1
+                || !RegExMatch(args[1], "i)\\pacs-metadata-[0-9a-f]{32}$")
+                || !DirExist(args[1]))
+                throw ValueError("The metadata worker needs its request directory")
+            directory := args[1]
+            config := directory "\request.ini"
+            worker := this(Integer(IniRead(config, "Request", "MaximumSize")), [
+                WinHttpConstants.resolveTimeoutMs,
+                WinHttpConstants.connectTimeoutMs,
+                WinHttpConstants.sendTimeoutMs,
+                WinHttpConstants.receiveTimeoutMs
+            ])
             response := worker.Get(IniRead(config, "Request", "Url"))
-            output := FileOpen(A_ScriptDir "\response.bin", "w", "UTF-8-RAW")
+            output := FileOpen(directory "\response.bin", "w", "UTF-8-RAW")
             try {
                 output.WriteUInt(response.status)
                 if (response.status = 200 && worker.totalBytes)
@@ -135,7 +143,10 @@ class WinHttpMetadataWorker {
             } finally output.Close()
             ExitApp(0)
         } catch as err {
-            try FileAppend(SubStr(err.Message, 1, 2048), A_ScriptDir "\error.txt", "UTF-8")
+            ; Without a request directory there is nowhere to report; the parent
+            ; then reports the exit code alone.
+            if (directory != "")
+                try FileAppend(SubStr(err.Message, 1, 2048), directory "\error.txt", "UTF-8")
             ExitApp(10)
         }
     }

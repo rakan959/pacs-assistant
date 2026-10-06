@@ -1,12 +1,15 @@
-﻿; = CONTENTS
+; = CONTENTS
 ;   + Preamble
-;   + WinHttpTextRequest class (worker files, polling, completion and cleanup)
+;   + WinHttpTextRequest class (request files, polling, completion and cleanup)
 
 #Requires AutoHotkey v2.0
-#Include WinHttpTransport.ahk
+#Include WinHttpConstants.ahk
 #Include WinHttpMetadataWorker.ahk
 #Include WinHttpWorkerProcess.ahk
 #Include AppLog.ahk
+
+; Compiled builds carry the worker as an embedded script (see WorkerArguments).
+;@Ahk2Exe-AddResource WinHttpMetadataWorkerMain.ahk, WINHTTPMETADATAWORKER
 
 /**
  * Asynchronous metadata request for the UI process. A separate owned interpreter
@@ -14,6 +17,10 @@
  * completion callbacks; WinHTTP worker threads never enter AutoHotkey callbacks.
  */
 class WinHttpTextRequest {
+    static workerResourceName := "WINHTTPMETADATAWORKER"
+    static requestFileNames := ["request.ini", "response.bin", "error.txt"]
+    static abandonedSweepDone := false
+
     __New(url, onComplete, onError, maximumSize) {
         if (Type(url) != "String"
             || !RegExMatch(url, "i)^https://api\.github\.com(/.*)$")
@@ -41,10 +48,10 @@ class WinHttpTextRequest {
         try {
             this.state := "starting"
             this.startedAt := this.NowMilliseconds()
-            this.CreateWorkerFiles()
+            this.CreateRequestFiles()
             this.exitCallback := ObjBindMethod(this, "Cancel")
             OnExit(this.exitCallback)
-            this.worker.Start(this.directory "\worker.ahk", this.directory)
+            this.worker.Start(this.WorkerArguments(), this.directory)
             this.state := "sending"
             this.timeoutTimer := ObjBindMethod(this, "Poll")
             SetTimer(this.timeoutTimer, 50)
@@ -55,7 +62,11 @@ class WinHttpTextRequest {
         }
     }
 
-    CreateWorkerFiles() {
+    CreateRequestFiles() {
+        if !WinHttpTextRequest.abandonedSweepDone {
+            WinHttpTextRequest.abandonedSweepDone := true
+            WinHttpTextRequest.SweepAbandonedDirectories(A_Temp)
+        }
         guid := Buffer(16)
         if DllCall("ole32\CoCreateGuid", "Ptr", guid, "Int")
             throw Error("Could not allocate a metadata request identity")
@@ -67,35 +78,44 @@ class WinHttpTextRequest {
             throw Error("Metadata request directory already exists")
         DirCreate(directory)
         this.directory := directory
-        destination := directory "\WinHttpMetadataWorker.ahk"
-        if A_IsCompiled
-            FileInstall("WinHttpMetadataWorker.ahk", destination)
-        else {
-            SplitPath(A_LineFile, , &sourceDirectory)
-            FileCopy(sourceDirectory "\WinHttpMetadataWorker.ahk", destination)
-        }
-        FileAppend(this.WorkerScript(), directory "\worker.ahk", "UTF-8")
         config := directory "\request.ini"
         IniWrite(this.url, config, "Request", "Url")
         IniWrite(this.maximumSize, config, "Request", "MaximumSize")
-        for entry in [
-            ["Resolve", WinHttpTransport.resolveTimeoutMs],
-            ["Connect", WinHttpTransport.connectTimeoutMs],
-            ["Send", WinHttpTransport.sendTimeoutMs],
-            ["Receive", WinHttpTransport.receiveTimeoutMs]
-        ]
-            IniWrite(entry[2], config, "Timeouts", entry[1])
     }
 
-    WorkerScript() {
-        return '#Requires AutoHotkey v2.0`n'
-            . '#SingleInstance Off`n'
-            . '#ErrorStdOut`n'
-            . '#Warn All, StdOut`n'
-            . 'FileEncoding "UTF-8"`n'
-            . 'OnError((*) => ExitApp(10))`n'
-            . '#Include WinHttpMetadataWorker.ahk`n'
-            . 'WinHttpMetadataWorker.Main()`n'
+    ; The worker is the program already running: a compiled build runs its embedded
+    ; worker script, so it never writes or executes a script file; a source run
+    ; starts the worker file beside this one. Its argument is the request directory.
+    WorkerArguments() {
+        if A_IsCompiled
+            script := "*" WinHttpTextRequest.workerResourceName
+        else {
+            SplitPath(A_LineFile, , &sourceDirectory)
+            script := '"' sourceDirectory '\WinHttpMetadataWorkerMain.ahk"'
+        }
+        return '/script /ErrorStdOut ' script ' "' this.directory '"'
+    }
+
+    ; A request directory outlives its request only when the process was killed
+    ; mid-check, so OnExit never ran, or its cleanup failed. Remove those once per
+    ; run; the age limit keeps the sweep clear of any live request.
+    static SweepAbandonedDirectories(root, minimumAgeMinutes := 60) {
+        loop files root "\pacs-metadata-*", "D" {
+            if (!RegExMatch(A_LoopFileName, "^pacs-metadata-[0-9a-f]{32}$")
+                || DateDiff(A_Now, A_LoopFileTimeModified, "Minutes") < minimumAgeMinutes)
+                continue
+            directory := A_LoopFileFullPath
+            try {
+                for name in this.requestFileNames {
+                    if FileExist(directory "\" name)
+                        FileDelete(directory "\" name)
+                }
+                DirDelete(directory)
+            } catch as err {
+                AppLog.Write("An abandoned metadata request directory could not be removed: "
+                    . ErrorText.Describe(err))
+            }
+        }
     }
 
     Poll() {
@@ -164,21 +184,25 @@ class WinHttpTextRequest {
             return
         ; A callback may immediately start another check. Reap this worker and
         ; release its timers/files before publishing completion to that caller.
-        cleanupError := 0
-        try this.worker.Close()
-        catch as err {
-            cleanupError := err
+        ; A failed reap keeps the exact handle, files and exit cleanup for a retry
+        ; at exit; it does not change the outcome, and a cancel never calls back.
+        reaped := false
+        try {
+            this.worker.Close()
+            reaped := true
+        } catch as err {
             AppLog.Write("Metadata worker cleanup failed: " ErrorText.Describe(err))
         }
-        if (this.exitCallback && !cleanupError) {
-            OnExit(this.exitCallback, 0)
-            this.exitCallback := 0
-        }
-        if !cleanupError
+        if reaped {
+            if this.exitCallback {
+                OnExit(this.exitCallback, 0)
+                this.exitCallback := 0
+            }
             this.CleanupFiles()
+        }
         this.state := "closed"
-        kind := cleanupError ? "error" : this.terminalKind
-        value := cleanupError ? Error("Metadata worker cleanup failed: " cleanupError.Message) : this.terminalValue
+        kind := this.terminalKind
+        value := this.terminalValue
         completeCallback := this.onComplete
         errorCallback := this.onError
         this.onComplete := 0
@@ -198,7 +222,7 @@ class WinHttpTextRequest {
         if (this.directory = "")
             return
         try {
-            for name in ["worker.ahk", "WinHttpMetadataWorker.ahk", "request.ini", "response.bin", "error.txt"] {
+            for name in WinHttpTextRequest.requestFileNames {
                 path := this.directory "\" name
                 if FileExist(path)
                     FileDelete(path)
@@ -228,16 +252,17 @@ class WinHttpTextRequest {
         return 0 ; OnExit must never veto the application's exit.
     }
 
+    ; The deadline covers starting the worker as well as its request.
     CheckTimeout() {
         if (this.state = "closing" || this.state = "closed")
             return
-        maxDuration := WinHttpTransport.resolveTimeoutMs
-            + WinHttpTransport.connectTimeoutMs
-            + WinHttpTransport.sendTimeoutMs
-            + WinHttpTransport.receiveTimeoutMs
+        maxDuration := WinHttpConstants.resolveTimeoutMs
+            + WinHttpConstants.connectTimeoutMs
+            + WinHttpConstants.sendTimeoutMs
+            + WinHttpConstants.receiveTimeoutMs
             + 2000
         if (this.NowMilliseconds() - this.startedAt > maxDuration)
-            this.Fail(Error("WinHTTP asynchronous request timed out"))
+            this.Fail(Error("The update metadata request timed out"))
     }
 
     StopTimeoutTimer() {
