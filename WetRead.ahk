@@ -65,6 +65,18 @@ class NativeStickyNoteWindowDriver {
         return ""
     }
 
+    ; A button's UIA identity, for the log. Only for buttons: their labels are UI
+    ; text, while a list cell or the note itself can hold patient data.
+    DescribeButton(element) {
+        name := ""
+        automationId := ""
+        className := ""
+        try name := element.Name
+        try automationId := element.AutomationId
+        try className := element.ClassName
+        return "Name='" name "' AutomationId='" automationId "' ClassName='" className "'"
+    }
+
     ; Process and window class, for the log; never the title, which can name a patient.
     Describe(hwnd) {
         if (hwnd <= 0)
@@ -259,6 +271,7 @@ class StickyNoteWriter {
     static savePath := "YY0/"     ; Pane > Pane > last Button
     static stepPauseMs := 100
     static pollMs := 100
+    static buttonsLogged := false
 
     __New(session) {
         this.driver := session.driver
@@ -315,7 +328,18 @@ class StickyNoteWriter {
             return this.TypedNotSaved("no-save", "The Sticky Notes Save button was not found")
         if !driver.Invoke(save)
             return this.TypedNotSaved("save-not-pressed", "The Sticky Notes Save button did not respond")
+        this.LogButtonIdentities(newNote, save)
         return {saved: true, typed: true, reason: "", message: ""}
+    }
+
+    ; The buttons are found by position, as v2.0b7 found them. Their names are
+    ; logged once per run so a later build can find them by name instead.
+    LogButtonIdentities(newNote, save) {
+        if StickyNoteWriter.buttonsLogged
+            return
+        StickyNoteWriter.buttonsLogged := true
+        AppLog.Write("Sticky Notes buttons: new note " this.driver.DescribeButton(newNote)
+            . "; save " this.driver.DescribeButton(save))
     }
 
     IsTextField(field) {

@@ -30,6 +30,7 @@ class WetReadTest {
         "FocusLossStopsBeforeTyping",
         "MissingTextFieldStopsBeforeTyping",
         "MissingOrUnresponsiveSaveLeavesTheNoteUnsaved",
+        "ButtonIdentitiesAreLoggedOncePerRun",
         "PreparedTextTypesEachLineBreakOnceAndKeepsSymbols",
         "UnsavedWetReadIsReportedWithoutItsText",
         "AttendingFailureMessagesReadAsOneSentence",
@@ -235,6 +236,23 @@ class WetReadTest {
         result := StickyNoteWriter(driver.Session()).Write("Normal study.")
         Assert.False(result.saved)
         Assert.Equal("save-not-pressed", result.reason)
+    }
+
+    ; The first saved note records the buttons' names for a later name-based lookup;
+    ; the note text never reaches the log.
+    ButtonIdentitiesAreLoggedOncePerRun() {
+        StickyNoteWriter.buttonsLogged := false
+        capturedLog := LogCapture()
+        try {
+            loop 2 {
+                driver := FakeWriterDriver()
+                Assert.True(StickyNoteWriter(driver.Session()).Write("Private note text").saved)
+            }
+            logged := capturedLog.Text()
+            entries := capturedLog.Count("Sticky Notes buttons: new note button YY0; save button YY0/")
+        } finally capturedLog.Restore()
+        Assert.Equal(1, entries, logged)
+        Assert.False(InStr(logged, "Private note text"), logged)
     }
 
     ; SendText types + ^ ! # { } as themselves; v2.0b7's Send read them as keys.
@@ -624,6 +642,7 @@ class FakeWriterDriver {
         return true
     }
 
+    DescribeButton(element) => "button " element.path
     MouseClick(element) => this.Record("mouse " element.path)
     SendKey(keys) => this.Record("key " keys)
     ControlClick(element) => this.Record("controlclick " element.path)

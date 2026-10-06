@@ -72,7 +72,8 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
   tells you to check it and click Save.
 - The clipboard is read once and never rewritten. Each line break is typed as one
   Enter, tabs become spaces, and trailing blank lines are dropped. The note text is
-  never written to `error.log`.
+  never written to `error.log`; the first saved note of a run logs the New and Save
+  buttons' names there, so a later build can find them by name instead of position.
 
 4) **Keybind scope**
 - Select a bind and click **Set Scope**.
