@@ -41,6 +41,7 @@ class WetReadTest {
         "WetReadStopsBeforeTypingAreLogged",
         "ThrowingStickyOpenerStillReportsAttendingOutcome",
         "ThrowingReportCaptureStillPastesAndReportsAttendingOutcome",
+        "ReportReadFailureIsNamedInTheAttendingNotice",
         "StickyNoteIsOpenedBeforePowerScribeRouting"
     ]
 
@@ -453,6 +454,24 @@ class WetReadTest {
         Assert.Equal(1, notifications.Length)
         Assert.Equal("Attending Not Assigned", notifications[1].title)
         Assert.True(InStr(notifications[1].text, "simulated report failure") > 0)
+    }
+
+    ReportReadFailureIsNamedInTheAttendingNotice() {
+        notifications := []
+        result := RunPinnedWetReadWorkflow(
+            "wet read",
+            (*) => {stickyHwnd: 200},
+            (*) => {text: "", session: 0, failure: "no PowerScribe reporting window was found"},
+            (*) => ThrowError("routing must not run without a report"),
+            (*) => true,
+            RecordNotification.Bind(notifications)
+        )
+        Assert.True(result)
+        Assert.Equal(1, notifications.Length)
+        Assert.Equal(
+            "Could not read the report from PowerScribe, so the attending was not assigned: no PowerScribe reporting window was found. Set it manually.",
+            notifications[1].text
+        )
     }
 
     StickyNoteIsOpenedBeforePowerScribeRouting() {

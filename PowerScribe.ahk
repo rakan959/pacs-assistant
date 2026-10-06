@@ -1,38 +1,96 @@
 #Requires AutoHotkey v2.0
 #Include UIA-v2/Lib/UIA.ahk
 #Include AppControl.ahk
+#Include AppLog.ahk
 #Include UIAValue.ahk
 
 class NativePowerScribeSessionDriver {
+    ; The reporting window as v2.0b7 found it: the first window of the PowerScribe
+    ; executable whose title contains "PowerScribe 360 | Reporting". Reading the
+    ; report does not activate it.
     Capture() {
-        try session := AppControl.ResolveUniqueExactWindow(
-            AppControl.PowerScribeWindowSpec()
-        )
+        try hwnds := AppControl.windowDriver.ListWindowsByExecutable(AppControl.powerScribeExecutable)
         catch
             return 0
-        if !session || !AppControl.ActivateWindow(session.target)
-            return 0
-        if !AppControl.ExactSessionIsUniqueAndLive(session)
-            return 0
-        return session
+        for hwnd in hwnds {
+            try {
+                title := AppControl.windowDriver.GetTitle(hwnd)
+                if (!InStr(title, AppControl.powerScribeReportingTitle, true)
+                    || StrCompare(AppControl.windowDriver.GetProcessName(hwnd), AppControl.powerScribeExecutable, false) != 0)
+                    continue
+                processId := AppControl.windowDriver.GetProcessId(hwnd)
+            } catch {
+                continue
+            }
+            if (processId > 0) {
+                return {
+                    hwnd: hwnd,
+                    target: "ahk_id " hwnd,
+                    processId: processId,
+                    title: title,
+                    exe: AppControl.powerScribeExecutable
+                }
+            }
+        }
+        return 0
     }
 
-    ; Still the one exact PowerScribe reporting window, under the same HWND and
-    ; process, that the session was captured from.
+    ; The captured window still exists, in the same process, with a reporting title.
     IsLive(session) {
-        return IsObject(session)
-            && HasProp(session, "hwnd")
-            && HasProp(session, "target")
-            && HasProp(session, "title")
-            && HasProp(session, "exe")
-            && session.target == "ahk_id " session.hwnd
-            && session.title == AppControl.powerScribeReportingTitle
-            && StrCompare(session.exe, AppControl.powerScribeExecutable, false) = 0
-            && AppControl.ExactSessionIsUniqueAndLive(session)
+        if (!IsObject(session) || !HasProp(session, "hwnd") || !HasProp(session, "processId"))
+            return false
+        try return AppControl.windowDriver.GetProcessId(session.hwnd) = session.processId
+            && InStr(AppControl.windowDriver.GetTitle(session.hwnd), AppControl.powerScribeReportingTitle, true) > 0
+        return false
     }
 
     Root(session) {
         return this.IsLive(session) ? AppControl.VerifiedUiaRoot(session) : 0
+    }
+}
+
+/**
+ * The native side of the attending picker: activation, keystrokes and the focused
+ * control. Tests replace it so the guard can be proven without typing.
+ */
+class NativeAttendingDriver {
+    Activate(session) {
+        return AppControl.windowDriver.Activate(session.target, AppControl.activationTimeoutSeconds)
+    }
+
+    SendKeys(keys) {
+        Send(keys)
+    }
+
+    TypeText(text) {
+        SendText(text)
+    }
+
+    ; {id, type, processId, element} of the focused control, or 0.
+    FocusedControl() {
+        try {
+            element := UIA.GetFocusedElement()
+            return {id: element.RuntimeId, type: element.Type, processId: element.ProcessId, element: element}
+        }
+        return 0
+    }
+
+    ; Control type, AutomationId and class for the log; never Name or value, which
+    ; can hold what was typed.
+    Describe(control) {
+        automationId := ""
+        className := ""
+        try automationId := control.element.AutomationId
+        try className := control.element.ClassName
+        return "Type=" control.type " AutomationId='" automationId "' ClassName='" className "'"
+    }
+
+    Now() {
+        return DllCall("GetTickCount64", "UInt64")
+    }
+
+    Pause(milliseconds) {
+        Sleep(milliseconds)
     }
 }
 
@@ -42,10 +100,11 @@ class NativePowerScribeSessionDriver {
  */
 class PowerScribe {
     static sessionDriver := NativePowerScribeSessionDriver()
+    static attendingDriver := NativeAttendingDriver()
+    static pickerTimeoutMs := 1500
+    static pickerLogged := false
 
-    ; Positional path to the report text. Brittle, so it is only a cross-check: it
-    ; must resolve to the same exact window and agree with the typed lookup, and it
-    ; is the report on its own only when that lookup finds nothing.
+    ; v2.0b7's path to the report text (Pane > Pane > Pane > Pane > Document).
     static reportPath := "YYYYV"
 
     ; Whether a piece of text reads like a report body rather than some other field
@@ -54,18 +113,16 @@ class PowerScribe {
     }
 
     /**
-     * Chooses report text only when every discovered report-shaped control agrees.
-     * A history/prior-report pane can expose another EXAMINATION block in the same
+     * Chooses report text only when every report-shaped candidate agrees. A
+     * history/prior-report pane can expose another EXAMINATION block in the same
      * window; choosing the first one could route the current study to its attending.
      */
-    static SelectReportText(candidates, fallbackText := "") {
+    static SelectReportText(candidates) {
         reports := []
         for text in candidates {
             if this.LooksLikeReport(text)
                 this.AddDistinctReport(reports, text)
         }
-        if this.LooksLikeReport(fallbackText)
-            this.AddDistinctReport(reports, fallbackText)
         return reports.Length = 1 ? reports[1] : ""
     }
 
@@ -93,62 +150,60 @@ class PowerScribe {
         )
     }
 
+    /**
+     * @returns {text, session}, plus {failure} naming why when text is blank
+     */
     static CaptureReport() {
         session := this.sessionDriver.Capture()
         if !session
-            return {text: "", session: 0}
-        return {text: this.ReadReportText(session), session: session}
+            return {text: "", session: 0, failure: "no PowerScribe reporting window was found"}
+        text := this.ReadReportText(session)
+        if (text = "")
+            return {text: "", session: session, failure: "the report text was not found in PowerScribe"}
+        return {text: text, session: session}
     }
 
+    /**
+     * The report at v2.0b7's path. When that is not report text, the one
+     * report-shaped text among the window's document and edit controls; controls
+     * that cannot be read, or belong to another window, are skipped.
+     */
     static ReadReportText(session) {
         root := this.sessionDriver.Root(session)
         if !root
             return ""
 
-        ; The report editor presents as a Document, but has been seen as a plain Edit.
-        candidates := []
-        for condition in [{Type: "Document"}, {Type: "Edit"}] {
-            try {
-                elements := root.FindElements(condition)
-            } catch {
-                return ""
-            }
-
-            for el in elements {
-                ; A returned candidate that cannot be fully identified/read makes
-                ; the current-report set unknowable; never route from the remainder.
-                try {
-                    if !this.InspectExpectedReportControl(root, el)
-                        return ""
-                    readResult := UIAValue.TryRead(el)
-                    if !readResult.supported
-                        return ""
-                    text := readResult.value
-                } catch {
-                    return ""
+        pathElement := 0
+        try pathElement := root.ElementFromPath(this.reportPath)
+        text := this.ReadReportControl(root, pathElement)
+        if (text = "") {
+            ; The report editor presents as a Document, but has been seen as a plain Edit.
+            candidates := []
+            for condition in [{Type: "Document"}, {Type: "Edit"}] {
+                elements := []
+                try elements := root.FindElements(condition)
+                for element in elements {
+                    if ((candidate := this.ReadReportControl(root, element)) != "")
+                        candidates.Push(candidate)
                 }
-                if (text = "")
-                    continue
-                candidates.Push(text)
             }
+            text := this.SelectReportText(candidates)
         }
 
-        ; A positional result is another candidate, never an override. It must resolve
-        ; to the same exact PowerScribe window and agree with the unique typed report.
-        fallbackText := ""
-        try {
-            fallbackElement := root.ElementFromPath(this.reportPath)
-            if this.IsExpectedReportControl(root, fallbackElement) {
-                fallbackResult := UIAValue.TryRead(fallbackElement)
-                if !fallbackResult.supported
-                    return ""
-                fallbackText := fallbackResult.value
-            }
-        }
-
+        ; A report read while the window closed or changed belongs to no session.
         if !this.sessionDriver.IsLive(session)
             return ""
-        return this.SelectReportText(candidates, fallbackText)
+        return text
+    }
+
+    ; The report text of one document or edit control of this window, or "".
+    static ReadReportControl(root, control) {
+        if !this.IsExpectedReportControl(root, control)
+            return ""
+        try result := UIAValue.TryRead(control)
+        catch
+            return ""
+        return result.supported && this.LooksLikeReport(result.value) ? result.value : ""
     }
 
     static InspectExpectedReportControl(root, control) {
@@ -161,11 +216,54 @@ class PowerScribe {
             && (control.Type = UIA.Type.Document || control.Type = UIA.Type.Edit)
     }
 
-    static SetAttending(*) {
-        ; A live PowerScribe capture has not established stable semantic identities
-        ; for both the attending picker and its confirmation action. Until it does,
-        ; routing remains read-only and callers report that assignment is manual.
-        return false
+    /**
+     * Assigns the attending by v2.0b7's keystrokes: Alt+T, A opens the attending
+     * picker; then the name, Tab, Space, Tab, Enter. One guard v2.0b7 lacked:
+     * nothing is typed until focus has moved, within PowerScribe, to a control that
+     * is not a document, because keys that reach the report editor would change
+     * the report.
+     * @returns true once the keys were sent; throws a plain Error naming why not
+     */
+    static SetAttending(attending, session := 0, *) {
+        driver := this.attendingDriver
+        if !session
+            session := this.sessionDriver.Capture()
+        if !session
+            throw Error("no PowerScribe reporting window was found")
+        if !driver.Activate(session)
+            throw Error("PowerScribe could not be brought to the front")
+        before := driver.FocusedControl()
+        if !before
+            throw Error("the focused PowerScribe control could not be read, so nothing was typed")
+        driver.SendKeys("{Alt down}ta{Alt up}")
+        picker := this.WaitForPickerFocus(session, before)
+        if !picker
+            throw Error("the attending picker did not take focus after Alt+T, A, so nothing was typed")
+        driver.Pause(100)
+        driver.TypeText(attending)
+        driver.Pause(100)
+        driver.SendKeys("{Tab}{Space}{Tab}{Enter}")
+        if !this.pickerLogged {
+            this.pickerLogged := true
+            AppLog.Write("PowerScribe attending picker focus: " driver.Describe(picker))
+        }
+        return true
+    }
+
+    static WaitForPickerFocus(session, before) {
+        driver := this.attendingDriver
+        deadline := driver.Now() + this.pickerTimeoutMs
+        loop {
+            focus := driver.FocusedControl()
+            if (focus
+                && focus.processId = session.processId
+                && focus.type != UIA.Type.Document
+                && !(focus.id == before.id))
+                return focus
+            if (driver.Now() >= deadline)
+                return 0
+            driver.Pause(50)
+        }
     }
 }
 

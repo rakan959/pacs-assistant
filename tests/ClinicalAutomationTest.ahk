@@ -12,8 +12,10 @@
 
 class ClinicalAutomationTest {
     static tests := [
-        "ForeignIdentityCandidateMakesTheReportUnreadable",
-        "FallbackThatIsNotAReportControlIsIgnored",
+        "ForeignCandidatesAreSkipped",
+        "PathElementThatIsNotATextControlIsIgnored",
+        "ReportPathIsReadBeforeTheScan",
+        "ReportCaptureNamesWhyNothingWasRead",
         "ActivationFailureDoesNotSend",
         "ActivationCanSucceedButFocusCheckStopsSend",
         "TargetedSendActivatesBeforeSending",
@@ -27,18 +29,20 @@ class ClinicalAutomationTest {
         "WindowToggleRevalidatesUniqueSessionBeforeMutation",
         "WindowToggleMinimizesAVisibleWindowAndRestoresAMinimizedOne",
         "PowerScribeToggleCommandTargetsTheExactReportingWindow",
-        "NativePowerScribeCaptureRejectsImpostorAndDuplicate",
-        "NativePowerScribeLivenessRequiresExactIdentity",
+        "NativePowerScribeCaptureFindsTheReportingWindow",
+        "NativePowerScribeLivenessRequiresTheSameWindowAndProcess",
         "TargetedCustomCommandUsesConfirmedTarget",
         "ClinicalCommandGateRejectsNestedBuiltIn",
         "ShutdownGateRejectsNewClinicalCommand",
         "ClinicalCommandDialogsWaitForTheLeaseRelease",
         "NoticesShowAtOnceOutsideACommandAndAfterAFailedCommand",
-        "UnavailableAttendingAssignmentHasNoWindowSideEffects",
+        "AttendingIsTypedOnlyAfterThePickerTakesFocus",
+        "AttendingPickerThatNeverOpensGetsNothingTyped",
+        "AttendingNeedsPowerScribeInFrontAndAReadableFocus",
         "AttendingRoutingUsesInjectedDependencies",
         "BlankAttendingSkipsPowerScribeWrite",
         "UnknownExaminationRequiresManualAssignment",
-        "UnavailableAttendingAssignmentIsReported",
+        "CheckAttendingTypesTheProfileAttending",
         "NativeLookupErrorsAreNotAbsence",
         "WindowCloseUncertaintyCancelsStop",
         "WindowCloseCarriesAndRevalidatesCapturedSession",
@@ -80,13 +84,13 @@ class ClinicalAutomationTest {
         "PacsLauncherAcceptsInstalledShortcut",
         "ReportSelectionUsesOnlyReportShapedText",
         "ReportSelectionRejectsMultipleReportCandidates",
-        "ReportSelectionRejectsUnrelatedFallbackText",
+        "ReportSelectionNeedsReportShapedText",
         "ReportControlIdentityRequiresEachProperty",
         "ReportCaptureReadsTheOneCurrentReport",
         "ReportReadFromAWindowThatClosedIsDiscarded",
         "ReportCaptureFailsClosedOnEnumerationError",
-        "ReportCaptureFailsClosedOnUnreadableSibling",
-        "ReportCaptureFailsClosedOnUnsupportedSibling",
+        "ReportCaptureSkipsAnUnreadableSibling",
+        "ReportCaptureSkipsAnUnsupportedSibling",
         "ExactWindowStatusDistinguishesAbsenceAmbiguityAndFailure"
     ]
 
@@ -95,19 +99,52 @@ class ClinicalAutomationTest {
         "PowerScribeSession"
     ]
 
-    ForeignIdentityCandidateMakesTheReportUnreadable() {
+    ; A control of another process is not a candidate; it neither counts as a second
+    ; report nor stops the read.
+    ForeignCandidatesAreSkipped() {
         session := {hwnd: 803, target: "ahk_id 803", processId: 42}
-        valid := FakePowerScribeReportElement(803, 42, "EXAMINATION: CT CHEST`nFINDINGS: Current report.")
+        report := "EXAMINATION: CT CHEST`nFINDINGS: Current report."
+        valid := FakePowerScribeReportElement(803, 42, report)
         foreign := FakePowerScribeReportElement(803, 43, "EXAMINATION: CT HEAD`nFINDINGS: Other process.")
         PowerScribe.sessionDriver := FixedReportRootSessionDriver(session, UncertainReportRoot(803, 42, [valid, foreign]))
-        Assert.Equal("", PowerScribe.ReadReportText(session))
+        Assert.Equal(report, PowerScribe.ReadReportText(session))
     }
-    FallbackThatIsNotAReportControlIsIgnored() {
+
+    PathElementThatIsNotATextControlIsIgnored() {
         session := {hwnd: 804, target: "ahk_id 804", processId: 42}
         text := FakePowerScribeReportElement(804, 42, "EXAMINATION: CT HEAD`nFINDINGS: Prior report pane.")
         text.Type := UIA.Type.Text
         PowerScribe.sessionDriver := FixedReportRootSessionDriver(session, PathOnlyReportRoot(804, 42, text))
         Assert.Equal("", PowerScribe.ReadReportText(session))
+    }
+
+    ; v2.0b7 read the report at YYYYV. A prior-report pane elsewhere in the window
+    ; does not make that read ambiguous; it matters only when the path finds nothing.
+    ReportPathIsReadBeforeTheScan() {
+        session := {hwnd: 805, target: "ahk_id 805", processId: 42}
+        current := "EXAMINATION: CT CHEST`nFINDINGS: Current report."
+        prior := FakePowerScribeReportElement(805, 42, "EXAMINATION: CT CHEST`nFINDINGS: Prior report.")
+        pathElement := FakePowerScribeReportElement(805, 42, current)
+        PowerScribe.sessionDriver := FixedReportRootSessionDriver(
+            session, PathAndControlsReportRoot(805, 42, pathElement, [pathElement, prior]))
+        Assert.Equal(current, PowerScribe.ReadReportText(session))
+
+        blank := FakePowerScribeReportElement(805, 42, "")
+        PowerScribe.sessionDriver := FixedReportRootSessionDriver(
+            session, PathAndControlsReportRoot(805, 42, blank, [pathElement, prior]))
+        Assert.Equal("", PowerScribe.ReadReportText(session))
+    }
+
+    ReportCaptureNamesWhyNothingWasRead() {
+        PowerScribe.sessionDriver := {Capture: (*) => 0}
+        capture := PowerScribe.CaptureReport()
+        Assert.Equal("", capture.text)
+        Assert.Equal("no PowerScribe reporting window was found", capture.failure)
+
+        PowerScribe.sessionDriver := FakePowerScribeSessionDriver("Patient search")
+        capture := PowerScribe.CaptureReport()
+        Assert.Equal("", capture.text)
+        Assert.Equal("the report text was not found in PowerScribe", capture.failure)
     }
 
     Setup() {
@@ -121,6 +158,7 @@ class ClinicalAutomationTest {
         this.originalBusyNotifier := PACSCommands.busyNotifier
         this.originalCommandAvailabilityProbe := PACSCommands.commandAvailabilityProbe
         this.originalNoticePresenter := ClinicalNotices.presenter
+        this.originalAttendingDriver := PowerScribe.attendingDriver
         this.busyNotifications := []
         PowerScribe.sessionDriver := FakePowerScribeSessionDriver()
         ProfileManager.profiles := Map()
@@ -374,37 +412,32 @@ class ClinicalAutomationTest {
         Assert.Equal(0, impostor.activateCalls)
     }
 
-    NativePowerScribeCaptureRejectsImpostorAndDuplicate() {
-        exact := {
-            hwnd: 601,
-            title: AppControl.powerScribeReportingTitle,
-            exe: AppControl.powerScribeExecutable,
-            pid: 77
-        }
-        suffix := {
-            hwnd: 602,
-            title: AppControl.powerScribeReportingTitle " Extra",
-            exe: AppControl.powerScribeExecutable,
-            pid: 77
-        }
+    ; v2.0b7 found the window by a title containing "PowerScribe 360 | Reporting",
+    ; taking the first in Z-order, and read it without activating it.
+    NativePowerScribeCaptureFindsTheReportingWindow() {
+        login := {hwnd: 600, title: "PowerScribe 360 | Login", exe: AppControl.powerScribeExecutable, pid: 77}
+        suffixed := {hwnd: 602, title: AppControl.powerScribeReportingTitle " - Dr. A", exe: AppControl.powerScribeExecutable, pid: 77}
+        exact := {hwnd: 601, title: AppControl.powerScribeReportingTitle, exe: AppControl.powerScribeExecutable, pid: 77}
         nativeDriver := NativePowerScribeSessionDriver()
 
-        AppControl.windowDriver := FakeExactWindowDriver([exact, suffix])
-        Assert.Equal(601, nativeDriver.Capture().hwnd)
+        windowDriver := FakeExactWindowDriver([login, suffixed, exact])
+        AppControl.windowDriver := windowDriver
+        session := nativeDriver.Capture()
+        Assert.Equal(602, session.hwnd)
+        Assert.Equal("ahk_id 602", session.target)
+        Assert.Equal(77, session.processId)
+        Assert.Equal(0, windowDriver.calls.Length, "reading the report does not activate PowerScribe")
 
-        AppControl.windowDriver := FakeExactWindowDriver([suffix])
+        AppControl.windowDriver := FakeExactWindowDriver([login])
         Assert.Equal(0, nativeDriver.Capture())
 
-        AppControl.windowDriver := FakeExactWindowDriver([exact, {
-            hwnd: 603,
-            title: AppControl.powerScribeReportingTitle,
-            exe: AppControl.powerScribeExecutable,
-            pid: 78
-        }])
+        AppControl.windowDriver := FakeExactWindowDriver([
+            {hwnd: 603, title: AppControl.powerScribeReportingTitle, exe: "notepad.exe", pid: 9}
+        ])
         Assert.Equal(0, nativeDriver.Capture())
     }
 
-    NativePowerScribeLivenessRequiresExactIdentity() {
+    NativePowerScribeLivenessRequiresTheSameWindowAndProcess() {
         nativeDriver := NativePowerScribeSessionDriver()
         expected := {
             hwnd: 601,
@@ -416,34 +449,17 @@ class ClinicalAutomationTest {
         session := nativeDriver.Capture()
         Assert.True(nativeDriver.IsLive(session))
 
-        ; The same HWND under another title, executable or process is not this session.
+        ; The same HWND in another process, or no longer a reporting window, is not
+        ; this session; neither is a window that has closed.
         for changed in [
-            {hwnd: 601, title: expected.title " Extra", exe: expected.exe, pid: 77},
-            {hwnd: 601, title: expected.title, exe: "not-powerscribe.exe", pid: 77},
-            {hwnd: 601, title: expected.title, exe: expected.exe, pid: 78}
+            [{hwnd: 601, title: expected.title, exe: expected.exe, pid: 78}],
+            [{hwnd: 601, title: "PowerScribe 360 | Login", exe: expected.exe, pid: 77}],
+            []
         ] {
-            AppControl.windowDriver := FakeExactWindowDriver([changed])
-            Assert.False(nativeDriver.IsLive(session), changed.title " / " changed.exe " / " changed.pid)
+            AppControl.windowDriver := FakeExactWindowDriver(changed)
+            Assert.False(nativeDriver.IsLive(session), A_Index)
         }
-
-        ; A second exact reporting window makes the target ambiguous.
-        AppControl.windowDriver := FakeExactWindowDriver([expected, {
-            hwnd: 602,
-            title: expected.title,
-            exe: expected.exe,
-            pid: 79
-        }])
-        Assert.False(nativeDriver.IsLive(session))
-
-        ; A session captured for another window is never PowerScribe.
-        AppControl.windowDriver := FakeExactWindowDriver([{hwnd: 603, title: "Other", exe: expected.exe, pid: 77}])
-        Assert.False(nativeDriver.IsLive({
-            hwnd: 603,
-            target: "ahk_id 603",
-            processId: 77,
-            title: "Other",
-            exe: expected.exe
-        }))
+        Assert.False(nativeDriver.IsLive(0))
     }
 
     TargetedCustomCommandUsesConfirmedTarget() {
@@ -553,15 +569,56 @@ class ClinicalAutomationTest {
         Assert.False(ClinicalNotices.deferring)
     }
 
-    UnavailableAttendingAssignmentHasNoWindowSideEffects() {
-        windowDriver := FakeWindowDriver()
-        sessionDriver := FakePowerScribeSessionDriver()
-        PowerScribe.sessionDriver := sessionDriver
-        AppControl.windowDriver := windowDriver
+    ; v2.0b7's keystrokes, with the name typed only once focus has left the report
+    ; editor for another PowerScribe control.
+    AttendingIsTypedOnlyAfterThePickerTakesFocus() {
+        driver := FakeAttendingDriver([
+            FakeFocus("report", UIA.Type.Document, 77),
+            FakeFocus("report", UIA.Type.Document, 77),
+            FakeFocus("picker", UIA.Type.Edit, 77)
+        ])
+        PowerScribe.attendingDriver := driver
 
-        Assert.False(PowerScribe.SetAttending("Smith"))
-        Assert.Equal(0, sessionDriver.captureCalls)
-        Assert.Equal(0, windowDriver.calls.Length)
+        Assert.True(PowerScribe.SetAttending("Smith", this.PowerScribeSession()))
+        Assert.Equal(
+            "activate 601|keys {Alt down}ta{Alt up}|text Smith|keys {Tab}{Space}{Tab}{Enter}",
+            driver.Log()
+        )
+    }
+
+    ; If Alt+T, A opened nothing, the name and Enter would land in the report.
+    AttendingPickerThatNeverOpensGetsNothingTyped() {
+        for stuckFocus in [
+            [FakeFocus("report", UIA.Type.Document, 77)],
+            [FakeFocus("field", UIA.Type.Edit, 77)],
+            [FakeFocus("report", UIA.Type.Document, 77), FakeFocus("other-report", UIA.Type.Document, 77)],
+            [FakeFocus("report", UIA.Type.Document, 77), FakeFocus("elsewhere", UIA.Type.Edit, 99)]
+        ] {
+            driver := FakeAttendingDriver(stuckFocus)
+            PowerScribe.attendingDriver := driver
+            Assert.Throws(
+                () => PowerScribe.SetAttending("Smith", this.PowerScribeSession()),
+                "did not take focus after Alt+T, A, so nothing was typed"
+            )
+            Assert.Equal("activate 601|keys {Alt down}ta{Alt up}", driver.Log(), A_Index)
+            Assert.True(driver.clock >= PowerScribe.pickerTimeoutMs)
+        }
+    }
+
+    AttendingNeedsPowerScribeInFrontAndAReadableFocus() {
+        driver := FakeAttendingDriver([FakeFocus("report", UIA.Type.Document, 77)])
+        driver.activateOk := false
+        PowerScribe.attendingDriver := driver
+        Assert.Throws(() => PowerScribe.SetAttending("Smith", this.PowerScribeSession()), "could not be brought to the front")
+        Assert.Equal("activate 601", driver.Log())
+
+        driver := FakeAttendingDriver([0])
+        PowerScribe.attendingDriver := driver
+        Assert.Throws(() => PowerScribe.SetAttending("Smith", this.PowerScribeSession()), "could not be read, so nothing was typed")
+        Assert.Equal("activate 601", driver.Log())
+
+        PowerScribe.sessionDriver := {Capture: (*) => 0}
+        Assert.Throws(() => PowerScribe.SetAttending("Smith"), "no PowerScribe reporting window was found")
     }
 
     AttendingRoutingUsesInjectedDependencies() {
@@ -606,16 +663,26 @@ class ClinicalAutomationTest {
         Assert.Equal(0, writes)
     }
 
-    UnavailableAttendingAssignmentIsReported() {
+    ; A configured attending is typed as configured; an unconfigured modality types
+    ; its own name, as v2.0b7 did for every study.
+    CheckAttendingTypesTheProfileAttending() {
         profile := ProfileManager.NewProfile()
         profile.modalityAttendings["Chest"] := "Smith"
         ProfileManager.profiles["Test"] := profile
         ProfileManager.currentProfile := "Test"
 
-        Assert.Throws(
-            () => CheckAttending("EXAMINATION: CT CHEST"),
-            "attending 'Smith' cannot be selected in PowerScribe automatically"
-        )
+        for testCase in [
+            {report: "EXAMINATION: CT CHEST", modality: "Chest", typed: "text Smith"},
+            {report: "EXAMINATION: MRI BRAIN", modality: "Neuro", typed: "text Neuro"}
+        ] {
+            driver := FakeAttendingDriver([
+                FakeFocus("report", UIA.Type.Document, 77),
+                FakeFocus("picker", UIA.Type.Edit, 77)
+            ])
+            PowerScribe.attendingDriver := driver
+            Assert.Equal(testCase.modality, CheckAttending(testCase.report, this.PowerScribeSession()))
+            Assert.True(InStr(driver.Log(), "|" testCase.typed "|"), driver.Log())
+        }
     }
 
     NativeLookupErrorsAreNotAbsence() {
@@ -1292,7 +1359,7 @@ class ClinicalAutomationTest {
             report
         ]
 
-        Assert.Equal(report, PowerScribe.SelectReportText(candidates, "unrelated fallback"))
+        Assert.Equal(report, PowerScribe.SelectReportText(candidates))
     }
 
     ReportSelectionRejectsMultipleReportCandidates() {
@@ -1303,22 +1370,14 @@ class ClinicalAutomationTest {
                 "EXAMINATION: CT CHEST`nFINDINGS: Prior report."
             ])
         )
-        Assert.Equal(
-            "",
-            PowerScribe.SelectReportText(
-                ["EXAMINATION: MRI BRAIN"],
-                "EXAMINATION: CT CHEST"
-            )
-        )
     }
 
-    ReportSelectionRejectsUnrelatedFallbackText() {
-        Assert.Equal(
-            "",
-            PowerScribe.SelectReportText(["Search", "Patient information"], "long unrelated fallback text")
-        )
-        fallbackReport := "EXAMINATION: XR KNEE`nFINDINGS: No fracture."
-        Assert.Equal(fallbackReport, PowerScribe.SelectReportText([], fallbackReport))
+    ReportSelectionNeedsReportShapedText() {
+        Assert.Equal("", PowerScribe.SelectReportText(["Search", "Patient information"]))
+        Assert.Equal("", PowerScribe.SelectReportText([]))
+        ; The same report seen through two controls is one report.
+        report := "EXAMINATION: XR KNEE`nFINDINGS: No fracture."
+        Assert.Equal(report, PowerScribe.SelectReportText([report, " " report " "]))
     }
 
     ; The report control must be a document or edit control in the root's process
@@ -1373,40 +1432,37 @@ class ClinicalAutomationTest {
         Assert.Equal("", PowerScribe.ReadReportText(session))
     }
 
-    ReportCaptureFailsClosedOnUnreadableSibling() {
+    ; PowerScribe has other document and edit controls; one that cannot be read is
+    ; not the report and does not stop the read.
+    ReportCaptureSkipsAnUnreadableSibling() {
         session := {hwnd: 801, target: "ahk_id 801", processId: 42}
-        valid := FakePowerScribeReportElement(
-            801,
-            42,
-            "EXAMINATION: CT CHEST`nFINDINGS: Current report."
-        )
+        report := "EXAMINATION: CT CHEST`nFINDINGS: Current report."
+        valid := FakePowerScribeReportElement(801, 42, report)
         PowerScribe.sessionDriver := FixedReportRootSessionDriver(
             session,
-            UncertainReportRoot(801, 42, [valid, {}])
+            UncertainReportRoot(801, 42, [{}, valid])
         )
 
-        Assert.Equal("", PowerScribe.ReadReportText(session))
+        Assert.Equal(report, PowerScribe.ReadReportText(session))
     }
 
-    ReportCaptureFailsClosedOnUnsupportedSibling() {
+    ReportCaptureSkipsAnUnsupportedSibling() {
         session := {hwnd: 802, target: "ahk_id 802", processId: 42}
-        valid := FakePowerScribeReportElement(
-            802,
-            42,
-            "EXAMINATION: CT CHEST`nFINDINGS: Current report."
-        )
+        report := "EXAMINATION: CT CHEST`nFINDINGS: Current report."
+        valid := FakePowerScribeReportElement(802, 42, report)
         PowerScribe.sessionDriver := FixedReportRootSessionDriver(
             session,
-            UncertainReportRoot(802, 42, [valid, UnsupportedPowerScribeReportElement(802, 42)])
+            UncertainReportRoot(802, 42, [UnsupportedPowerScribeReportElement(802, 42), valid])
         )
 
-        Assert.Equal("", PowerScribe.ReadReportText(session))
+        Assert.Equal(report, PowerScribe.ReadReportText(session))
     }
 
     Teardown() {
         AppControl.windowDriver := this.originalDriver
         AppControl.lifecycleDriver := this.originalLifecycleDriver
         PowerScribe.sessionDriver := this.originalPowerScribeSessionDriver
+        PowerScribe.attendingDriver := this.originalAttendingDriver
         ProfileManager.profiles := this.originalProfiles
         ProfileManager.currentProfile := this.originalCurrentProfile
         PACSCommands.clinicalCommandActive := this.originalClinicalCommandActive
@@ -2009,5 +2065,58 @@ class PathOnlyReportRoot {
     }
     ElementFromPath(*) {
         return this.pathElement
+    }
+}
+
+class PathAndControlsReportRoot extends PathOnlyReportRoot {
+    __New(hwnd, processId, pathElement, controls) {
+        super.__New(hwnd, processId, pathElement)
+        this.controls := controls
+    }
+    FindElements(condition) {
+        return condition.Type = "Document" ? this.controls : []
+    }
+}
+
+FakeFocus(id, type, processId) {
+    return {id: id, type: type, processId: processId}
+}
+
+; Attending-picker double. focusSequence holds successive FocusedControl results:
+; the first is read before Alt+T, A; the last repeats.
+class FakeAttendingDriver {
+    __New(focusSequence) {
+        this.focusSequence := focusSequence
+        this.focusReads := 0
+        this.activateOk := true
+        this.actions := []
+        this.clock := 0
+    }
+
+    Activate(session) {
+        this.actions.Push("activate " session.hwnd)
+        return this.activateOk
+    }
+
+    SendKeys(keys) => this.actions.Push("keys " keys)
+    TypeText(text) => this.actions.Push("text " text)
+
+    FocusedControl() {
+        this.focusReads++
+        return this.focusSequence[Min(this.focusReads, this.focusSequence.Length)]
+    }
+
+    Describe(control) => "Type=" control.type
+    Now() => this.clock
+
+    Pause(milliseconds) {
+        this.clock += milliseconds
+    }
+
+    Log() {
+        text := ""
+        for action in this.actions
+            text .= (text = "" ? "" : "|") action
+        return text
     }
 }

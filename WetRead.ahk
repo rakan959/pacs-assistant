@@ -386,9 +386,8 @@ class StickyNoteWriter {
 
 /**
  * Routes the report to the attending the profile assigns to its modality. A blank
- * assignment leaves PowerScribe's default unchanged; any other assignment throws
- * until PowerScribe.SetAttending can drive the attending picker safely, so the
- * caller reports the attending as a manual step.
+ * assignment leaves PowerScribe's default unchanged; when PowerScribe.SetAttending
+ * cannot assign one, the error says why and the caller reports a manual step.
  */
 CheckAttending(reportText, powerScribeSession := 0) {
     return AttendingRouting.Route(
@@ -458,8 +457,11 @@ RunPinnedWetReadWorkflow(
                 || !HasProp(reportCapture, "session")
                 || Type(reportCapture.text) != "String") {
                 attendingError := Error("PowerScribe returned an invalid report capture")
-            } else
+            } else {
                 haystack := reportCapture.text
+                if (haystack = "" && HasProp(reportCapture, "failure"))
+                    attendingError := Error(reportCapture.failure)
+            }
         }
 
         if (haystack != "") {
