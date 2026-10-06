@@ -12,10 +12,13 @@
 #Include PACSCommands.ahk
 #Include UpdateChecker.ahk
 #Include Settings.ahk
+#Include UITheme.ahk
 
 class KeybindGUI {
     gui := ""
     profileSelectorGui := 0
+    ; Controls of the live main window that RefreshMainView updates; see BuildMainView.
+    mainView := 0
     static isListening := false
     static activeInputHook := 0
     static captureRuntimeProfile := 0
@@ -34,6 +37,11 @@ class KeybindGUI {
         ["<+", "LShift"], [">+", "RShift"], ["+", "Shift"],
         ["<#", "LWin"], [">#", "RWin"], ["#", "Win"]
     ]
+    ; Main window content width and keybind-list height at first show, in logical
+    ; units. The window can be resized larger; the list takes the extra space.
+    static mainContentWidth := 640
+    static mainListHeight := 280
+    static mainMinListHeight := 120
 
     __New() {
         ProfileManager.LoadProfiles()
@@ -50,57 +58,283 @@ class KeybindGUI {
         }
     }
 
+    /**
+     * Builds and shows the main window for the current profile: its keybind list,
+     * the commands that edit it, and a status bar that says whether there are
+     * unsaved changes and whether keybinds are suspended.
+     */
     CreateMainGUI(applyBinds := true) {
-        ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
-        this.gui := Gui(, "PACS Assistant - " ProfileManager.currentProfile)
-        this.gui.Add("Text",, "Current Profile: " ProfileManager.currentProfile)
-
-        ; Add rename button next to profile name
-        this.gui.Add("Button", "x+10 yp-4 w60", "Rename").OnEvent("Click", (*) => this.PromptRenameProfile(ProfileManager.currentProfile))
-
-        this.gui.Add("Text", "xm y+20", "Active Keybinds:")
-        y := 70
-
-        ; Keybind list: function, its key, and the window it is restricted to
-        lv := this.gui.Add("ListView", "xm y" y " w520 h200", ["Function", "Keybind", "Active In"])
-
-        currentProfile := ProfileManager.profiles[ProfileManager.currentProfile]
-        for funcName, bind in currentProfile.binds {
-            lv.Add(, funcName, this.PrettifyHotkey(bind), this.ScopeLabel(funcName))
-        }
-
-        this.ResizeColumns(lv)
-
-        ; Add buttons below ListView
-        y += 210
-        this.gui.Add("Button", "xm y" y " w120", "Add Function").OnEvent("Click", (*) => this.ShowAddFunctionDialog(lv))
-        this.gui.Add("Button", "x+10 yp w120", "Remove Function").OnEvent("Click", (*) => this.RemoveFunction(lv))
-        this.gui.Add("Button", "x+10 yp w120", "Change Keybind").OnEvent("Click", (*) => this.ChangeSelectedKeybind(lv))
-        this.gui.Add("Button", "x+10 yp w120", "Set Scope").OnEvent("Click", (*) => this.ShowScopeDialog(lv))
-
-        ; Add profile management buttons
-        y += 30
-        this.gui.Add("Button", "xm y" y, "Save").OnEvent("Click", (*) => this.SaveCurrentProfile())
-        this.gui.Add("Button", "x+10", "Switch Profile").OnEvent("Click", (*) => this.OpenProfileSelector())
-
-        ; Add Check for Updates button
-        this.gui.Add("Button", "x+10", "Check for Updates").OnEvent("Click", (*) => UpdateChecker.ShowUpdateDialog())
-
-        ; Add Settings button
-        this.gui.Add("Button", "x+10", "Settings").OnEvent("Click", (*) => Settings.ShowDialog())
-
-        ; Add modality attending assignments
-        y += 30
-        this.gui.Add("Button", "xm y" y " w160", "Modality Attendings").OnEvent("Click", (*) => this.ShowModalityAttendingsDialog())
+        profileName := ProfileManager.currentProfile
+        this.gui := UITheme.NewWindow("PACS Assistant - " profileName, "+Resize")
+        view := this.BuildMainView(this.gui, profileName)
+        this.mainView := view
 
         ; Close hides the window after any callback that does not return true. Every
         ; successful path destroys the window or exits, so a refused close must keep
         ; it visible rather than strand the app with no window.
         this.gui.OnEvent("Close", (*) => (this.RequestExit(), true))
-        this.gui.Show()
+        this.gui.OnEvent("Size", (window, minMax, *) => minMax = -1 ? 0 : this.LayoutMainView(view))
+
+        width := KeybindGUI.mainContentWidth + 2 * UITheme.margin
+        height := this.MainViewHeight(view, KeybindGUI.FitListHeight(view))
+        this.LayoutMainView(view, width, height)
+        this.RefreshMainView()
+        this.gui.Show("w" width " h" height)
+        ; Start in the list, so the arrow keys, F2 and Delete work at once.
+        view.list.Focus()
+        ; MinSize is in physical pixels and the layout is in logical units.
+        this.gui.Opt("+MinSize" Round(width * A_ScreenDPI / 96) "x"
+            Round(this.MainViewHeight(view, KeybindGUI.mainMinListHeight) * A_ScreenDPI / 96))
+        A_IconTip := "PACS Assistant - " profileName
 
         if applyBinds
             this.ApplyBinds()
+    }
+
+    BuildMainView(mainGui, profileName) {
+        view := {gui: mainGui, profileName: profileName}
+        mainGui.MenuBar := this.BuildMainMenu(view)
+
+        ; Header: which profile this is, a one-line summary, and the way to another.
+        view.heading := UITheme.AddHeading(mainGui, profileName, "xm ym w400 h30", 15)
+        view.summary := UITheme.AddNote(mainGui, "", "xm y+0 w400")
+        view.switchButton := this.AddMainButton(mainGui, "S&witch Profile...", 140, (*) => this.OpenProfileSelector())
+
+        ; Commands on the selected function. The last three need a selection and
+        ; are enabled by RefreshMainView.
+        view.addButton := this.AddMainButton(mainGui, "&Add Function...", 124, (*) => this.ShowAddFunctionDialog(view.list))
+        view.keybindButton := this.AddMainButton(mainGui, "Set &Keybind...", 112, (*) => this.ChangeSelectedKeybind(view.list))
+        view.scopeButton := this.AddMainButton(mainGui, "Set S&cope...", 104, (*) => this.ShowScopeDialog(view.list))
+        view.removeButton := this.AddMainButton(mainGui, "&Remove", UITheme.buttonWidth, (*) => this.RemoveFunction(view.list))
+
+        ; The keybind list: function, its key, and the window it is restricted to.
+        ; LV0x10000 (double buffering) keeps it from flickering while resized.
+        lv := mainGui.Add("ListView", "w600 h200 -Multi +LV0x10000", ["Function", "Keybind", "Active In"])
+        view.list := lv
+        UITheme.UseExplorerTheme(lv)
+        currentProfile := ProfileManager.profiles[profileName]
+        for funcName, bind in currentProfile.binds
+            lv.Add(, funcName, this.PrettifyHotkey(bind), this.ScopeLabel(funcName))
+        if lv.GetCount()
+            lv.Modify(1, "Select Focus")
+        lv.OnEvent("ItemSelect", (*) => this.RefreshMainView())
+        lv.OnEvent("DoubleClick", (ctrl, row) => row ? this.ChangeSelectedKeybind(ctrl) : 0)
+        lv.OnEvent("ContextMenu", (ctrl, row, *) => this.ShowFunctionMenu(ctrl, row))
+        lv.OnNotify(-155, (ctrl, lParam) => this.OnFunctionListKey(ctrl, lParam))  ; LVN_KEYDOWN
+
+        ; Footer: profile-wide settings at the left, Save at the right.
+        view.rule := UITheme.AddSeparator(mainGui, "x0 w10")
+        view.attendingsButton := this.AddMainButton(mainGui, "Modality Atte&ndings...", 160, (*) => this.ShowModalityAttendingsDialog())
+        view.settingsButton := this.AddMainButton(mainGui, "Settin&gs...", 104, (*) => Settings.ShowDialog())
+        view.saveButton := this.AddMainButton(mainGui, "&Save Changes", 128, (*) => this.SaveCurrentProfile())
+
+        view.status := mainGui.Add("StatusBar")
+        scale := A_ScreenDPI / 96
+        view.status.SetParts(Round(220 * scale), Round(200 * scale))
+        return view
+    }
+
+    AddMainButton(mainGui, text, width, action) {
+        button := mainGui.Add("Button", "w" width " h" UITheme.buttonHeight, text)
+        button.OnEvent("Click", action)
+        return button
+    }
+
+    BuildMainMenu(view) {
+        profileMenu := Menu()
+        profileMenu.Add("&Switch Profile...", (*) => this.OpenProfileSelector())
+        profileMenu.Add("&Rename Profile...", (*) => this.PromptRenameProfile(ProfileManager.currentProfile))
+        profileMenu.Add()
+        profileMenu.Add(KeybindGUI.saveMenuItem, (*) => this.SaveCurrentProfile())
+        profileMenu.Add()
+        profileMenu.Add("E&xit", (*) => this.RequestExit())
+
+        toolsMenu := Menu()
+        toolsMenu.Add("Modality &Attendings...", (*) => this.ShowModalityAttendingsDialog())
+        toolsMenu.Add("&Settings...", (*) => Settings.ShowDialog())
+        toolsMenu.Add()
+        toolsMenu.Add("Open &Data Folder", (*) => this.OpenDataFolder())
+
+        helpMenu := Menu()
+        helpMenu.Add("Check for &Updates...", (*) => UpdateChecker.ShowUpdateDialog())
+        helpMenu.Add()
+        helpMenu.Add("&About PACS Assistant", (*) => this.ShowAbout())
+
+        view.profileMenu := profileMenu
+        bar := MenuBar()
+        bar.Add("&Profile", profileMenu)
+        bar.Add("&Tools", toolsMenu)
+        bar.Add("&Help", helpMenu)
+        return bar
+    }
+
+    static saveMenuItem := "&Save Changes"
+
+    ; Client height of the main window for a given keybind-list height.
+    MainViewHeight(view, listHeight) {
+        view.status.GetPos(,,, &statusHeight)
+        return KeybindGUI.MainListTop() + listHeight + KeybindGUI.MainFooterHeight() + statusHeight
+    }
+
+    static MainListTop() => UITheme.margin + 62 + UITheme.buttonHeight + 10
+
+    static MainFooterHeight() => UITheme.sectionGap + 1 + 12 + UITheme.buttonHeight + 14
+
+    ; The first list height, reduced so the whole window fits the primary monitor's
+    ; work area (title bar, menu and borders take about 90 logical units).
+    static FitListHeight(view) {
+        try {
+            MonitorGetWorkArea(MonitorGetPrimary(),, &top,, &bottom)
+            view.status.GetPos(,,, &statusHeight)
+            available := (bottom - top) * 96 / A_ScreenDPI - 90
+                - this.MainListTop() - this.MainFooterHeight() - statusHeight
+            return Max(this.mainMinListHeight, Min(this.mainListHeight, Floor(available)))
+        }
+        return this.mainListHeight
+    }
+
+    /**
+     * Positions the main window's controls for a client area of width x height
+     * logical units, or for the window's current size when they are omitted.
+     */
+    LayoutMainView(view, width := 0, height := 0) {
+        if !width
+            view.gui.GetClientPos(,, &width, &height)
+        m := UITheme.margin
+        gap := UITheme.gap
+        buttonHeight := UITheme.buttonHeight
+        contentWidth := width - 2 * m
+
+        view.heading.Move(m, m, contentWidth - 160, 30)
+        view.summary.Move(m, m + 32, contentWidth - 160, 18)
+        view.switchButton.Move(m + contentWidth - 140, m + 2, 140, buttonHeight)
+
+        x := m
+        for button in [view.addButton, view.keybindButton, view.scopeButton, view.removeButton] {
+            button.GetPos(,, &buttonWidth)
+            button.Move(x, m + 62, buttonWidth, buttonHeight)
+            x += buttonWidth + gap
+        }
+
+        view.status.GetPos(,,, &statusHeight)
+        listTop := KeybindGUI.MainListTop()
+        listHeight := Max(40, height - statusHeight - KeybindGUI.MainFooterHeight() - listTop)
+        view.list.Move(m, listTop, contentWidth, listHeight)
+
+        ruleY := listTop + listHeight + UITheme.sectionGap
+        view.rule.Move(0, ruleY, width, 1)
+        buttonY := ruleY + 13
+        view.attendingsButton.Move(m, buttonY, 160, buttonHeight)
+        view.settingsButton.Move(m + 160 + gap, buttonY, 104, buttonHeight)
+        view.saveButton.Move(m + contentWidth - 128, buttonY, 128, buttonHeight)
+        this.ResizeColumns(view.list)
+    }
+
+    /**
+     * Updates what the main window derives from state: the profile summary, which
+     * commands are available, and the status bar. Purely presentational, so a
+     * failure is logged instead of interrupting the profile operation that caused it.
+     */
+    RefreshMainView() {
+        if !this.HasOwnProp("mainView")
+            return false
+        view := this.mainView
+        try {
+            if !(IsObject(view) && this.GuiIsLive(view.gui) && view.gui == this.gui)
+                return false
+            dirty := this.IsProfileDirty(view.profileName)
+            selected := view.list.GetNext(0) > 0
+            view.summary.Value := KeybindGUI.ProfileSummary(
+                view.profileName = ProfileManager.defaultProfile,
+                view.list.GetCount()
+            )
+            for button in [view.keybindButton, view.scopeButton, view.removeButton]
+                button.Enabled := selected
+            view.saveButton.Enabled := dirty
+            if dirty
+                view.profileMenu.Enable(KeybindGUI.saveMenuItem)
+            else
+                view.profileMenu.Disable(KeybindGUI.saveMenuItem)
+            view.status.SetText(" " (dirty ? "Unsaved changes" : "All changes saved"), 1)
+            view.status.SetText(" " (A_IsSuspended ? "Keybinds suspended" : "Keybinds active"), 2)
+            ; Left-aligned: right-aligned text would sit under the size grip.
+            view.status.SetText(" " AppVersion.current, 3)
+            return true
+        } catch Any as err {
+            AppLog.Write("The main window could not be refreshed: " ErrorText.Describe(err))
+            return false
+        }
+    }
+
+    ; The line under the profile name.
+    static ProfileSummary(isDefault, functionCount) {
+        if (functionCount = 0)
+            return "No functions yet. Click Add Function to bind your first command."
+        text := functionCount (functionCount = 1 ? " function" : " functions")
+        return isDefault ? text ", opens at startup" : text
+    }
+
+    ShowFunctionMenu(listView, row) {
+        if !row
+            return false
+        commands := Menu()
+        commands.Add("Set &Keybind...", (*) => this.ChangeSelectedKeybind(listView))
+        commands.Add("Set S&cope...", (*) => this.ShowScopeDialog(listView))
+        commands.Add()
+        commands.Add("&Remove", (*) => this.RemoveFunction(listView))
+        commands.Default := "Set &Keybind..."
+        commands.Show()
+        return true
+    }
+
+    ; Delete removes the selected function and F2 sets its keybind, like the
+    ; matching buttons. Both run after the notification returns, so a confirmation
+    ; or dialog never opens from inside the list's message handling.
+    OnFunctionListKey(listView, lParam) {
+        ; NMLVKEYDOWN: wVKey follows the NMHDR header.
+        key := NumGet(lParam, 3 * A_PtrSize, "UShort")
+        if !(key = 0x2E || key = 0x71) || !listView.GetNext(0)
+            return
+        if (key = 0x2E)
+            SetTimer(() => this.RemoveFunction(listView), -1)
+        else
+            SetTimer(() => this.ChangeSelectedKeybind(listView), -1)
+    }
+
+    ; Brings the main window forward (from the tray), or the profile selector when
+    ; no profile is open.
+    ShowMainWindow() {
+        if this.HasMainWindow() {
+            if (WinGetMinMax("ahk_id " this.gui.Hwnd) = -1)
+                this.gui.Show("Restore")
+            else
+                this.gui.Show()
+            return true
+        }
+        if this.ProfileSelectorIsCurrent(this.profileSelectorGui) {
+            this.profileSelectorGui.Show()
+            return true
+        }
+        return false
+    }
+
+    OpenDataFolder() {
+        folder := AppStorage.DataRoot()
+        try Run('explorer.exe "' folder '"')
+        catch Any as err
+            this.ShowNotice("The data folder could not be opened:`n" folder "`n`n" ErrorText.Message(err), "Data Folder Unavailable", "Icon!")
+    }
+
+    ShowAbout() {
+        this.ShowNotice(
+            "PACS Assistant " AppVersion.current
+                . "`n`nKeybinds and automation for Vue PACS and PowerScribe."
+                . "`n`nReleases and source: https://github.com/rakan959/pacs-assistant"
+                . "`nLicense: GPL-3.0"
+                . "`n`nSettings, profiles and error.log are kept in:`n" AppStorage.DataRoot(),
+            "About PACS Assistant",
+            "Iconi"
+        )
     }
 
     OpenProfileSelector() {
@@ -206,8 +440,7 @@ class KeybindGUI {
         if !ownerGui && this.HasMainWindow()
             ownerGui := this.gui
         options := this.GuiIsLive(ownerGui) ? "+Owner" ownerGui.Hwnd : ""
-        ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
-        dialog := Gui(options, title)
+        dialog := UITheme.NewWindow(title, options)
         dialog.profileName := profileName
         if (profileName != "" && ProfileManager.profiles.Has(profileName)) {
             ; Hold the exact object reference for the dialog's lifetime. Unlike a
@@ -353,42 +586,61 @@ class KeybindGUI {
             try WinActivate("ahk_id " this.profileSelectorGui.Hwnd)
             return this.profileSelectorGui
         }
-        ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
-        selectorGui := Gui(, "PACS Assistant - Profile Selection")
-        selectorGui.Add("Text",, "Select profile:")
-
-        ; Add profiles listbox with default profile marked
-        profileNames := []
-        for name, _ in ProfileManager.profiles {
-            ; Add asterisk to mark default profile
-            profileNames.Push(name (name = ProfileManager.defaultProfile ? " *" : ""))
-        }
-        lb := selectorGui.Add("ListBox", "w200 h150", profileNames)
-
-        ; If there's a default profile, select it in the listbox
-        defaultIndex := this.DefaultProfileListIndex(
-            profileNames,
-            ProfileManager.defaultProfile
+        selectorGui := UITheme.NewWindow("PACS Assistant - Profile Selection")
+        listWidth := 280
+        buttonWidth := 136
+        contentWidth := listWidth + 12 + buttonWidth
+        UITheme.AddHeading(selectorGui, "Choose a profile", "xm ym w" contentWidth)
+        UITheme.AddNote(
+            selectorGui,
+            "Each profile keeps its own keybinds and modality attendings.",
+            "xm y+4 w" contentWidth
         )
-        if defaultIndex
-            lb.Choose(defaultIndex)
 
-        ; Add buttons
-        selectorGui.Add("GroupBox", "w190 h150", "Actions")
+        profileNames := []
+        for name, _ in ProfileManager.profiles
+            profileNames.Push(name)
+        ; -Hdr: a plain list of names, with the default profile labelled beside its name.
+        lv := selectorGui.Add("ListView", "xm y+14 w" listWidth " h216 -Multi -Hdr +LV0x10000", ["Profile", "Default"])
+        UITheme.UseExplorerTheme(lv)
+        for name in profileNames
+            lv.Add(, name, name = ProfileManager.defaultProfile ? "Default" : "")
+        lv.ModifyCol(1, listWidth - 80)
+        lv.ModifyCol(2, "AutoHdr")
 
-        selectorGui.Add("Button", "xp+10 yp+20 w170", "Select").OnEvent("Click", (*) => this.SelectProfile(StrReplace(lb.Text, " *"), selectorGui))
-        selectorGui.Add("Button", "w170", "Set as Default").OnEvent("Click", (*) => this.SetDefaultProfile(StrReplace(lb.Text, " *"), selectorGui))
-        selectorGui.Add("Button", "w170", "Rename").OnEvent("Click", (*) => this.PromptRenameProfile(StrReplace(lb.Text, " *"), selectorGui))
-        selectorGui.Add("Button", "w170", "Delete Profile").OnEvent("Click", (*) => this.DeleteProfile(StrReplace(lb.Text, " *"), selectorGui))
-        selectorGui.Add("Button", "w170", "New Profile").OnEvent("Click", (*) => this.OpenNewProfilePrompt(selectorGui))
+        ; Start on the profile that was open, else the default one, else the first.
+        preferred := this.ProfileListIndex(profileNames, ProfileManager.currentProfile)
+        if !preferred
+            preferred := this.ProfileListIndex(profileNames, ProfileManager.defaultProfile)
+        if (!preferred && profileNames.Length)
+            preferred := 1
+        if preferred
+            lv.Modify(preferred, "Select Focus Vis")
 
-        ; Add legend text
-        selectorGui.Add("Text", "y+10", "* = Default Profile")
+        selected := () => this.SelectedProfileName(lv)
+        lv.GetPos(&listX, &listY)
+        buttonX := listX + listWidth + 12
+        buttons := {}
+        buttons.open := selectorGui.Add("Button", "x" buttonX " y" listY " w" buttonWidth " h" UITheme.buttonHeight " Default", "&Open")
+        buttons.open.OnEvent("Click", (*) => this.SelectProfile(selected(), selectorGui))
+        newButton := selectorGui.Add("Button", "x" buttonX " y+" UITheme.gap " w" buttonWidth " h" UITheme.buttonHeight, "&New Profile...")
+        newButton.OnEvent("Click", (*) => this.OpenNewProfilePrompt(selectorGui))
+        buttons.rename := selectorGui.Add("Button", "x" buttonX " y+" UITheme.gap " w" buttonWidth " h" UITheme.buttonHeight, "&Rename...")
+        buttons.rename.OnEvent("Click", (*) => this.PromptRenameProfile(selected(), selectorGui))
+        buttons.setDefault := selectorGui.Add("Button", "x" buttonX " y+" UITheme.gap " w" buttonWidth " h" UITheme.buttonHeight, "Set as &Default")
+        buttons.setDefault.OnEvent("Click", (*) => this.SetDefaultProfile(selected(), selectorGui))
+        buttons.delete := selectorGui.Add("Button", "x" buttonX " y+" UITheme.sectionGap " w" buttonWidth " h" UITheme.buttonHeight, "De&lete...")
+        buttons.delete.OnEvent("Click", (*) => this.DeleteProfile(selected(), selectorGui))
+
+        lv.OnEvent("ItemSelect", (*) => this.RefreshProfileSelectorButtons(lv, buttons))
+        lv.OnEvent("DoubleClick", (ctrl, row) => row ? this.SelectProfile(selected(), selectorGui) : 0)
+        this.RefreshProfileSelectorButtons(lv, buttons)
+        selectorGui.contentWidth := contentWidth
 
         ; Return true so a refused close keeps the selector visible (see CreateMainGUI).
         selectorGui.OnEvent("Close", (*) => (this.CloseProfileSelector(selectorGui), true))
         this.RegisterProfileSelector(selectorGui)
-        try selectorGui.Show()
+        try UITheme.ShowDialog(selectorGui)
         catch Any as err {
             this.RetireProfileSelector(selectorGui)
             throw err
@@ -429,15 +681,30 @@ class KeybindGUI {
         try selectorGui.Destroy()
     }
 
-    DefaultProfileListIndex(profileNames, defaultProfile) {
-        if (defaultProfile = "")
+    ; Position of exactly this name in the selector's list, or 0.
+    ProfileListIndex(profileNames, profileName) {
+        if (profileName = "")
             return 0
-        renderedDefault := defaultProfile " *"
-        for index, renderedName in profileNames {
-            if (renderedName == renderedDefault)
+        for index, name in profileNames {
+            if (name == profileName)
                 return index
         }
         return 0
+    }
+
+    SelectedProfileName(listView) {
+        row := listView.GetNext(0)
+        return row ? listView.GetText(row, 1) : ""
+    }
+
+    ; Buttons that act on a profile need one selected; Set as Default also needs it
+    ; not to be the default already.
+    RefreshProfileSelectorButtons(listView, buttons) {
+        name := this.SelectedProfileName(listView)
+        buttons.open.Enabled := name != ""
+        buttons.rename.Enabled := name != ""
+        buttons.delete.Enabled := name != ""
+        buttons.setDefault.Enabled := name != "" && name != ProfileManager.defaultProfile
     }
 
     CloseProfileSelector(selectorGui) {
@@ -473,14 +740,29 @@ class KeybindGUI {
     }
 
     PromptNewProfile() {
-        ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
-        inputGui := Gui(, "PACS Assistant - Create New Profile")
-        inputGui.Add("Text",, "Enter profile name:")
-        nameEdit := inputGui.Add("Edit", "w200")
-        inputGui.Add("Button",, "OK").OnEvent("Click", (*) => this.CreateProfile(nameEdit.Value, inputGui))
+        inputGui := UITheme.NewWindow("PACS Assistant - Create New Profile")
+        width := 320
+        ; With no profile to return to, closing this prompt exits the app.
+        firstProfile := ProfileManager.profiles.Count = 0
+        UITheme.AddHeading(inputGui, firstProfile ? "Create your first profile" : "Create a profile", "xm ym w" width)
+        UITheme.AddNote(
+            inputGui,
+            "A profile is a set of keybinds and modality attendings, such as one per rotation or shift.",
+            "xm y+4 w" width
+        )
+        inputGui.Add("Text", "xm y+14 w" width, "Profile &name")
+        nameEdit := inputGui.Add("Edit", "xm y+4 w" width)
+        UITheme.SetPlaceholder(nameEdit, "For example, Neuro or Night Float")
+        close := (*) => (this.CloseNewProfilePrompt(inputGui), true)
+        UITheme.AddFooter(inputGui, width, [
+            {text: "Create", action: (*) => this.CreateProfile(nameEdit.Value, inputGui), default: true},
+            {text: firstProfile ? "Exit" : "Cancel", action: close}
+        ])
         ; Return true so a refused close keeps the prompt visible (see CreateMainGUI).
-        inputGui.OnEvent("Close", (*) => (this.CloseNewProfilePrompt(inputGui), true))
-        inputGui.Show()
+        inputGui.OnEvent("Close", close)
+        if !firstProfile
+            inputGui.OnEvent("Escape", close)
+        UITheme.ShowDialog(inputGui)
         return inputGui
     }
 
@@ -1133,12 +1415,14 @@ class KeybindGUI {
             this.EnsureDirtyProfiles()[profileName] := true
             KeybindGUI.AdvanceProfileMutationRevision(profileName)
         }
+        this.RefreshMainView()
     }
 
     ClearProfileDirty(profileName) {
         dirty := this.EnsureDirtyProfiles()
         if dirty.Has(profileName)
             dirty.Delete(profileName)
+        this.RefreshMainView()
     }
 
     IsProfileDirty(profileName) {
@@ -1769,13 +2053,20 @@ class KeybindGUI {
                 renameGui.Destroy()
                 return false
             }
-            renameGui.Add("Text",, "Enter new name for profile '" name "':")
-            nameEdit := renameGui.Add("Edit", "w200", name)
-            renameGui.Add("Button",, "OK").OnEvent("Click", (*) => this.RenameProfile(name, nameEdit.Value, renameGui, parentGui))
-            renameGui.Add("Button", "x+10", "Cancel").OnEvent("Click", (*) => renameGui.Destroy())
+            width := 320
+            UITheme.AddHeading(renameGui, "Rename profile", "xm ym w" width)
+            UITheme.AddNote(renameGui, "Its keybinds and modality attendings stay with it.", "xm y+4 w" width)
+            renameGui.Add("Text", "xm y+14 w" width, "&New name for '" name "'")
+            nameEdit := renameGui.Add("Edit", "xm y+4 w" width, name)
+            cancel := (*) => renameGui.Destroy()
+            UITheme.AddFooter(renameGui, width, [
+                {text: "Rename", action: (*) => this.RenameProfile(name, nameEdit.Value, renameGui, parentGui), default: true},
+                {text: "Cancel", action: cancel}
+            ])
             ; The title-bar X must destroy like Cancel; Close only hides by default.
-            renameGui.OnEvent("Close", (*) => renameGui.Destroy())
-            renameGui.Show()
+            renameGui.OnEvent("Close", cancel)
+            renameGui.OnEvent("Escape", cancel)
+            UITheme.ShowDialog(renameGui)
             return true
         } finally {
             if selectorTransaction
@@ -1916,34 +2207,53 @@ class KeybindGUI {
             }
         }
 
-        ; Add custom keybind creation button
-        selectorGui.Add("Button", "w200", "Create New Custom Keybind").OnEvent("Click", (*) => (
-            selectorGui.Destroy(),
-            this.ShowCustomKeybindDialog(listView, selectorGui.profileName)
-        ))
+        width := 400
+        UITheme.AddHeading(selectorGui, "Add a function", "xm ym w" width)
+        UITheme.AddNote(
+            selectorGui,
+            "Choose a command for '" selectorGui.profileName "'. You'll press its keybind next.",
+            "xm y+4 w" width
+        )
 
-        ; Add built-in functions section
-        selectorGui.Add("Text", "xm y+20", "Built-in Functions:")
-        lbBuiltIn := selectorGui.Add("ListBox", "w200 h150", builtInFunctions)
+        selectorGui.Add("Text", "xm y+14 w" width, "&Built-in commands")
+        lbBuiltIn := selectorGui.Add("ListBox", "xm y+4 w" width " r9", builtInFunctions)
+        if (builtInFunctions.Length = 0)
+            UITheme.AddNote(selectorGui, "Every built-in command is already in this profile.", "xm y+4 w" width)
 
         ; Custom functions get their own list when the profile has any. lbCustom stays
-        ; defined either way, because the Add Selected handler reads it even when
-        ; there is no custom list.
+        ; defined either way, because the Add handler reads it even when there is no
+        ; custom list.
         lbCustom := ""
         if (customFunctions.Length > 0) {
-            selectorGui.Add("Text", "xm y+10", "Custom Functions:")
-            lbCustom := selectorGui.Add("ListBox", "w200 h100", customFunctions)
-            selectorGui.Add("Button", "y+5 w200", "Delete Selected Custom Function").OnEvent("Click", (*) => this.DeleteCustomFunction(lbCustom.Text, selectorGui))
+            selectorGui.Add("Text", "xm y+14 w" width, "&Custom keybinds")
+            lbCustom := selectorGui.Add("ListBox", "xm y+4 w" width " r4", customFunctions)
+            selectorGui.Add("Button", "x" (UITheme.margin + width - 180) " y+" UITheme.gap " w180 h" UITheme.buttonHeight, "&Delete Custom Keybind...")
+                .OnEvent("Click", (*) => this.DeleteCustomFunction(lbCustom.Text, selectorGui))
             this.LinkFunctionLists(lbBuiltIn, lbCustom)
         }
 
-        ; Add action buttons
-        selectorGui.Add("Button", "xm y+10", "Add Selected").OnEvent("Click", (*) => this.AddFunction(this.SelectedFunction(lbBuiltIn, lbCustom), listView, selectorGui))
-        selectorGui.Add("Button", "x+10", "Cancel").OnEvent("Click", (*) => selectorGui.Destroy())
+        add := (*) => this.AddFunction(this.SelectedFunction(lbBuiltIn, lbCustom), listView, selectorGui)
+        lbBuiltIn.OnEvent("DoubleClick", add)
+        if lbCustom
+            lbCustom.OnEvent("DoubleClick", add)
+        cancel := (*) => selectorGui.Destroy()
+        UITheme.AddFooter(
+            selectorGui,
+            width,
+            [
+                {text: "Add", action: add, default: true},
+                {text: "Cancel", action: cancel}
+            ],
+            [{text: "Create Custom &Keybind...", width: 170, action: (*) => (
+                selectorGui.Destroy(),
+                this.ShowCustomKeybindDialog(listView, selectorGui.profileName)
+            )}]
+        )
         ; The title-bar X must destroy like Cancel; Close only hides by default.
-        selectorGui.OnEvent("Close", (*) => selectorGui.Destroy())
+        selectorGui.OnEvent("Close", cancel)
+        selectorGui.OnEvent("Escape", cancel)
 
-        selectorGui.Show()
+        UITheme.ShowDialog(selectorGui)
         return true
     }
 
@@ -2089,25 +2399,42 @@ class KeybindGUI {
 
     ShowCustomKeybindDialog(listView, profileName := "") {
         customGui := this.NewProfileDialog("PACS Assistant - Configure Custom Keybind", profileName)
-        customGui.Add("Text",, "Name for this keybind:")
-        nameEdit := customGui.Add("Edit", "w200")
+        width := 360
+        UITheme.AddHeading(customGui, "Create a custom keybind", "xm ym w" width)
+        UITheme.AddNote(customGui, "Sends keys or text when you press its keybind.", "xm y+4 w" width)
 
-        customGui.Add("Text", "y+10", "Keys to send (e.g. {Tab}, ^c, Hello):")
-        keysEdit := customGui.Add("Edit", "w200")
+        customGui.Add("Text", "xm y+14 w" width, "&Name")
+        nameEdit := customGui.Add("Edit", "xm y+4 w" width)
+        UITheme.SetPlaceholder(nameEdit, "For example, Normal chest")
 
-        customGui.Add("Text", "y+10", "Target window (optional):")
-        windowEdit := customGui.Add("Edit", "w200")
+        customGui.Add("Text", "xm y+12 w" width, "&Keys to send")
+        keysEdit := customGui.Add("Edit", "xm y+4 w" width)
+        UITheme.SetPlaceholder(keysEdit, "{F9}, ^c or text to type")
+        UITheme.AddNote(
+            customGui,
+            "AutoHotkey Send syntax: {Tab} presses Tab, ^c presses Ctrl+C, and other text is typed as written.",
+            "xm y+4 w" width
+        )
 
-        customGui.Add("Button", "y+10", "OK").OnEvent("Click", (*) => this.AddCustomKeybind(nameEdit.Value, keysEdit.Value, windowEdit.Value, listView, customGui))
-        customGui.Add("Button", "x+10", "Cancel").OnEvent("Click", (*) => customGui.Destroy())
+        customGui.Add("Text", "xm y+12 w" width, "&Target window (optional)")
+        windowEdit := customGui.Add("Edit", "xm y+4 w" width)
+        UITheme.SetPlaceholder(windowEdit, "Whichever window is active")
+        UITheme.AddNote(
+            customGui,
+            "An AutoHotkey window selector, such as a title or ahk_exe app.exe. The keybind does nothing unless exactly one window matches.",
+            "xm y+4 w" width
+        )
+
+        cancel := (*) => customGui.Destroy()
+        UITheme.AddFooter(customGui, width, [
+            {text: "Create", action: (*) => this.AddCustomKeybind(nameEdit.Value, keysEdit.Value, windowEdit.Value, listView, customGui), default: true},
+            {text: "Cancel", action: cancel}
+        ])
         ; The title-bar X must destroy like Cancel; Close only hides by default.
-        customGui.OnEvent("Close", (*) => customGui.Destroy())
+        customGui.OnEvent("Close", cancel)
+        customGui.OnEvent("Escape", cancel)
 
-        ; Add help text
-        customGui.Add("Text", "y+20", "Examples:")
-        customGui.Add("Text",, "{Tab} = Tab key`n^c = Ctrl+C`nHello = types 'Hello'")
-
-        customGui.Show()
+        UITheme.ShowDialog(customGui)
         return true
     }
 
@@ -2336,9 +2663,25 @@ class KeybindGUI {
         }
 
         promptGui := this.NewProfileDialog("PACS Assistant - Set Keybind", profileName)
-        promptGui.Add("Text",, "Press keys for '" funcName "'...")
-        promptGui.Add("Edit", "w200 ReadOnly", "Press keys...")
-        promptGui.Add("Button",, "Cancel").OnEvent("Click", (*) => this.CancelKeybindPrompt(promptGui))
+        width := 320
+        UITheme.AddHeading(promptGui, "Press the new keybind", "xm ym w" width)
+        UITheme.AddNote(
+            promptGui,
+            "For '" funcName "'. Current keybind: " this.CurrentBindLabel(promptGui.profileName, funcName) ".",
+            "xm y+4 w" width
+        )
+        ; 0x200 (SS_CENTERIMAGE) centres the single line vertically in the well.
+        promptGui.SetFont("s11 c" UITheme.secondaryColor, UITheme.fontName)
+        promptGui.Add("Text", "xm y+14 w" width " h56 Center 0x200 Background" UITheme.panelColor, "Waiting for a key...")
+        UITheme.UseBodyFont(promptGui)
+        UITheme.AddNote(
+            promptGui,
+            "Hold Ctrl, Alt, Shift or Win, then press the key. Esc cancels.",
+            "xm y+10 w" width
+        )
+        UITheme.AddFooter(promptGui, width, [
+            {text: "Cancel", action: (*) => this.CancelKeybindPrompt(promptGui)}
+        ])
 
         ; Closing with the X has to tear the hook down as well, otherwise it keeps
         ; capturing and rebinds the next key pressed anywhere
@@ -2365,9 +2708,19 @@ class KeybindGUI {
         return this.ShowStartedCapturePrompt(promptGui)
     }
 
+    ; Display form of a function's current keybind, for the capture prompt.
+    CurrentBindLabel(profileName, funcName) {
+        try {
+            profile := ProfileManager.profiles[profileName]
+            if profile.binds.Has(funcName)
+                return this.PrettifyHotkey(profile.binds[funcName])
+        }
+        return "Unassigned"
+    }
+
     ShowStartedCapturePrompt(promptGui) {
         try {
-            promptGui.Show()
+            UITheme.ShowDialog(promptGui)
             return true
         } catch as err {
             restored := this.CancelKeybindPrompt(promptGui)
@@ -2407,12 +2760,29 @@ class KeybindGUI {
         flags := HotkeyContract.FlagsFromScope(ProfileManager.GetScope(funcName))
 
         scopeGui := this.NewProfileDialog("PACS Assistant - Keybind Scope")
-        scopeGui.Add("Text",, "Only activate '" funcName "' when one of these is the active window:")
-        pacsBox := scopeGui.Add("Checkbox", "y+10", "PACS")
+        width := 340
+        UITheme.AddHeading(scopeGui, "Where should this keybind work?", "xm ym w" width)
+        UITheme.AddNote(
+            scopeGui,
+            "'" funcName "' (" this.CurrentBindLabel(scopeGui.profileName, funcName) ")",
+            "xm y+4 w" width
+        )
+        restricted := flags.requirePACS || flags.requirePowerScribe
+        anyRadio := scopeGui.Add("Radio", "xm y+14 w" width " Group" (restricted ? "" : " Checked"), "In &any window")
+        onlyRadio := scopeGui.Add("Radio", "xm y+8 w" width (restricted ? " Checked" : ""), "&Only when one of these is the active window:")
+        pacsBox := scopeGui.Add("Checkbox", "xm+22 y+8 w" (width - 22), "&PACS")
         pacsBox.Value := flags.requirePACS
-        psBox := scopeGui.Add("Checkbox", "y+5", "PowerScribe")
+        psBox := scopeGui.Add("Checkbox", "xm+22 y+6 w" (width - 22), "Power&Scribe")
         psBox.Value := flags.requirePowerScribe
-        scopeGui.Add("Text", "y+10", "Leave both unchecked to activate in any window.")
+        UITheme.AddNote(
+            scopeGui,
+            "Outside these windows the key goes to whichever app is in front, as if this keybind did not exist.",
+            "xm y+14 w" width
+        )
+        syncChoices := (*) => (pacsBox.Enabled := onlyRadio.Value, psBox.Enabled := onlyRadio.Value)
+        anyRadio.OnEvent("Click", syncChoices)
+        onlyRadio.OnEvent("Click", syncChoices)
+        syncChoices()
 
         if !this.CaptureFunctionDialogState(scopeGui, funcName, listView, rowIndex) {
             scopeGui.Destroy()
@@ -2424,13 +2794,46 @@ class KeybindGUI {
             return false
         }
 
-        scopeGui.Add("Button", "y+15 w80", "OK")
-            .OnEvent("Click", (*) => this.ApplyScope(funcName, pacsBox.Value, psBox.Value, listView, rowIndex, scopeGui))
-        scopeGui.Add("Button", "x+10 w80", "Cancel").OnEvent("Click", (*) => scopeGui.Destroy())
+        cancel := (*) => scopeGui.Destroy()
+        UITheme.AddFooter(scopeGui, width, [
+            {
+                text: "OK",
+                default: true,
+                action: (*) => this.SubmitScope(
+                    funcName, anyRadio.Value, pacsBox.Value, psBox.Value, listView, rowIndex, scopeGui
+                )
+            },
+            {text: "Cancel", action: cancel}
+        ])
         ; The title-bar X must destroy like Cancel; Close only hides by default.
-        scopeGui.OnEvent("Close", (*) => scopeGui.Destroy())
-        scopeGui.Show()
+        scopeGui.OnEvent("Close", cancel)
+        scopeGui.OnEvent("Escape", cancel)
+        UITheme.ShowDialog(scopeGui)
         return true
+    }
+
+    /**
+     * The scope flags a choice in the scope dialog stands for: none for "any
+     * window", else the ticked windows.
+     * @returns {requirePACS, requirePowerScribe}, or 0 when "only these windows" was
+     *     chosen without ticking any
+     */
+    static ScopeChoice(anyWindow, requirePACS, requirePowerScribe) {
+        if anyWindow
+            return {requirePACS: false, requirePowerScribe: false}
+        if !(requirePACS || requirePowerScribe)
+            return 0
+        return {requirePACS: !!requirePACS, requirePowerScribe: !!requirePowerScribe}
+    }
+
+    SubmitScope(funcName, anyWindow, requirePACS, requirePowerScribe, listView, rowIndex, scopeGui) {
+        choice := KeybindGUI.ScopeChoice(anyWindow, requirePACS, requirePowerScribe)
+        if !choice {
+            try scopeGui.Opt("+OwnDialogs")
+            MsgBox("Tick PACS, PowerScribe or both, or choose In any window.", "Choose a Window", "Icon!")
+            return false
+        }
+        return this.ApplyScope(funcName, choice.requirePACS, choice.requirePowerScribe, listView, rowIndex, scopeGui)
     }
 
     ApplyScope(funcName, requirePACS, requirePowerScribe, listView, rowIndex, scopeGui) {
@@ -2502,20 +2905,34 @@ class KeybindGUI {
         ; NewProfileDialog records the profile object and both revisions;
         ; DialogProfileIsCurrent rejects the save if any of them changed.
         modGui := this.NewProfileDialog("PACS Assistant - Modality Attendings")
-        modGui.Add("Text",, "Attending to assign per modality for '" modGui.profileName "'.")
-        modGui.Add("Text", "y+5", "Leave a modality blank to keep PowerScribe's default attending.")
+        width := 360
+        labelWidth := 90
+        UITheme.AddHeading(modGui, "Modality attendings", "xm ym w" width)
+        UITheme.AddNote(
+            modGui,
+            "The attending for each modality in '" modGui.profileName "'. Wet reads use the one for the study's modality; leave a modality blank to keep PowerScribe's default attending.",
+            "xm y+4 w" width
+        )
 
         edits := Map()
+        first := true
         for modality in ReportModality.names {
-            modGui.Add("Text", "xm y+10 w100", modality ":")
-            edits[modality] := modGui.Add("Edit", "x+5 yp-3 w220", ProfileManager.GetModalityAttending(modality))
+            modGui.Add("Text", "xm y+" (first ? 16 : 10) " w" labelWidth, modality)
+            attendingEdit := modGui.Add("Edit", "x+" UITheme.gap " yp-3 w" (width - labelWidth - UITheme.gap), ProfileManager.GetModalityAttending(modality))
+            UITheme.SetPlaceholder(attendingEdit, "PowerScribe default")
+            edits[modality] := attendingEdit
+            first := false
         }
 
-        modGui.Add("Button", "xm y+15 w80", "Save").OnEvent("Click", (*) => this.SaveModalityAttendings(edits, modGui))
-        modGui.Add("Button", "x+10 w80", "Cancel").OnEvent("Click", (*) => modGui.Destroy())
+        cancel := (*) => modGui.Destroy()
+        UITheme.AddFooter(modGui, width, [
+            {text: "Save", action: (*) => this.SaveModalityAttendings(edits, modGui), default: true},
+            {text: "Cancel", action: cancel}
+        ])
         ; The title-bar X must destroy like Cancel; Close only hides by default.
-        modGui.OnEvent("Close", (*) => modGui.Destroy())
-        modGui.Show()
+        modGui.OnEvent("Close", cancel)
+        modGui.OnEvent("Escape", cancel)
+        UITheme.ShowDialog(modGui)
         return true
     }
 

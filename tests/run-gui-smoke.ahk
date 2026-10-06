@@ -163,6 +163,7 @@ Main() {
         Assert(lv.GetCount("Col") = 3, "the list has a scope column")
         AssertScope(lv, "Draft Report", "PowerScribe")
         AssertScope(lv, "Sign Report", "Any window")
+        CheckMainWindowState(kb, lv)
 
         lv.Modify(1, "Select Focus")
         scopeHwnd := 0
@@ -245,6 +246,73 @@ Main() {
     }
 
     return DesktopChecks.Finish("checks")
+}
+
+; The main window's derived state and keyboard paths: Save and the status bar
+; follow unsaved changes, the selection commands follow the selection, Delete and
+; F2 in the list reach removal and key capture, and resizing grows the list.
+CheckMainWindowState(kb, lv) {
+    view := kb.mainView
+    mainHwnd := kb.gui.Hwnd
+    Assert(!view.saveButton.Enabled, "Save Changes starts disabled with nothing to save")
+    Assert(StatusBarGetText(1, "ahk_id " mainHwnd) = " All changes saved", "the status bar says the profile is saved")
+    Assert(StatusBarGetText(2, "ahk_id " mainHwnd) = " Keybinds active", "the status bar says keybinds are active")
+
+    kb.MarkProfileDirty(ProfileManager.currentProfile)
+    Assert(view.saveButton.Enabled, "an unsaved change enables Save Changes")
+    Assert(StatusBarGetText(1, "ahk_id " mainHwnd) = " Unsaved changes", "the status bar reports unsaved changes")
+    kb.ClearProfileDirty(ProfileManager.currentProfile)
+    Assert(!view.saveButton.Enabled, "clearing the change disables Save Changes again")
+
+    lv.Modify(0, "-Select")
+    kb.RefreshMainView()
+    Assert(!view.removeButton.Enabled && !view.keybindButton.Enabled, "selection commands are disabled with no row selected")
+    lv.Modify(1, "Select Focus")
+    kb.RefreshMainView()
+    Assert(view.removeButton.Enabled && view.keybindButton.Enabled, "selecting a row enables its commands")
+
+    ; Delete asks to remove the selected function; this driver answers No. The key
+    ; is posted to the list as the keyboard delivers it: Send from this same thread
+    ; is processed while the thread cannot be interrupted, so the list's key
+    ; notification would never reach its handler.
+    confirmations := []
+    kb.confirmationDriver := {Confirm: (driver, message, title) => (confirmations.Push(title), false)}
+    try {
+        PressListKey(lv, 0x2E)  ; VK_DELETE
+        Sleep(200)
+    } finally kb.DeleteProp("confirmationDriver")
+    Assert(confirmations.Length = 1 && confirmations[1] = "Confirm Remove", "Delete in the list asks to remove the selected function")
+    Assert(lv.GetCount() = 3, "declining the removal keeps every function")
+
+    ; F2 opens key capture for the selected function; closing it restores the binds.
+    captureHwnd := 0
+    Check("F2 in the list opens key capture", () => (
+        captureHwnd := OpenAndCaptureWindow(
+            "PACS Assistant - Set Keybind",
+            () => (PressListKey(lv, 0x71), Sleep(150))  ; VK_F2
+        )
+    ))
+    CloseWindow(captureHwnd)
+    Assert(KeybindGUI.isListening = false, "closing the F2 capture prompt stops listening")
+
+    view.list.GetPos(,,, &listHeightBefore)
+    WinGetPos(&x, &y, &width, &height, "ahk_id " mainHwnd)
+    WinMove(,, width + 120, height + 160, "ahk_id " mainHwnd)
+    Sleep(200)
+    view.list.GetPos(,,, &listHeightAfter)
+    view.saveButton.GetPos(&saveX,, &saveWidth)
+    view.gui.GetClientPos(,, &clientWidth)
+    Assert(listHeightAfter > listHeightBefore, "resizing the window grows the keybind list")
+    ; Within a unit: logical coordinates are rounded at non-100% scaling.
+    Assert(Abs(saveX + saveWidth + UITheme.margin - clientWidth) <= 1, "Save Changes stays at the right edge after a resize")
+    WinMove(,, width, height, "ahk_id " mainHwnd)
+    Sleep(150)
+}
+
+PressListKey(listView, virtualKey) {
+    listView.Focus()
+    PostMessage(0x100, virtualKey, 0, listView)  ; WM_KEYDOWN
+    PostMessage(0x101, virtualKey, 0xC0000001, listView)  ; WM_KEYUP
 }
 
 AssertScope(listView, funcName, expected) {

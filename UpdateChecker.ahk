@@ -4,6 +4,7 @@
 
 #Requires AutoHotkey v2.0
 #Include Settings.ahk
+#Include UITheme.ahk
 #Include Version.ahk
 #Include JsonParser.ahk
 #Include ErrorText.ahk
@@ -681,28 +682,23 @@ class UpdateChecker {
                 this.CloseUpdateDialog(this.updateDialog)
             }
 
-            ; Create update dialog with modern styling
-            ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
-            updateGui := Gui(, "PACS Assistant - Update Available")
+            updateGui := UITheme.NewWindow("PACS Assistant - Update Available")
             updateGui.settingsRevision := Settings.revision
             updateGui.latestVersion := updateInfo.latestVersion
-            updateGui.SetFont("s10", "Segoe UI")  ; Modern font
+            width := 440
 
-            ; Header
-            updateGui.Add("Text", "y10 w400", "A new version of PACS Assistant is available!")
-            updateGui.Add("Text", "y+10", "Current version: " updateInfo.currentVersion)
-            updateGui.Add("Text", "y+5", "Latest version: " updateInfo.latestVersion)
+            UITheme.AddHeading(updateGui, "A new version is available", "xm ym w" width)
+            UITheme.AddNote(
+                updateGui,
+                "PACS Assistant " updateInfo.latestVersion " is ready to install. You have " updateInfo.currentVersion ".",
+                "xm y+4 w" width
+            )
+            UITheme.AddSectionLabel(updateGui, "What's new", "xm y+16 w" width)
+            updateGui.Add("Edit", "xm y+6 r10 w" width " ReadOnly Background" UITheme.panelColor, updateInfo.releaseNotes)
 
-            ; Release notes with better formatting
-            updateGui.Add("Text", "y+15", "What's New:")
-            updateGui.Add("Edit", "y+5 r10 w400 ReadOnly", updateInfo.releaseNotes)
-
-            ; Auto-update checkbox
-            autoUpdateCheckbox := updateGui.Add("Checkbox", "y+10", "Automatically check for updates")
+            autoUpdateCheckbox := updateGui.Add("Checkbox", "xm y+14 w" width, "Check for updates &automatically")
             autoUpdateCheckbox.Value := Settings.Get("AutoUpdate")
-
-            ; Skip beta versions checkbox
-            skipBetaCheckbox := updateGui.Add("Checkbox", "y+5", "Skip beta versions")
+            skipBetaCheckbox := updateGui.Add("Checkbox", "xm y+6 w" width, "Skip &beta versions")
             skipBetaCheckbox.Value := Settings.Get("SkipBetaVersions")
 
             ; Gui.Destroy() does not raise Close, so every way out of the dialog saves
@@ -723,22 +719,31 @@ class UpdateChecker {
                 this.CloseUpdateDialog(updateGui)
             )
 
-            ; Buttons
-            updateGui.Add("GroupBox", "y+15 w400 h50")
-            updateGui.Add("Button", "xp+10 yp+15 w120", "Update Now").OnEvent("Click", (*) => (
-                saveChoices() && this.PerformUpdate(updateInfo, updateGui)
-            ))
-            updateGui.Add("Button", "x+10 w120", "Remind Me Later").OnEvent("Click", (*) => (
-                saveChoices() && (this.RemindLater(), this.CloseUpdateDialog(updateGui))
-            ))
-            updateGui.Add("Button", "x+10 w120", "Skip This Version").OnEvent("Click", (*) => (
-                saveSkippedChoices() && this.CloseUpdateDialog(updateGui)
-            ))
+            footer := UITheme.AddFooter(
+                updateGui,
+                width,
+                [
+                    {text: "&Update Now", width: 112, default: true, action: (*) => (
+                        saveChoices() && this.PerformUpdate(updateInfo, updateGui)
+                    )},
+                    {text: "&Remind Me Later", width: 132, action: (*) => (
+                        saveChoices() && (this.RemindLater(), this.CloseUpdateDialog(updateGui))
+                    )}
+                ],
+                [
+                    {text: "S&kip This Version", width: 132, action: (*) => (
+                        saveSkippedChoices() && this.CloseUpdateDialog(updateGui)
+                    )}
+                ]
+            )
 
             updateGui.OnEvent("Close", dismiss)
+            updateGui.OnEvent("Escape", dismiss)
 
             this.updateDialog := updateGui
-            updateGui.Show()
+            UITheme.ShowDialog(updateGui)
+            ; Start on the default action rather than inside the release notes.
+            footer["&Update Now"].Focus()
             return updateGui
         } finally this.dialogRelease.Call()
     }

@@ -11,6 +11,14 @@ FileEncoding "UTF-8"
 #Include MicrophoneManager.ahk
 #Include ErrorText.ahk
 #Include AppLog.ahk
+#Include AppTray.ahk
+
+; The app icon: compiled into the EXE (which then also uses it for the tray and its
+; windows), and set at startup for source runs, before any window is created.
+;@Ahk2Exe-SetMainIcon pacs-assistant.ico
+if !A_IsCompiled
+    TraySetIcon(A_ScriptDir "\pacs-assistant.ico")
+A_IconTip := "PACS Assistant"
 
 ; Production error record: append every uncaught runtime error, with its type,
 ; location and call stack, to error.log in the app's data folder (AppLog). The
@@ -46,6 +54,7 @@ MicrophoneManager.automationRelease := ObjBindMethod(PACSCommands, "ReleaseClini
 kbGUI := KeybindGUI()
 UpdateChecker.shutdownCoordinator := kbGUI
 OnExit((exitReason, exitCode) => kbGUI.HandleProcessExit(exitReason, exitCode))
+AppTray.Install(kbGUI)
 
 ; Start background clinical services only after the shared automation and
 ; configuration gates are fully composed.

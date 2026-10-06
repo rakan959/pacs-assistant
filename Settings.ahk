@@ -6,6 +6,8 @@
 #Requires AutoHotkey v2.0
 #Include AppStorage.ahk
 #Include AppLog.ahk
+#Include Version.ahk
+#Include UITheme.ahk
 
 class Settings {
     static settingsFile := AppStorage.DataRoot() "\settings.ini"
@@ -20,7 +22,7 @@ class Settings {
     ; One day is a deliberate product bound as well as protection from AutoHotkey's
     ; DWORD-backed timer period wrapping after seconds are multiplied by 1000.
     static maxRefreshIntervalSeconds := 86400
-    static dialogLogicalWidth := 400
+    static dialogLogicalWidth := 440
     static dialogLogicalHeight := 420
     ; Keys are PascalCase, unlike other map keys (style guide s4), because each one is
     ; also the persisted settings.ini key name.
@@ -286,49 +288,81 @@ class Settings {
             return false
         }
         try {
-            ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
-            settingsGui := Gui(, "PACS Assistant - Settings")
+            settingsGui := UITheme.NewWindow("PACS Assistant - Settings")
             settingsGui.settingsRevision := this.revision
-            settingsGui.SetFont("s10", "Segoe UI")
             checkboxes := Map()
+            width := this.dialogLogicalWidth - 2 * UITheme.margin
+            ; Page content sits inside the tab's border; x/w below are for that column.
+            x := UITheme.margin + 16
+            w := width - 32
             tab := settingsGui.Add(
                 "Tab3",
-                "x20 y15 w360 h330",
+                "xm ym w" width " h312",
                 ["General", "PowerScribe", "Notifications"]
             )
 
             tab.UseTab(1)
-            settingsGui.Add("GroupBox", "x35 y55 w330 h75", "Updates")
-            checkboxes["AutoUpdate"] := settingsGui.Add("Checkbox", "x50 y78", "Automatically check for updates")
-            checkboxes["SkipBetaVersions"] := settingsGui.Add("Checkbox", "x50 y103", "Skip beta versions")
-            settingsGui.Add("GroupBox", "x35 y140 w330 h115", "PACS")
-            checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x50 y165", "Auto refresh PACS")
-            settingsGui.Add("Text", "x50 y195", "Refresh interval (seconds):")
-            refreshIntervalEdit := settingsGui.Add("Edit", "x50 y218 w75 Number", this.Get("RefreshInterval"))
+            UITheme.AddSectionLabel(settingsGui, "Updates", "x" x " y" (UITheme.margin + 44) " w" w)
+            checkboxes["AutoUpdate"] := settingsGui.Add("Checkbox", "x" x " y+8 w" w, "Check for updates &automatically")
+            checkboxes["SkipBetaVersions"] := settingsGui.Add("Checkbox", "x" x " y+6 w" w, "Skip &beta versions")
+            if AppVersion.isDevBuild
+                UITheme.AddNote(settingsGui, "This is a development build, so it never checks for updates.", "x" x " y+6 w" w)
+            UITheme.AddSectionLabel(settingsGui, "PACS worklist", "x" x " y+18 w" w)
+            checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x" x " y+8 w" w, "&Refresh PACS and scan for new studies automatically")
+            settingsGui.Add("Text", "x" x " y+12", "Every")
+            refreshIntervalEdit := settingsGui.Add("Edit", "x+6 yp-3 w64 Number Right", this.Get("RefreshInterval"))
+            settingsGui.Add("Text", "x+6 yp+3", "seconds (" this.minRefreshIntervalSeconds " or more)")
+            UITheme.AddNote(
+                settingsGui,
+                "New studies are announced only while a sound or notification is turned on in the Notifications tab.",
+                "x" x " y+10 w" w
+            )
 
             tab.UseTab(2)
-            settingsGui.Add("GroupBox", "x35 y55 w330 h140", "PowerScribe login")
-            checkboxes["SwapMicrophoneOnLogin"] := settingsGui.Add("Checkbox", "x50 y82", "Set microphone on login")
-            settingsGui.Add("Text", "x50 y115", "Microphone (blank = leave unchanged):")
-            micNameEdit := settingsGui.Add("Edit", "x50 y140 w300", this.Get("MicrophoneName"))
+            UITheme.AddSectionLabel(settingsGui, "Microphone", "x" x " y" (UITheme.margin + 44) " w" w)
+            checkboxes["SwapMicrophoneOnLogin"] := settingsGui.Add("Checkbox", "x" x " y+8 w" w, "Select a &microphone when PowerScribe logs in")
+            settingsGui.Add("Text", "x" x " y+12 w" w, "Microphone &name")
+            micNameEdit := settingsGui.Add("Edit", "x" x " y+4 w" w, this.Get("MicrophoneName"))
+            UITheme.SetPlaceholder(micNameEdit, "For example, PowerMic")
+            UITheme.AddNote(
+                settingsGui,
+                "An exact device name is best. A partial name such as PowerMic works when it matches only one device.",
+                "x" x " y+6 w" w
+            )
 
             tab.UseTab(3)
-            settingsGui.Add("GroupBox", "x35 y55 w330 h260", "New-study notifications")
-            checkboxes["AudioAlertNewCase"] := settingsGui.Add("Checkbox", "x50 y80", "Play sound on new case")
-            checkboxes["MessageBoxNewCase"] := settingsGui.Add("Checkbox", "x50 y106", "Show Windows notification on new case")
-            settingsGui.Add("Text", "x50 y140", "Alert sound:")
-            soundDropDown := settingsGui.Add("DropDownList", "x50 y163 w300", this.alertSounds)
+            UITheme.AddSectionLabel(settingsGui, "When a new study arrives", "x" x " y" (UITheme.margin + 44) " w" w)
+            checkboxes["AudioAlertNewCase"] := settingsGui.Add("Checkbox", "x" x " y+8 w" w, "Play a &sound")
+            checkboxes["MessageBoxNewCase"] := settingsGui.Add("Checkbox", "x" x " y+6 w" w, "Show a &Windows notification")
+            UITheme.AddSectionLabel(settingsGui, "Sound", "x" x " y+18 w" w)
+            buttonWidth := UITheme.buttonWidth
+            soundDropDown := settingsGui.Add("DropDownList", "x" x " y+8 w" (w - buttonWidth - UITheme.gap), this.alertSounds)
             soundDropDown.Value := this.FindSoundIndex(this.Get("AlertSound"))
-            settingsGui.Add("Text", "x50 y200", "Custom sound file:")
-            customSoundEdit := settingsGui.Add("Edit", "x50 y223 w225 ReadOnly", this.Get("CustomSoundFile"))
-            settingsGui.Add("Button", "x285 y221 w65", "Browse")
-                .OnEvent("Click", (*) => this.BrowseSound(customSoundEdit))
-            settingsGui.Add("Button", "x50 y263 w65", "Test")
-                .OnEvent("Click", (*) => this.TestSound(soundDropDown.Text, customSoundEdit.Text))
+            settingsGui.Add("Button", "x+" UITheme.gap " yp-1 w" buttonWidth " h" UITheme.buttonHeight, "&Test")
+                .OnEvent("Click", (*) => (
+                    settingsGui.Opt("+OwnDialogs"),
+                    this.TestSound(soundDropDown.Text, customSoundEdit.Text)
+                ))
+            settingsGui.Add("Text", "x" x " y+12 w" w, "Custom sound file")
+            customSoundEdit := settingsGui.Add("Edit", "x" x " y+4 w" (w - buttonWidth - UITheme.gap) " ReadOnly", this.Get("CustomSoundFile"))
+            browseButton := settingsGui.Add("Button", "x+" UITheme.gap " yp-2 w" buttonWidth " h" UITheme.buttonHeight, "Br&owse...")
+            browseButton.OnEvent("Click", (*) => (
+                settingsGui.Opt("+OwnDialogs"),
+                this.BrowseSound(customSoundEdit)
+            ))
+            UITheme.AddNote(settingsGui, "A .wav or .mp3 file, played when the sound is Custom File.", "x" x " y+6 w" w)
 
             for setting, checkbox in checkboxes {
                 checkbox.Value := this.Get(setting)
             }
+
+            ; Controls that only matter for one choice follow it.
+            syncMicrophone := (*) => micNameEdit.Enabled := checkboxes["SwapMicrophoneOnLogin"].Value
+            checkboxes["SwapMicrophoneOnLogin"].OnEvent("Click", syncMicrophone)
+            syncMicrophone()
+            syncCustomSound := (*) => browseButton.Enabled := soundDropDown.Text = "Custom File"
+            soundDropDown.OnEvent("Change", syncCustomSound)
+            syncCustomSound()
 
             tab.UseTab()
             controls := {
@@ -338,12 +372,18 @@ class Settings {
                 soundDropDown: soundDropDown,
                 customSound: customSoundEdit
             }
-            settingsGui.Add("Button", "x110 y365 w80 Default", "Save")
-                .OnEvent("Click", (*) => this.SaveSettings(controls, settingsGui))
-            settingsGui.Add("Button", "x210 y365 w80", "Cancel")
-                .OnEvent("Click", (*) => settingsGui.Destroy())
+            cancel := (*) => settingsGui.Destroy()
+            UITheme.AddFooter(settingsGui, width, [
+                {
+                    text: "Save",
+                    default: true,
+                    action: (*) => (settingsGui.Opt("+OwnDialogs"), this.SaveSettings(controls, settingsGui))
+                },
+                {text: "Cancel", action: cancel}
+            ])
             ; The title-bar X must destroy like Cancel; Close only hides by default.
-            settingsGui.OnEvent("Close", (*) => settingsGui.Destroy())
+            settingsGui.OnEvent("Close", cancel)
+            settingsGui.OnEvent("Escape", cancel)
 
             settingsGui.Show("w" this.dialogLogicalWidth " h" this.dialogLogicalHeight)
             return settingsGui

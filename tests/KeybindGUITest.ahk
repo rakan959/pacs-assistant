@@ -79,7 +79,11 @@ class KeybindGUITest {
         "TestDiscardBeforeRenameRestoresRuntimeAndMainView",
         "TestDiscardBeforeCaseRenameKeepsStoredRuntime",
         "TestSuccessfulMainRenameDoesNotReapplyHotkeys",
-        "TestDefaultProfileSelectionRequiresExactRenderedName",
+        "TestProfileSelectionRequiresTheExactName",
+        "TestProfileSummaryCountsFunctionsAndNamesTheDefault",
+        "TestScopeChoiceMapsTheDialogToFlags",
+        "TestScopeWithNoWindowTickedIsRefused",
+        "TestMainViewRefreshNeedsTheLiveMainWindow",
         "TestCreateProfileSurfacesStorageRecovery",
         "TestDirtyScopeEditBlocksProfileSwitchWhenCancelled",
         "TestClosingSavesDirtyProfileBeforeExit",
@@ -2191,10 +2195,63 @@ class KeybindGUITest {
         Assert.False(editor.IsProfileDirty("night"))
     }
 
-    TestDefaultProfileSelectionRequiresExactRenderedName() {
-        Assert.Equal(2, this.gui.DefaultProfileListIndex(["AA *", "A *"], "A"))
-        Assert.Equal(1, this.gui.DefaultProfileListIndex(["A *", "AA *"], "A"))
-        Assert.Equal(0, this.gui.DefaultProfileListIndex(["AA *"], "A"))
+    TestProfileSelectionRequiresTheExactName() {
+        Assert.Equal(2, this.gui.ProfileListIndex(["AA", "A"], "A"))
+        Assert.Equal(1, this.gui.ProfileListIndex(["A", "AA"], "A"))
+        Assert.Equal(0, this.gui.ProfileListIndex(["AA"], "A"))
+        Assert.Equal(0, this.gui.ProfileListIndex(["a"], "A"))
+        Assert.Equal(0, this.gui.ProfileListIndex(["A"], ""))
+    }
+
+    TestProfileSummaryCountsFunctionsAndNamesTheDefault() {
+        Assert.Equal("1 function", KeybindGUI.ProfileSummary(false, 1))
+        Assert.Equal("12 functions, opens at startup", KeybindGUI.ProfileSummary(true, 12))
+        Assert.True(InStr(KeybindGUI.ProfileSummary(true, 0), "Add Function") > 0)
+    }
+
+    TestScopeChoiceMapsTheDialogToFlags() {
+        anyWindow := KeybindGUI.ScopeChoice(true, true, true)
+        Assert.False(anyWindow.requirePACS)
+        Assert.False(anyWindow.requirePowerScribe)
+        Assert.Equal(0, KeybindGUI.ScopeChoice(false, false, false))
+        both := KeybindGUI.ScopeChoice(false, 1, 1)
+        Assert.Equal(
+            "PACS or PowerScribe",
+            HotkeyContract.ScopeFromFlags(both.requirePACS, both.requirePowerScribe)
+        )
+        onlyPowerScribe := KeybindGUI.ScopeChoice(false, 0, 1)
+        Assert.Equal(
+            "PowerScribe",
+            HotkeyContract.ScopeFromFlags(onlyPowerScribe.requirePACS, onlyPowerScribe.requirePowerScribe)
+        )
+    }
+
+    ; "Only these windows" with none ticked would silently mean any window. The
+    ; dialog says so instead and leaves the scope alone.
+    TestScopeWithNoWindowTickedIsRefused() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "PACS"
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "PACS")
+        result := this.gui.SubmitScope("Sign Report", false, false, false, listView, 1, FakeProfileDialog())
+
+        Assert.False(result)
+        Assert.Equal("PACS", profile.scopes["Sign Report"])
+        Assert.Equal(1, TestRunner.dialogs.Length)
+        Assert.Equal("Choose a Window", TestRunner.dialogs[1].title)
+    }
+
+    ; Editors built without a window (as here) and windows already replaced must
+    ; not be touched by the status refresh that every profile change triggers.
+    TestMainViewRefreshNeedsTheLiveMainWindow() {
+        Assert.False(this.gui.RefreshMainView())
+        editor := {base: KeybindGUI.Prototype, gui: "", mainView: {gui: FakeProfileDialog()}}
+        Assert.False(editor.RefreshMainView())
+        editor.MarkProfileDirty("Test")
+        Assert.True(editor.IsProfileDirty("Test"))
     }
 
     TestSuccessfulMainRenameDoesNotReapplyHotkeys() {

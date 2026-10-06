@@ -58,8 +58,20 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 
 2) **Initial setup**
 - Launch, create a profile, assign keybinds, and set notification/update preferences.
-- Keybind edits become active immediately. Use **Save** to persist them; closing the
-  app or switching profiles prompts to save, discard, or keep editing when changes remain.
+- The main window lists the profile's functions with their keybinds and the window each
+  one is active in. Select a function and use **Set Keybind**, **Set Scope** or
+  **Remove**; or double-click it or press F2 to set its keybind, press Delete to remove
+  it, or right-click it for the same commands.
+- Keybind edits become active immediately. **Save Changes** persists them; it is enabled
+  only while there are unsaved changes, and the status bar says whether there are any.
+  Closing the app or switching profiles prompts to save, discard, or keep editing when
+  changes remain.
+- The **Profile**, **Tools** and **Help** menus hold the rest: switching and renaming
+  profiles, Settings, modality attendings, the data folder (settings, profiles and
+  `error.log`), update checks and the version.
+- The tray icon opens the window when double-clicked. Its menu also opens Settings and
+  the update check, suspends every keybind until resumed, and exits. Closing the
+  window exits too.
 
 3) **Wet read workflow**
 - Copy your wet read text to clipboard.
@@ -78,8 +90,9 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 
 4) **Keybind scope**
 - Select a bind and click **Set Scope**.
-- Tick PACS and/or PowerScribe to fire only when one of them is in front; leave both
-  unticked for a bind that works everywhere.
+- Choose **In any window**, or **Only when one of these is the active window** and tick
+  PACS, PowerScribe or both. Outside its scope the key passes through to whichever app
+  is in front.
 
 5) **Modality attendings**
 - Click **Modality Attendings** to assign an attending per modality for the current profile.
@@ -93,10 +106,14 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - Assignments are per profile, so a call shift assigned by modality can be its own profile.
 
 ## Settings
-- Auto refresh PACS: turns on new-study scanning at the set interval, and the refresh
-  click before each scan (semantic refresh clicking remains disabled until the exact
-  live control identity is approved). Off by default. The scan runs only while a new-case
-  sound or Windows notification is also on, since alerts are all it is used for.
+Settings has three tabs: General (updates and the PACS worklist), PowerScribe (the
+microphone) and Notifications (new-study alerts and their sound).
+
+- Refresh PACS and scan for new studies automatically: turns on new-study scanning at
+  the set interval, and the refresh click before each scan (semantic refresh clicking
+  remains disabled until the exact live control identity is approved). Off by default.
+  The scan runs only while a new-case sound or Windows notification is also on, since
+  alerts are all it is used for.
 - PowerScribe: set microphone on login, and the name to match. An exact name is
   preferred; a partial name such as `PowerMic` is accepted only when exactly one
   full device name matches.
@@ -231,7 +248,7 @@ if ($process.ExitCode -ne 0) {
 
 | File | Holds |
 |---|---|
-| `main.ahk` | Startup: update check, PACS monitor, microphone watcher, GUI |
+| `main.ahk` | Startup: update check, PACS monitor, microphone watcher, GUI, tray menu |
 | `PACSCommands.ahk` | The command registry — what can be bound to a key |
 | `PowerScribe.ahk` | Report reading, modality classification, attending routing |
 | `AppControl.ahk` | Restarting PACS, the save-changes prompt, window toggles |
@@ -241,7 +258,10 @@ if ($process.ExitCode -ne 0) {
 | `UIAElementIdentity.ahk` | UIA element identity checks used when revalidating targets |
 | `PACSMonitor.ahk` | Worklist polling and new-study alerts |
 | `MicrophoneManager.ahk` | Microphone selection on the PowerScribe login screen |
-| `KeybindGUI.ahk` | Main window and its dialogs |
+| `KeybindGUI.ahk` | Main window (menus, keybind list, status bar) and its dialogs |
+| `UITheme.ahk` | Shared window style: font, colors, spacing, headings and footer buttons |
+| `AppTray.ahk` | The tray icon's menu |
+| `pacs-assistant.ico` | App icon, compiled into the EXE and set for source runs |
 | `HotkeyManager.ahk` | Hotkey registration and window scoping |
 | `HotkeyContract.ahk` | Shared persisted/runtime hotkey contract and identity |
 | `ProfileManager.ahk` | Profile load/save |

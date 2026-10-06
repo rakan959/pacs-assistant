@@ -1159,10 +1159,11 @@ UpdateReleaseJson(version) {
         . ']}'
 }
 
-; Clicks a dialog button the way a user does, then lets its handler run.
+; Clicks a dialog button the way a user does, then lets its handler run. The text
+; is the label as shown, without the & that marks its keyboard mnemonic.
 ClickDialogButton(dialogGui, text) {
     for , control in dialogGui {
-        if (control.Type = "Button" && control.Text = text) {
+        if (control.Type = "Button" && StrReplace(control.Text, "&") = text) {
             SendMessage(0xF5, 0, 0, control)  ; BM_CLICK
             Sleep(50)
             return

@@ -103,6 +103,7 @@ $winHttpMetadataWorkerMain = Get-Content -Raw (Join-Path $repoRoot 'WinHttpMetad
 $updateNetworking = $updateChecker + $winHttpTransport + $winHttpTextRequest + $winHttpMetadataWorker + $winHttpMetadataWorkerMain
 $appControl = Get-Content -Raw (Join-Path $repoRoot 'AppControl.ahk')
 $keybindGui = Get-Content -Raw (Join-Path $repoRoot 'KeybindGUI.ahk')
+$appTray = Get-Content -Raw (Join-Path $repoRoot 'AppTray.ahk')
 $exclusiveOperations = Get-Content -Raw (Join-Path $repoRoot 'ExclusiveOperations.ahk')
 $guiSmoke = Get-Content -Raw (Join-Path $repoRoot 'tests/run-gui-smoke.ahk')
 $runTests = Get-Content -Raw (Join-Path $repoRoot 'tests/RunTests.ahk')
@@ -506,6 +507,12 @@ Assert-Matches $main '(?m)^#SingleInstance\s+Ignore\s*$' 'A second launch must n
 Assert-NotMatches $main '(?m)^#SingleInstance\s+Force\s*$' 'Force replacement bypasses shutdown and clinical transaction gates.'
 Assert-Matches $main 'OnExit\(\(exitReason, exitCode\) => kbGUI\.HandleProcessExit\(exitReason, exitCode\)\)' 'Tray and external exits must use the authoritative shutdown coordinator.'
 Assert-Matches $main 'UpdateChecker\.shutdownCoordinator\s*:=\s*kbGUI' 'Self-update must use the same shutdown coordinator as normal exit.'
+Assert-Matches $main '(?s)OnExit\(\(exitReason, exitCode\) => kbGUI\.HandleProcessExit\(exitReason, exitCode\)\).*AppTray\.Install\(kbGUI\)' 'The tray menu must be installed after the shutdown coordinator, so its Exit passes the same gate.'
+Assert-NotMatches $appTray 'AddStandard' 'The tray menu must not restore AutoHotkey''s standard items: Pause Script would silently stop monitoring.'
+Assert-Matches $main '(?m)^;@Ahk2Exe-SetMainIcon pacs-assistant\.ico\s*$' 'Compiled builds must carry the app icon.'
+if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'pacs-assistant.ico') -PathType Leaf)) {
+    $failures.Add('pacs-assistant.ico must exist: main.ahk compiles it in and sets it for source runs.')
+}
 Assert-Matches $main 'PACSCommands\.commandAvailabilityProbe\s*:=\s*\(\*\)\s*=>\s*ExclusiveOperations\.Active\("clinical"\)\s*=\s*""' 'Clinical commands must be gated by every other exclusive operation through the shared classifier.'
 Assert-Matches $main 'UpdateChecker\.clinicalActivityProbe\s*:=\s*\(\*\)\s*=>\s*PACSCommands\.clinicalCommandActive' 'Self-update must see an active clinical command.'
 Assert-Matches $main 'Settings\.mutationGuard\s*:=\s*\(\*\)\s*=>\s*ExclusiveOperations\.Active\("settingsWrite"\)\s*=\s*""' 'Settings writes must be gated by every other exclusive operation through the shared classifier.'
