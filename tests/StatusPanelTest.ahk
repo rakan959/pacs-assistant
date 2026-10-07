@@ -9,7 +9,8 @@ class StatusPanelTest {
         "TestScanningSaysWhyItIsNotRunning",
         "TestScanningReportsTheLastReadAndFailures",
         "TestMicrophoneRowReportsTheLastSelectionOrError",
-        "TestUpdateRowNamesAnAvailableVersion"
+        "TestUpdateRowNamesAnAvailableVersion",
+        "TestUpdateRowNeedsASuccessfulCheck"
     ]
 
     TestKeybindRowWarnsWhenSomeAreNotLive() {
@@ -58,10 +59,25 @@ class StatusPanelTest {
 
     TestUpdateRowNamesAnAvailableVersion() {
         Assert.Equal("off", StatusPanel.UpdateState(false, true, 0).tone)
-        Assert.Equal("ok", StatusPanel.UpdateState(true, true, 0).tone)
         Assert.Equal("Automatic checks are off", StatusPanel.UpdateState(true, false, 0).value)
         available := StatusPanel.UpdateState(true, true, {hasUpdate: true, latestVersion: "v2.1.0"})
         Assert.Equal("warn", available.tone)
         Assert.True(InStr(available.value, "v2.1.0 is available") = 1)
+    }
+
+    ; Up to date only once a check has succeeded; a failure says so.
+    TestUpdateRowNeedsASuccessfulCheck() {
+        waiting := StatusPanel.UpdateState(true, true, 0)
+        Assert.Equal("off", waiting.tone)
+        Assert.Equal("Checked automatically; no check has finished yet", waiting.value)
+        today := SubStr(A_Now, 1, 8) "141500"
+        checked := StatusPanel.UpdateState(true, true, 0, today)
+        Assert.Equal("ok", checked.tone)
+        Assert.Equal("Up to date as of 2:15 PM; checked automatically", checked.value)
+        earlier := StatusPanel.UpdateState(true, false, 0, "20261001090500")
+        Assert.Equal("Up to date as of Oct 1, 9:05 AM; automatic checks are off", earlier.value)
+        failed := StatusPanel.UpdateState(true, true, 0, today, "The server could not be reached")
+        Assert.Equal("warn", failed.tone)
+        Assert.Equal("The last check failed: The server could not be reached", failed.value)
     }
 }

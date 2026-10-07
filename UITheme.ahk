@@ -140,6 +140,8 @@ class UITheme {
         this.UpdateMode()
         ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
         window := Gui(options, title)
+        ; The mode it is built in: a window rebuilt for a theme change compares it.
+        window.themeMode := this.mode
         this.Style(window)
         return window
     }

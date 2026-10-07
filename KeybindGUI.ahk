@@ -22,6 +22,8 @@
 class KeybindGUI {
     gui := ""
     profileSelectorGui := 0
+    ; The new-profile prompt last shown; a theme change rebuilds it while it is open.
+    newProfilePrompt := 0
     ; Controls of the live main window that RefreshMainView updates; see BuildMainView.
     mainView := 0
     static isListening := false
@@ -94,8 +96,6 @@ class KeybindGUI {
         profileName := ProfileManager.currentProfile
         this.gui := UITheme.NewWindow("PACS Assistant - " profileName, "+Resize")
         view := this.BuildMainView(this.gui, profileName)
-        ; The theme it is built in: ApplyThemeChange rebuilds it when that changes.
-        view.mode := UITheme.mode
         this.mainView := view
 
         ; Close hides the window after any callback that does not return true. Every
@@ -129,20 +129,39 @@ class KeybindGUI {
     }
 
     /**
-     * Rebuilds the main window when the theme it was built in is no longer current:
-     * the Theme setting, Windows' app mode or high contrast changed. Its dialogs
-     * would close with it, so while one is open, or another operation runs, it
-     * tries again shortly. The window keeps its place, visibility and selection.
-     * @returns whether the main window is in the current theme
+     * Rebuilds the app's own windows built in a theme that is no longer current
+     * (the Theme setting, Windows' app mode or high contrast changed): the main
+     * window, the profile selector and the new-profile prompt, whichever are open.
+     * A window's dialogs would close with it, so while one is open, or another
+     * operation runs, it tries again shortly.
+     * @returns whether those windows are in the current theme
      */
     ApplyThemeChange(*) {
         mode := UITheme.UpdateMode()
-        if !(this.HasMainWindow() && this.HasOwnProp("mainView") && this.mainView.mode != mode)
+        stale := []
+        if (this.HasMainWindow() && this.HasOwnProp("mainView") && this.gui.themeMode != mode)
+            stale.Push({window: this.gui, rebuild: ObjBindMethod(this, "RebuildMainWindow")})
+        if (this.ProfileSelectorIsCurrent(this.profileSelectorGui) && this.profileSelectorGui.themeMode != mode)
+            stale.Push({window: this.profileSelectorGui, rebuild: ObjBindMethod(this, "RebuildProfileSelector")})
+        if (this.GuiIsLive(this.newProfilePrompt) && this.newProfilePrompt.themeMode != mode)
+            stale.Push({window: this.newProfilePrompt, rebuild: ObjBindMethod(this, "RebuildNewProfilePrompt")})
+        if !stale.Length
             return true
-        if (ExclusiveOperations.Active() != "" || this.MainWindowHasOpenDialog()) {
+        waiting := ExclusiveOperations.Active() != ""
+        for item in stale
+            waiting := waiting || this.WindowHasOpenDialog(item.window)
+        if waiting {
             this.QueueThemeCheck(2000)
             return false
         }
+        for item in stale
+            item.rebuild.Call()
+        return true
+    }
+
+    ; The main window, rebuilt in the current theme with its place, visibility and
+    ; selection.
+    RebuildMainWindow() {
         visible := DllCall("IsWindowVisible", "Ptr", this.gui.Hwnd)
         active := WinActive(this.gui)
         minMax := WinGetMinMax(this.gui)
@@ -164,7 +183,41 @@ class KeybindGUI {
             if active
                 this.mainView.list.Focus()
         }
-        return true
+    }
+
+    ; The profile selector, rebuilt in the current theme where it was. Its
+    ; profile operations each run under the profile lease, so it is rebuilt
+    ; under that lease too.
+    RebuildProfileSelector() {
+        if !this.BeginProfileMutationTransaction("apply the theme")
+            return false
+        try {
+            selector := this.profileSelectorGui
+            WinGetPos(&x, &y,,, selector)
+            this.RetireProfileSelector(selector)
+            WinMove(x, y,,, this.ShowProfileSelector())
+            return true
+        } finally this.EndProfileMutationTransaction()
+    }
+
+    ; The new-profile prompt, rebuilt in the current theme where it was, with the
+    ; name typed and the file chosen to import.
+    RebuildNewProfilePrompt() {
+        if !this.BeginProfileMutationTransaction("apply the theme")
+            return false
+        try {
+            prompt := this.newProfilePrompt
+            WinGetPos(&x, &y,,, prompt)
+            rebuilt := this.PromptNewProfile()
+            rebuilt.nameEdit.Value := prompt.nameEdit.Value
+            if HasProp(prompt, "importSource") {
+                rebuilt.importSource := prompt.importSource
+                rebuilt.importNote.Value := prompt.importNote.Value
+            }
+            prompt.Destroy()
+            WinMove(x, y,,, rebuilt)
+            return true
+        } finally this.EndProfileMutationTransaction()
     }
 
     ; Queues a theme check for a Windows setting change (WM_SETTINGCHANGE). Every
@@ -179,22 +232,31 @@ class KeybindGUI {
         SetTimer(this.themeCheck, -delayMs)
     }
 
-    ; Whether a window the main window owns (a dialog) is open: rebuilding the
-    ; main window would close it.
-    MainWindowHasOpenDialog() {
+    ; Whether a window the given one owns (a dialog) is open: rebuilding the
+    ; owner would close it.
+    WindowHasOpenDialog(owner) {
         for hwnd in WinGetList("ahk_pid " DllCall("GetCurrentProcessId")) {
-            if (DllCall("GetWindow", "Ptr", hwnd, "UInt", 4, "Ptr") = this.gui.Hwnd)  ; GW_OWNER
+            if (DllCall("GetWindow", "Ptr", hwnd, "UInt", 4, "Ptr") = owner.Hwnd)  ; GW_OWNER
                 return true
         }
         return false
     }
 
-    ; Moves the hidden main window to its saved place when that is still on a
-    ; monitor. @returns whether it was last maximized
+    /**
+     * Moves the hidden main window to its saved place when that is still on a
+     * monitor. Without one (a first run, or a monitor since removed), it saves
+     * the place the window opens in, so a window maximized before it is ever
+     * moved still has a place to restore to, and reopens maximized.
+     * @returns whether it was last maximized
+     */
     RestoreMainWindowPlacement() {
         saved := WindowPlacement.Load()
-        if !WindowPlacement.IsReachable(saved, WindowPlacement.WorkAreas())
+        if !WindowPlacement.IsReachable(saved, WindowPlacement.WorkAreas()) {
+            WinGetPos(&x, &y, &w, &h, this.gui)
+            WindowPlacement.SaveRect(x, y, w, h)
+            WindowPlacement.SaveMaximized(false)
             return false
+        }
         WinMove(saved.x, saved.y, saved.w, saved.h, this.gui)
         return saved.maximized
     }
@@ -1213,6 +1275,7 @@ class KeybindGUI {
         )
         inputGui.Add("Text", "xm y+14 w" width, "Profile &name")
         nameEdit := inputGui.Add("Edit", "xm y+4 r1 w" width)
+        inputGui.nameEdit := nameEdit
         UITheme.SetPlaceholder(nameEdit, "For example, Neuro or Night Float")
         close := (*) => (this.CloseNewProfilePrompt(inputGui), true)
         UITheme.AddFooter(
@@ -1229,6 +1292,7 @@ class KeybindGUI {
         if !firstProfile
             inputGui.OnEvent("Escape", close)
         UITheme.ShowDialog(inputGui)
+        this.newProfilePrompt := inputGui
         return inputGui
     }
 

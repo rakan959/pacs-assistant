@@ -49,6 +49,11 @@ class UpdateChecker {
     static skippedVersion := ""  ; Track which version the user chose to skip
     static lastRemindTime := 0   ; Track when the user last clicked "Remind Me Later"
     static pendingUpdateInfo := 0
+    ; The latest finished check, automatic or manual, for Tools > Status: when one
+    ; last succeeded (a timestamp, "" before any has), and why the most recent one
+    ; failed ("" when it succeeded).
+    static lastCheckTime := ""
+    static lastCheckError := ""
     static notifiedVersion := ""
     static updateDialog := 0
     static updateAvailableNotifier := (text, title, options) => TrayTip(text, title, options)
@@ -147,6 +152,7 @@ class UpdateChecker {
 
         try {
             updateInfo := this.ProcessReleaseResponse(response, stableOnly)
+            this.RecordCheckOutcome()
             this.autoCheckFailureLogged := false
             if updateInfo.hasUpdate
                 this.RecordAvailableUpdate(updateInfo)
@@ -176,11 +182,23 @@ class UpdateChecker {
     ; The hourly check fails every time on an offline workstation, so only the first
     ; failure after a successful check is logged.
     static RecordAutoCheckFailure(err) {
+        this.RecordCheckOutcome(err)
         OutputDebug("Update check failed: " ErrorText.Message(err))
         if this.autoCheckFailureLogged
             return
         this.autoCheckFailureLogged := true
         AppLog.Write("Automatic update check failed: " ErrorText.Describe(err))
+    }
+
+    ; Records a finished check for Tools > Status: a success, or the error that
+    ; ended it.
+    static RecordCheckOutcome(err := 0) {
+        if err {
+            this.lastCheckError := ErrorText.Message(err)
+            return
+        }
+        this.lastCheckTime := A_Now
+        this.lastCheckError := ""
     }
 
     static OnSettingsChanged() {
@@ -585,6 +603,7 @@ class UpdateChecker {
             return
         try {
             updateInfo := this.ProcessReleaseResponse(response, stableOnly, false)
+            this.RecordCheckOutcome()
             if (!updateInfo.hasUpdate && HasProp(updateInfo, "skippedVersion")) {
                 this.manualResultNotifier.Call(
                     "Version " updateInfo.skippedVersion " is available, but it was skipped with Skip This Version.",
@@ -613,6 +632,7 @@ class UpdateChecker {
             }
             this.ShowUpdateDialog(updateInfo)
         } catch as err {
+            this.RecordCheckOutcome(err)
             AppLog.Write("Update check failed: " ErrorText.Describe(err))
             this.manualResultNotifier.Call(
                 "The update check failed: " err.Message,
@@ -625,6 +645,7 @@ class UpdateChecker {
     static FailManualCheck(slot, err) {
         if !this.ClaimSlot(slot)
             return
+        this.RecordCheckOutcome(err)
         AppLog.Write("Update check failed: " ErrorText.Describe(err))
         this.manualResultNotifier.Call(
             "The update check failed: " ErrorText.Message(err),

@@ -2458,8 +2458,12 @@ class KeybindGUITest {
         saved := UIThemeFixture.Save()
         mainGui := Gui()
         try {
+            mainGui.themeMode := builtMode
             this.gui.gui := mainGui
-            this.gui.mainView := {mode: builtMode}
+            this.gui.mainView := {}
+            ; Set on a real instance by its field initializers.
+            this.gui.profileSelectorGui := 0
+            this.gui.newProfilePrompt := 0
             rebuilds := 0
             this.gui.DefineProp("CreateMainGUI", {Call: (*) => rebuilds++})
             UIThemeFixture.Use("Dark", false, false)

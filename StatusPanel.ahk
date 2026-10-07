@@ -44,7 +44,9 @@ class StatusPanel {
             this.UpdateState(
                 UpdateChecker.updateCheckEligibleProbe.Call(),
                 Settings.Get("AutoUpdate"),
-                UpdateChecker.pendingUpdateInfo
+                UpdateChecker.pendingUpdateInfo,
+                UpdateChecker.lastCheckTime,
+                UpdateChecker.lastCheckError
             )
         ]
     }
@@ -95,14 +97,24 @@ class StatusPanel {
         return (row.value := "'" name "' is selected at the next PowerScribe login", row.tone := "ok", row)
     }
 
-    static UpdateState(eligible, autoUpdate, pendingUpdateInfo) {
+    ; "Up to date" only once a check has succeeded: the first automatic check is
+    ; still running at startup, and an offline workstation never completes one.
+    static UpdateState(eligible, autoUpdate, pendingUpdateInfo, lastCheckTime := "", lastCheckError := "") {
         row := {label: "Updates"}
         if !eligible
             return (row.value := "Not checked by this build (development build)", row.tone := "off", row)
         if (IsObject(pendingUpdateInfo) && HasProp(pendingUpdateInfo, "hasUpdate") && pendingUpdateInfo.hasUpdate)
             return (row.value := pendingUpdateInfo.latestVersion " is available: Help > Check for Updates", row.tone := "warn", row)
-        return (row.value := autoUpdate ? "Checked automatically; up to date" : "Automatic checks are off", row.tone := autoUpdate ? "ok" : "off", row)
+        if (lastCheckError != "")
+            return (row.value := "The last check failed: " lastCheckError, row.tone := "warn", row)
+        schedule := autoUpdate ? "checked automatically" : "automatic checks are off"
+        if (lastCheckTime != "")
+            return (row.value := "Up to date as of " this.When(lastCheckTime) "; " schedule, row.tone := autoUpdate ? "ok" : "off", row)
+        return (row.value := autoUpdate ? "Checked automatically; no check has finished yet" : "Automatic checks are off", row.tone := "off", row)
     }
+
+    ; A timestamp as a time today, or with its date on another day.
+    static When(timestamp) => FormatTime(timestamp, SubStr(timestamp, 1, 8) = SubStr(A_Now, 1, 8) ? "h:mm tt" : "MMM d, h:mm tt")
 
     static ToneColor(tone) => tone = "ok" ? UITheme.okColor : tone = "warn" ? UITheme.warningColor : UITheme.secondaryColor
 

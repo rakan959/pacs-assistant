@@ -250,6 +250,8 @@ Main() {
 
     CheckWindowBehaviour(kb)
     CheckThemeChange(kb)
+    CheckSelectorThemeChange(kb)
+    CheckFirstRunPlacement(kb)
     CheckCommandFeedback()
     return DesktopChecks.Finish("checks")
 }
@@ -262,7 +264,7 @@ CheckThemeChange(kb) {
     lightGui := kb.gui
     try {
         Settings.SaveValues(Map("Theme", "Dark"))
-        Assert(kb.ApplyThemeChange() && kb.gui != lightGui && kb.mainView.mode = "dark", "a change to Dark rebuilds the main window dark")
+        Assert(kb.ApplyThemeChange() && kb.gui != lightGui && kb.gui.themeMode = "dark", "a change to Dark rebuilds the main window dark")
         hwnd := kb.gui.Hwnd
         WinGetPos(&x2, &y2, &w2, &h2, "ahk_id " hwnd)
         Assert(x2 = x && y2 = y && w2 = w && h2 = h && DllCall("IsWindowVisible", "Ptr", hwnd), "the rebuilt window keeps its place and stays open")
@@ -274,7 +276,62 @@ CheckThemeChange(kb) {
         Settings.SaveValues(Map("Theme", "Light"))
         kb.ApplyThemeChange()
     }
-    Assert(kb.mainView.mode = "light" && !TitleBarIsDark(kb.gui.Hwnd) && !DarkMenuBar.windows.Has(kb.gui.Hwnd), "a change back to Light rebuilds it light")
+    Assert(kb.gui.themeMode = "light" && !TitleBarIsDark(kb.gui.Hwnd) && !DarkMenuBar.windows.Has(kb.gui.Hwnd), "a change back to Light rebuilds it light")
+}
+
+; With no main window, the profile selector is the app's window, so a theme change
+; rebuilds it in place. Closing it then reopens the main window.
+CheckSelectorThemeChange(kb) {
+    selectorHwnd := OpenAndCaptureWindow("PACS Assistant - Profile Selection", () => kb.OpenProfileSelector())
+    lightSelector := kb.profileSelectorGui
+    WinGetPos(&x, &y,,, "ahk_id " selectorHwnd)
+    try {
+        Settings.SaveValues(Map("Theme", "Dark"))
+        Assert(kb.ApplyThemeChange(), "a theme change with only the profile selector open is applied")
+        selector := kb.profileSelectorGui
+        WinGetPos(&x2, &y2,,, "ahk_id " selector.Hwnd)
+        Assert(
+            selector != lightSelector && selector.themeMode = "dark" && TitleBarIsDark(selector.Hwnd) && x2 = x && y2 = y,
+            "the profile selector is rebuilt dark where it was"
+        )
+    } finally {
+        Settings.SaveValues(Map("Theme", "Light"))
+        kb.ApplyThemeChange()
+    }
+    Assert(kb.profileSelectorGui.themeMode = "light", "a change back to Light rebuilds the selector light")
+
+    ; The new-profile prompt is rebuilt too, with the name already typed.
+    prompt := kb.OpenNewProfilePrompt(kb.profileSelectorGui)
+    prompt.nameEdit.Value := "Night Float"
+    try {
+        Settings.SaveValues(Map("Theme", "Dark"))
+        kb.ApplyThemeChange()
+        rebuilt := kb.newProfilePrompt
+        Assert(
+            rebuilt != prompt && rebuilt.themeMode = "dark" && rebuilt.nameEdit.Value == "Night Float",
+            "the new-profile prompt is rebuilt dark, keeping the name typed"
+        )
+    } finally {
+        Settings.SaveValues(Map("Theme", "Light"))
+        kb.ApplyThemeChange()
+    }
+    CloseWindow(kb.newProfilePrompt.Hwnd)  ; back to the profile selector
+    CloseWindow(kb.profileSelectorGui.Hwnd)
+    Assert(kb.HasMainWindow(), "closing the rebuilt selector reopens the main window")
+}
+
+; A first run has no saved place: a window maximized before it is ever moved or
+; resized still reopens maximized.
+CheckFirstRunPlacement(kb) {
+    try FileDelete(WindowPlacement.Path())
+    kb.gui.Destroy()
+    kb.CreateMainGUI(false)
+    WinMaximize(kb.gui)
+    Sleep(300)
+    saved := WindowPlacement.Load()
+    Assert(IsObject(saved) && saved.maximized, "a first-run window maximized before it is moved reopens maximized")
+    WinRestore(kb.gui)
+    Sleep(200)
 }
 
 ; DWMWA_USE_IMMERSIVE_DARK_MODE

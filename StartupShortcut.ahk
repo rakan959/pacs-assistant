@@ -15,15 +15,30 @@ class StartupShortcut {
 
     static Path() => this.folder "\" this.fileName
 
-    static IsEnabled() => !!FileExist(this.Path())
+    /**
+     * Whether the shortcut starts this build. One left by a copy that has since
+     * moved does not count: the option then shows off, and turning it on replaces
+     * the shortcut.
+     */
+    static IsEnabled() {
+        if !FileExist(this.Path())
+            return false
+        try FileGetShortcut(this.Path(), &target,, &arguments)
+        catch
+            return false
+        expected := this.Expected()
+        return target = expected.target && arguments = expected.arguments
+    }
 
-    ; Creates the shortcut to this build: the EXE, or for a source run the
-    ; interpreter with this script.
+    ; What starts this build: the EXE, or for a source run the interpreter with
+    ; this script.
+    static Expected() => A_IsCompiled
+        ? {target: A_ScriptFullPath, arguments: ""}
+        : {target: A_AhkPath, arguments: '"' A_ScriptFullPath '"'}
+
     static Enable() {
-        if A_IsCompiled
-            FileCreateShortcut(A_ScriptFullPath, this.Path(), A_ScriptDir,, "PACS Assistant")
-        else
-            FileCreateShortcut(A_AhkPath, this.Path(), A_ScriptDir, '"' A_ScriptFullPath '"', "PACS Assistant")
+        expected := this.Expected()
+        FileCreateShortcut(expected.target, this.Path(), A_ScriptDir, expected.arguments, "PACS Assistant")
     }
 
     static Disable() {

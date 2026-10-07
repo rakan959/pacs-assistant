@@ -25,6 +25,7 @@ class UpdateCheckerTest {
         "TestManualCheckReportsASkippedVersion",
         "TestSettingsChangeKeepsAnUpdateDeferredByRemindLater",
         "TestSettingsChangeRestartsTimer",
+        "TestChecksRecordTheirOutcomeForStatus",
         "TestAutomaticCheckUsesAsyncTransport",
         "TestOnlyCompiledReleaseBuildsCheckForUpdates",
         "TestSynchronousAsyncFailureIsNotReportedAsStarted",
@@ -111,6 +112,10 @@ class UpdateCheckerTest {
         UpdateChecker.updateDialog := 0
         UpdateChecker.activeRequest := 0
         UpdateChecker.autoCheckFailureLogged := false
+        this.originalLastCheckTime := UpdateChecker.lastCheckTime
+        this.originalLastCheckError := UpdateChecker.lastCheckError
+        UpdateChecker.lastCheckTime := ""
+        UpdateChecker.lastCheckError := ""
     }
 
     TestVersionParsing() {
@@ -377,6 +382,28 @@ class UpdateCheckerTest {
         SetTestSetting("AutoUpdate", false)
         UpdateChecker.OnSettingsChanged()
         Assert.Equal(0, UpdateChecker.updateTimer)
+    }
+
+    ; Tools > Status reports "up to date" only after a check succeeded, and names
+    ; the error of one that failed.
+    TestChecksRecordTheirOutcomeForStatus() {
+        transport := FakeAsyncUpdateTransport()
+        UpdateChecker.transport := transport
+
+        Assert.True(UpdateChecker.BeginAutoCheck())
+        Assert.Equal("", UpdateChecker.lastCheckTime, "nothing has finished while the request runs")
+        transport.onError.Call(Error("The server could not be reached"))
+        Assert.Equal("", UpdateChecker.lastCheckTime)
+        Assert.Equal("The server could not be reached", UpdateChecker.lastCheckError)
+
+        Assert.True(UpdateChecker.BeginAutoCheck())
+        transport.Resolve({status: 200, body: UpdateReleaseJson("v0.0.0")})
+        Assert.True(UpdateChecker.lastCheckTime != "")
+        Assert.Equal("", UpdateChecker.lastCheckError)
+
+        Assert.True(UpdateChecker.BeginManualCheck())
+        transport.Resolve({status: 200, body: "invalid JSON"})
+        Assert.True(UpdateChecker.lastCheckError != "", "a manual check that fails is recorded too")
     }
 
     TestAutomaticCheckUsesAsyncTransport() {
@@ -985,6 +1012,8 @@ class UpdateCheckerTest {
         UpdateChecker.dialogAcquire := this.originalDialogAcquire
         UpdateChecker.dialogRelease := this.originalDialogRelease
         UpdateChecker.autoCheckFailureLogged := this.originalAutoCheckFailureLogged
+        UpdateChecker.lastCheckTime := this.originalLastCheckTime
+        UpdateChecker.lastCheckError := this.originalLastCheckError
         UpdateChecker.moveFile := this.originalMoveFile
         UpdateChecker.pendingUpdateInfo := this.originalPendingUpdateInfo
         UpdateChecker.notifiedVersion := this.originalNotifiedVersion

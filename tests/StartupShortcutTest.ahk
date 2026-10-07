@@ -5,7 +5,8 @@
 class StartupShortcutTest {
     static tests := [
         "TestEnablingCreatesAShortcutToThisBuild",
-        "TestDisablingRemovesTheShortcutAndToleratesItsAbsence"
+        "TestDisablingRemovesTheShortcutAndToleratesItsAbsence",
+        "TestAShortcutToAnotherCopyIsNotEnabled"
     ]
 
     ; Never the real Startup folder: a private folder under A_Temp.
@@ -30,6 +31,15 @@ class StartupShortcutTest {
         Assert.Equal(A_IsCompiled ? A_ScriptFullPath : A_AhkPath, target)
         if !A_IsCompiled
             Assert.Equal('"' A_ScriptFullPath '"', arguments)
+    }
+
+    ; A shortcut left by a copy that has since moved: the option shows off, and
+    ; turning it on points the shortcut at this build again.
+    TestAShortcutToAnotherCopyIsNotEnabled() {
+        FileCreateShortcut(A_WinDir "\notepad.exe", StartupShortcut.Path())
+        Assert.False(StartupShortcut.IsEnabled())
+        StartupShortcut.Set(true)
+        Assert.True(StartupShortcut.IsEnabled())
     }
 
     TestDisablingRemovesTheShortcutAndToleratesItsAbsence() {
