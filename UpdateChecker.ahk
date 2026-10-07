@@ -4,6 +4,7 @@
 
 #Requires AutoHotkey v2.0
 #Include Settings.ahk
+#Include UITheme.ahk
 #Include Version.ahk
 #Include JsonParser.ahk
 #Include ErrorText.ahk
@@ -48,6 +49,14 @@ class UpdateChecker {
     static skippedVersion := ""  ; Track which version the user chose to skip
     static lastRemindTime := 0   ; Track when the user last clicked "Remind Me Later"
     static pendingUpdateInfo := 0
+    ; The latest finished check, automatic or manual, for Tools > Status: when one
+    ; last succeeded (a timestamp, "" before any has), and why the most recent one
+    ; failed ("" when it succeeded).
+    static lastCheckTime := ""
+    static lastCheckError := ""
+    ; A newer release the latest successful check found but the user skipped
+    ; (Skip This Version), or "".
+    static lastSkippedVersion := ""
     static notifiedVersion := ""
     static updateDialog := 0
     static updateAvailableNotifier := (text, title, options) => TrayTip(text, title, options)
@@ -146,6 +155,7 @@ class UpdateChecker {
 
         try {
             updateInfo := this.ProcessReleaseResponse(response, stableOnly)
+            this.RecordCheckOutcome(, updateInfo)
             this.autoCheckFailureLogged := false
             if updateInfo.hasUpdate
                 this.RecordAvailableUpdate(updateInfo)
@@ -175,11 +185,26 @@ class UpdateChecker {
     ; The hourly check fails every time on an offline workstation, so only the first
     ; failure after a successful check is logged.
     static RecordAutoCheckFailure(err) {
+        this.RecordCheckOutcome(err)
         OutputDebug("Update check failed: " ErrorText.Message(err))
         if this.autoCheckFailureLogged
             return
         this.autoCheckFailureLogged := true
         AppLog.Write("Automatic update check failed: " ErrorText.Describe(err))
+    }
+
+    ; Records a finished check for Tools > Status: a success with its result, or
+    ; the error that ended it.
+    static RecordCheckOutcome(err := 0, updateInfo := 0) {
+        if err {
+            this.lastCheckError := ErrorText.Message(err)
+            return
+        }
+        this.lastCheckTime := A_Now
+        this.lastCheckError := ""
+        this.lastSkippedVersion := IsObject(updateInfo) && HasProp(updateInfo, "skippedVersion")
+            ? updateInfo.skippedVersion
+            : ""
     }
 
     static OnSettingsChanged() {
@@ -228,8 +253,11 @@ class UpdateChecker {
         }
         try {
             Settings.SaveValuesAtRevision(values, expectedRevision)
-            if IsSet(skippedVersion)
+            if IsSet(skippedVersion) {
                 this.skippedVersion := skippedVersion
+                ; Status names it from now on, not only after the next check.
+                this.lastSkippedVersion := skippedVersion
+            }
         } catch SettingsConflictError {
             MsgBox(
                 "Settings changed while this update dialog was open. Reopen it before saving preferences.",
@@ -562,6 +590,7 @@ class UpdateChecker {
         start := this.StartCheck(true)
         if !start.started {
             if start.error {
+                this.RecordCheckOutcome(start.error)
                 AppLog.Write("Update check failed: " ErrorText.Describe(start.error))
                 this.manualResultNotifier.Call(
                     "The update check could not start: " ErrorText.Message(start.error),
@@ -584,6 +613,7 @@ class UpdateChecker {
             return
         try {
             updateInfo := this.ProcessReleaseResponse(response, stableOnly, false)
+            this.RecordCheckOutcome(, updateInfo)
             if (!updateInfo.hasUpdate && HasProp(updateInfo, "skippedVersion")) {
                 this.manualResultNotifier.Call(
                     "Version " updateInfo.skippedVersion " is available, but it was skipped with Skip This Version.",
@@ -612,6 +642,7 @@ class UpdateChecker {
             }
             this.ShowUpdateDialog(updateInfo)
         } catch as err {
+            this.RecordCheckOutcome(err)
             AppLog.Write("Update check failed: " ErrorText.Describe(err))
             this.manualResultNotifier.Call(
                 "The update check failed: " err.Message,
@@ -624,6 +655,7 @@ class UpdateChecker {
     static FailManualCheck(slot, err) {
         if !this.ClaimSlot(slot)
             return
+        this.RecordCheckOutcome(err)
         AppLog.Write("Update check failed: " ErrorText.Describe(err))
         this.manualResultNotifier.Call(
             "The update check failed: " ErrorText.Message(err),
@@ -639,7 +671,7 @@ class UpdateChecker {
      * an unauthenticated 60/hour GitHub limit and can return a different answer from
      * the one the caller acted on.
      */
-    static ShowUpdateDialog(updateInfo?) {
+    static ShowUpdateDialog(updateInfo?, showOptions := "") {
         fromCache := !IsSet(updateInfo)
         if !IsSet(updateInfo) {
             if (IsObject(this.pendingUpdateInfo) && this.pendingUpdateInfo.hasUpdate)
@@ -681,28 +713,24 @@ class UpdateChecker {
                 this.CloseUpdateDialog(this.updateDialog)
             }
 
-            ; Create update dialog with modern styling
-            ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
-            updateGui := Gui(, "PACS Assistant - Update Available")
+            updateGui := UITheme.NewWindow("PACS Assistant - Update Available")
             updateGui.settingsRevision := Settings.revision
             updateGui.latestVersion := updateInfo.latestVersion
-            updateGui.SetFont("s10", "Segoe UI")  ; Modern font
+            updateGui.updateInfo := updateInfo
+            width := 440
 
-            ; Header
-            updateGui.Add("Text", "y10 w400", "A new version of PACS Assistant is available!")
-            updateGui.Add("Text", "y+10", "Current version: " updateInfo.currentVersion)
-            updateGui.Add("Text", "y+5", "Latest version: " updateInfo.latestVersion)
+            UITheme.AddHeading(updateGui, "A new version is available", "xm ym w" width)
+            UITheme.AddNote(
+                updateGui,
+                "PACS Assistant " updateInfo.latestVersion " is ready to install. You have " updateInfo.currentVersion ".",
+                "xm y+4 w" width
+            )
+            UITheme.AddSectionLabel(updateGui, "What's new", "xm y+16 w" width)
+            updateGui.Add("Edit", "xm y+6 r10 w" width " ReadOnly Background" UITheme.panelColor, updateInfo.releaseNotes)
 
-            ; Release notes with better formatting
-            updateGui.Add("Text", "y+15", "What's New:")
-            updateGui.Add("Edit", "y+5 r10 w400 ReadOnly", updateInfo.releaseNotes)
-
-            ; Auto-update checkbox
-            autoUpdateCheckbox := updateGui.Add("Checkbox", "y+10", "Automatically check for updates")
+            autoUpdateCheckbox := updateGui.Add("Checkbox", "xm y+14 w" width, "Check for updates &automatically")
             autoUpdateCheckbox.Value := Settings.Get("AutoUpdate")
-
-            ; Skip beta versions checkbox
-            skipBetaCheckbox := updateGui.Add("Checkbox", "y+5", "Skip beta versions")
+            skipBetaCheckbox := updateGui.Add("Checkbox", "xm y+6 w" width, "Skip &beta versions")
             skipBetaCheckbox.Value := Settings.Get("SkipBetaVersions")
 
             ; Gui.Destroy() does not raise Close, so every way out of the dialog saves
@@ -723,22 +751,34 @@ class UpdateChecker {
                 this.CloseUpdateDialog(updateGui)
             )
 
-            ; Buttons
-            updateGui.Add("GroupBox", "y+15 w400 h50")
-            updateGui.Add("Button", "xp+10 yp+15 w120", "Update Now").OnEvent("Click", (*) => (
-                saveChoices() && this.PerformUpdate(updateInfo, updateGui)
-            ))
-            updateGui.Add("Button", "x+10 w120", "Remind Me Later").OnEvent("Click", (*) => (
-                saveChoices() && (this.RemindLater(), this.CloseUpdateDialog(updateGui))
-            ))
-            updateGui.Add("Button", "x+10 w120", "Skip This Version").OnEvent("Click", (*) => (
-                saveSkippedChoices() && this.CloseUpdateDialog(updateGui)
-            ))
+            footer := UITheme.AddFooter(
+                updateGui,
+                width,
+                [
+                    {text: "&Update Now", width: 112, default: true, action: (*) => (
+                        saveChoices() && this.PerformUpdate(updateInfo, updateGui)
+                    )},
+                    {text: "&Remind Me Later", width: 132, action: (*) => (
+                        saveChoices() && (this.RemindLater(), this.CloseUpdateDialog(updateGui))
+                    )}
+                ],
+                [
+                    {text: "S&kip This Version", width: 132, action: (*) => (
+                        saveSkippedChoices() && this.CloseUpdateDialog(updateGui)
+                    )}
+                ]
+            )
 
             updateGui.OnEvent("Close", dismiss)
+            updateGui.OnEvent("Escape", dismiss)
 
             this.updateDialog := updateGui
-            updateGui.Show()
+            UITheme.ShowDialog(updateGui, showOptions)
+            ; Start on the default action rather than inside the release notes;
+            ; focusing a control would activate a dialog shown otherwise (a
+            ; rebuild shows it as its predecessor was).
+            if (showOptions = "")
+                footer["&Update Now"].Focus()
             return updateGui
         } finally this.dialogRelease.Call()
     }
@@ -781,6 +821,28 @@ class UpdateChecker {
         try return this.updateDialog.Hwnd > 0
             && WinExist("ahk_id " this.updateDialog.Hwnd)
         return false
+    }
+
+    /**
+     * The open update dialog, rebuilt in the current theme where it was, keeping
+     * its checkboxes and the settings revision it was opened at.
+     * @returns the rebuilt dialog, or false when it could not be shown
+     */
+    static RebuildUpdateDialog() {
+        previous := this.updateDialog
+        state := UITheme.StateOf(previous)
+        ; Cleared first: ShowUpdateDialog brings a live dialog for the same version
+        ; forward instead of building another.
+        this.updateDialog := 0
+        rebuilt := this.ShowUpdateDialog(previous.updateInfo, "Hide")
+        if !IsObject(rebuilt) {
+            this.updateDialog := previous
+            return false
+        }
+        UITheme.CopyInputs(previous, rebuilt)
+        rebuilt.settingsRevision := previous.settingsRevision
+        previous.Destroy()
+        return UITheme.ShowAsBefore(rebuilt, state)
     }
 
     static CloseUpdateDialog(updateGui) {

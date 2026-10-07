@@ -8,6 +8,7 @@
 #Include TestRunner.ahk
 #Include ExclusiveOperationsFixture.ahk
 #Include LogCapture.ahk
+#Include UIThemeFixture.ahk
 
 class KeybindGUITest {
     static tests := [
@@ -79,7 +80,31 @@ class KeybindGUITest {
         "TestDiscardBeforeRenameRestoresRuntimeAndMainView",
         "TestDiscardBeforeCaseRenameKeepsStoredRuntime",
         "TestSuccessfulMainRenameDoesNotReapplyHotkeys",
-        "TestDefaultProfileSelectionRequiresExactRenderedName",
+        "TestProfileSelectionRequiresTheExactName",
+        "TestEveryBuiltInCommandHasANamedGroup",
+        "TestFunctionDisplayOrderFollowsTheGroups",
+        "TestFunctionRowsOutsideTheGroupedListAreOnlyAdded",
+        "TestKeybindStatusTextCountsLiveKeybinds",
+        "TestApplyRecordsWhyEachKeybindIsNotActive",
+        "TestFunctionDescriptionAddsWhyAKeybindIsNotActive",
+        "TestUniqueProfileNameAvoidsTakenNames",
+        "TestProfileCopyIsCreatedUnderItsNewName",
+        "TestProfileCopyRefusesATakenName",
+        "TestDiscardChangesRestoresTheSavedProfile",
+        "TestDiscardChangesWaitsForConfirmation",
+        "TestAddAllAddsEveryMissingCommandUnassigned",
+        "TestKeybindCardListsOnlySetKeybindsInListOrder",
+        "TestFolderContainmentResolvesThePath",
+        "TestExportRefusesTheAppsOwnFolders",
+        "TestExportSeesThroughAJunction",
+        "TestExportNeverWritesThroughAHardLink",
+        "TestThemeChangeWaitsWhileAnOperationRuns",
+        "TestThemeChangeWaitsWhileADialogIsOpen",
+        "TestThemeChangeLeavesAWindowAlreadyInTheTheme",
+        "TestProfileSummaryCountsFunctionsAndNamesTheDefault",
+        "TestScopeChoiceMapsTheDialogToFlags",
+        "TestScopeWithNoWindowTickedIsRefused",
+        "TestMainViewRefreshNeedsTheLiveMainWindow",
         "TestCreateProfileSurfacesStorageRecovery",
         "TestDirtyScopeEditBlocksProfileSwitchWhenCancelled",
         "TestClosingSavesDirtyProfileBeforeExit",
@@ -114,7 +139,9 @@ class KeybindGUITest {
     static helpers := [
         "UseTempProfilesFolder",
         "PrepareBlockedProfileSave",
-        "PrepareDiscardRenameState"
+        "PrepareDiscardRenameState",
+        "CheckThemeChangeKeepsTheWindow",
+        "LeftoverStagedExports"
     ]
 
     Setup() {
@@ -128,6 +155,8 @@ class KeybindGUITest {
         this.originalProfileMutationRevisions := KeybindGUI.profileMutationRevisions
         this.originalShutdownAuthorized := KeybindGUI.shutdownAuthorized
         this.originalDeferredNotices := KeybindGUI.deferredNotices
+        this.originalRuntimeFailures := KeybindGUI.runtimeFailures
+        KeybindGUI.runtimeFailures := Map()
         this.originalCommandAvailabilityProbe := PACSCommands.commandAvailabilityProbe
         KeybindGUI.captureRuntimeProfile := 0
         KeybindGUI.captureOwnerGui := 0
@@ -172,6 +201,7 @@ class KeybindGUITest {
         KeybindGUI.profileMutationRevisions := this.originalProfileMutationRevisions
         KeybindGUI.shutdownAuthorized := this.originalShutdownAuthorized
         KeybindGUI.deferredNotices := this.originalDeferredNotices
+        KeybindGUI.runtimeFailures := this.originalRuntimeFailures
         PACSCommands.commandAvailabilityProbe := this.originalCommandAvailabilityProbe
         ProfileManager.profiles := this.originalProfiles
         ProfileManager.currentProfile := this.originalCurrentProfile
@@ -2191,10 +2221,403 @@ class KeybindGUITest {
         Assert.False(editor.IsProfileDirty("night"))
     }
 
-    TestDefaultProfileSelectionRequiresExactRenderedName() {
-        Assert.Equal(2, this.gui.DefaultProfileListIndex(["AA *", "A *"], "A"))
-        Assert.Equal(1, this.gui.DefaultProfileListIndex(["A *", "AA *"], "A"))
-        Assert.Equal(0, this.gui.DefaultProfileListIndex(["AA *"], "A"))
+    TestProfileSelectionRequiresTheExactName() {
+        Assert.Equal(2, this.gui.ProfileListIndex(["AA", "A"], "A"))
+        Assert.Equal(1, this.gui.ProfileListIndex(["A", "AA"], "A"))
+        Assert.Equal(0, this.gui.ProfileListIndex(["AA"], "A"))
+        Assert.Equal(0, this.gui.ProfileListIndex(["a"], "A"))
+        Assert.Equal(0, this.gui.ProfileListIndex(["A"], ""))
+    }
+
+    ; A new built-in command must be given a group on purpose, not fall into Other.
+    TestEveryBuiltInCommandHasANamedGroup() {
+        for name, _ in PACSCommands.commands {
+            groupId := KeybindGUI.FunctionGroupId(name)
+            Assert.True(groupId < KeybindGUI.customGroupId, name)
+        }
+        Assert.Equal(KeybindGUI.customGroupId, KeybindGUI.FunctionGroupId("Custom: Macro"))
+        Assert.Equal(KeybindGUI.functionGroups.Length, KeybindGUI.FunctionGroupId("Retired Command"))
+    }
+
+    TestFunctionDisplayOrderFollowsTheGroups() {
+        binds := Map(
+            "Sign Report", "^s", "Custom: B", "", "Next Series", "",
+            "Toggle Dictation", "", "Retired Command", "", "Custom: A", ""
+        )
+        order := KeybindGUI.FunctionDisplayOrder(binds)
+        expected := ["Toggle Dictation", "Sign Report", "Next Series", "Custom: A", "Custom: B", "Retired Command"]
+        Assert.Equal(expected.Length, order.Length)
+        for index, name in expected
+            Assert.Equal(name, order[index])
+    }
+
+    ; Outside the main window's grouped list (as in these tests' list doubles) a row
+    ; is only added.
+    TestFunctionRowsOutsideTheGroupedListAreOnlyAdded() {
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "Any window")
+        Assert.Equal(2, this.gui.AddFunctionRow(listView, "Draft Report", "Unassigned", "Any window"))
+        Assert.Equal("Draft Report", listView.GetText(2, 1))
+    }
+
+    TestKeybindStatusTextCountsLiveKeybinds() {
+        Assert.Equal("3 keybinds active", KeybindGUI.KeybindStatusText(3, 0, false))
+        Assert.Equal("1 keybind active", KeybindGUI.KeybindStatusText(1, 0, false))
+        Assert.Equal("2 of 3 keybinds active", KeybindGUI.KeybindStatusText(3, 1, false))
+        Assert.Equal("No keybinds set", KeybindGUI.KeybindStatusText(0, 0, false))
+        Assert.Equal("Keybinds suspended", KeybindGUI.KeybindStatusText(3, 1, true))
+    }
+
+    ; Each apply records, per set keybind, why it is not live, so the main window
+    ; can mark that row instead of only reporting it once.
+    TestApplyRecordsWhyEachKeybindIsNotActive() {
+        HotkeyManager.hotkeyFunctions := Map("Sign Report", (*) => 0, "Draft Report", (*) => 0)
+        HotkeyManager.hotkeyDriver.invalidKeys["^NoSuchKey"] := true
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "Any"
+        profile.binds["Draft Report"] := "^NoSuchKey"
+        profile.scopes["Draft Report"] := "Any"
+        profile.binds["Retired Command"] := "^F14"
+        profile.scopes["Retired Command"] := "Any"
+        profile.binds["Unbound Command"] := ""
+        profile.scopes["Unbound Command"] := "Any"
+
+        capturedLog := LogCapture()
+        try this.gui.ApplyProfileBinds(profile, false)
+        finally capturedLog.Restore()
+        failures := KeybindGUI.runtimeFailures
+
+        Assert.False(failures.Has("Sign Report"))
+        Assert.True(InStr(failures["Draft Report"], "does not accept this key") > 0)
+        Assert.True(InStr(failures["Retired Command"], "no command with this name") > 0)
+        Assert.False(failures.Has("Unbound Command"))
+
+        ; A later apply replaces the record rather than adding to it.
+        profile.binds.Delete("Retired Command")
+        profile.binds["Draft Report"] := "^F15"
+        this.gui.ApplyProfileBinds(profile, false)
+        Assert.Equal(0, KeybindGUI.runtimeFailures.Count)
+    }
+
+    TestFunctionDescriptionAddsWhyAKeybindIsNotActive() {
+        profile := ProfileManager.NewProfile()
+        profile.customFuncs["Custom: Hello"] := {keys: "Hello", window: ""}
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        KeybindGUI.runtimeFailures := Map("Sign Report", "AutoHotkey does not accept this key on this computer.")
+
+        Assert.Equal(CommandInfo.Describe("Draft Report"), this.gui.FunctionDescription("Draft Report"))
+        Assert.Equal("Sends Hello to whichever window is active.", this.gui.FunctionDescription("Custom: Hello"))
+        Assert.True(InStr(this.gui.FunctionDescription("Sign Report"), "`nNot active: AutoHotkey does not accept") > 0)
+    }
+
+    TestUniqueProfileNameAvoidsTakenNames() {
+        this.UseTempProfilesFolder()
+        ProfileManager.profiles := Map("Night", ProfileManager.NewProfile())
+        FileAppend("not loaded", ProfileManager.ProfilePath("Day"))
+        Assert.Equal("Night 2", this.gui.UniqueProfileName("Night"))
+        ; Windows file names ignore case, so neither may a new profile's.
+        Assert.Equal("night 2", this.gui.UniqueProfileName("night"))
+        Assert.Equal("Day 2", this.gui.UniqueProfileName("Day"))
+        Assert.Equal("Evening", this.gui.UniqueProfileName(" Evening "))
+        Assert.Equal("New profile", this.gui.UniqueProfileName("bad|name"))
+    }
+
+    TestProfileCopyIsCreatedUnderItsNewName() {
+        this.UseTempProfilesFolder()
+        source := ProfileManager.NewProfile()
+        source.binds["Sign Report"] := "^F13"
+        source.scopes["Sign Report"] := "PACS"
+        ProfileManager.profiles := Map("Night", source)
+        ProfileManager.currentProfile := "Night"
+        notifications := []
+        editor := {base: FakeWindowKeybindGUI.Prototype}
+        editor.notificationDriver := ArrayNotificationDriver(notifications)
+        dialog := FakeProfileDialog()
+
+        Assert.True(editor.CreateProfileCopy(" Night copy ", ProfileManager.CloneProfile(source), dialog))
+
+        copy := ProfileManager.profiles["Night copy"]
+        Assert.Equal("^F13", copy.binds["Sign Report"])
+        Assert.Equal("PACS", ProfileManager.LoadProfile(ProfileManager.ProfilePath("Night copy")).scopes["Sign Report"])
+        Assert.False(copy == source)
+        Assert.True(dialog.destroyed)
+        Assert.Equal("Profile Created", notifications[1].title)
+    }
+
+    TestProfileCopyRefusesATakenName() {
+        this.UseTempProfilesFolder()
+        ProfileManager.profiles := Map("Night", ProfileManager.NewProfile())
+        ProfileManager.SaveProfile("Night", ProfileManager.profiles["Night"])
+        notifications := []
+        editor := {base: FakeWindowKeybindGUI.Prototype}
+        editor.notificationDriver := ArrayNotificationDriver(notifications)
+        dialog := FakeProfileDialog()
+
+        Assert.False(editor.CreateProfileCopy("Night", ProfileManager.NewProfile(), dialog))
+
+        Assert.Equal(1, ProfileManager.profiles.Count)
+        Assert.False(dialog.destroyed)
+        Assert.Equal(1, notifications.Length)
+    }
+
+    TestDiscardChangesRestoresTheSavedProfile() {
+        state := this.PrepareDiscardRenameState()
+        editor := state.gui
+        editor.confirmationDriver := AlwaysConfirmDriver()
+
+        Assert.True(editor.DiscardCurrentChanges())
+
+        Assert.Equal("^F13", ProfileManager.profiles["Night"].binds["Sign Report"])
+        Assert.Equal("^F13", HotkeyManager.activeHotkeys["Sign Report"].hotkey)
+        Assert.Equal("^F13", editor.visibleBind)
+        Assert.False(editor.IsProfileDirty("Night"))
+    }
+
+    TestDiscardChangesWaitsForConfirmation() {
+        state := this.PrepareDiscardRenameState()
+        editor := state.gui
+        confirmation := CountingRejectConfirmationDriver()
+        editor.confirmationDriver := confirmation
+
+        Assert.False(editor.DiscardCurrentChanges())
+
+        Assert.Equal(1, confirmation.calls)
+        Assert.Equal("^F14", ProfileManager.profiles["Night"].binds["Sign Report"])
+        Assert.True(editor.IsProfileDirty("Night"))
+    }
+
+    TestAddAllAddsEveryMissingCommandUnassigned() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "PACS"
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+        editor := {base: FakeWindowKeybindGUI.Prototype}
+        dialog := ProfileBoundFakeDialog("Test")
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "PACS")
+
+        Assert.True(editor.AddAllFunctions(listView, dialog))
+
+        Assert.Equal(PACSCommands.commands.Count, profile.binds.Count)
+        Assert.Equal("^F13", profile.binds["Sign Report"])
+        Assert.Equal("PACS", profile.scopes["Sign Report"])
+        Assert.Equal("", profile.binds["Draft Report"])
+        Assert.Equal("Any", profile.scopes["Draft Report"])
+        Assert.Equal(PACSCommands.commands.Count, listView.GetCount())
+        Assert.True(editor.IsProfileDirty("Test"))
+        Assert.True(dialog.destroyed)
+    }
+
+    ; The card lists only set keybinds, in the main list's groups and order.
+    TestKeybindCardListsOnlySetKeybindsInListOrder() {
+        profile := ProfileManager.NewProfile()
+        for name, bind in Map("Sign Report", "^F13", "Toggle Dictation", "^F15", "Next Series", "", "Custom: Hello", "^!F14") {
+            profile.binds[name] := bind
+            profile.scopes[name] := name = "Custom: Hello" ? "PACS" : "Any"
+        }
+        profile.customFuncs["Custom: Hello"] := {keys: "Hello", window: ""}
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+
+        rows := this.gui.KeybindCardRows()
+
+        Assert.Equal(3, rows.Length)
+        Assert.Equal("Toggle Dictation", rows[1].name)
+        Assert.Equal("Sign Report", rows[2].name)
+        Assert.Equal("PowerScribe", rows[2].group)
+        Assert.Equal("Ctrl + F13", rows[2].keybind)
+        Assert.Equal("Any window", rows[2].activeIn)
+        Assert.Equal("Custom", rows[3].group)
+        Assert.Equal("PACS", rows[3].activeIn)
+    }
+
+    TestFolderContainmentResolvesThePath() {
+        Assert.True(KeybindGUI.IsInsideFolder("C:\Data\profiles\Neuro.ini", "C:\Data"))
+        Assert.True(KeybindGUI.IsInsideFolder("c:\data\Neuro.ini", "C:\Data\"))
+        Assert.True(KeybindGUI.IsInsideFolder("C:\Data", "C:\Data"))
+        Assert.True(KeybindGUI.IsInsideFolder("C:\Data\sub\..\Neuro.ini", "C:\Data"))
+        Assert.False(KeybindGUI.IsInsideFolder("C:\Data\..\Neuro.ini", "C:\Data"))
+        Assert.False(KeybindGUI.IsInsideFolder("C:\Data2\Neuro.ini", "C:\Data"))
+    }
+
+    ; An export over one of the app's own files would change a profile behind its
+    ; in-memory copy, so it is refused and the file is left alone.
+    TestExportRefusesTheAppsOwnFolders() {
+        this.UseTempProfilesFolder()
+        messages := []
+        this.gui.notificationDriver := ArrayNotificationDriver(messages)
+        FileAppend("[Keybinds]`nSign Report=^F13`n", ProfileManager.ProfilePath("Neuro"))
+        other := ProfileManager.profilesPath "\Other.ini"
+        FileAppend("[Keybinds]`n", other)
+
+        Assert.False(this.gui.ExportProfileTo("Neuro", other))
+        Assert.Equal("[Keybinds]`n", FileRead(other))
+        Assert.Equal("Choose Another Folder", messages[1].title)
+
+        outside := A_Temp "\pacs-export-test-" DllCall("GetCurrentProcessId") ".ini"
+        try {
+            Assert.True(this.gui.ExportProfileTo("Neuro", outside))
+            Assert.Equal(FileRead(ProfileManager.ProfilePath("Neuro")), FileRead(outside))
+        } finally {
+            try FileDelete(outside)
+        }
+    }
+
+    ; A file outside that is a hard link to a profile has the profile's contents:
+    ; the export replaces that name with a new file, so the profile is unchanged.
+    TestExportNeverWritesThroughAHardLink() {
+        this.UseTempProfilesFolder()
+        this.gui.notificationDriver := ArrayNotificationDriver([])
+        FileAppend("[Keybinds]`nSign Report=^F13`n", ProfileManager.ProfilePath("Neuro"))
+        other := ProfileManager.profilesPath "\Other.ini"
+        FileAppend("[Keybinds]`n", other)
+        link := A_Temp "\pacs-export-hardlink-" DllCall("GetCurrentProcessId") ".ini"
+        try FileDelete(link)
+        try {
+            Assert.True(DllCall("CreateHardLinkW", "Str", link, "Str", other, "Ptr", 0), "the hard link was made")
+            Assert.True(this.gui.ExportProfileTo("Neuro", link))
+            Assert.Equal("[Keybinds]`n", FileRead(other))
+            Assert.Equal(FileRead(ProfileManager.ProfilePath("Neuro")), FileRead(link))
+            Assert.Equal(0, this.LeftoverStagedExports(link), "no staged copy is left behind")
+        } finally {
+            try FileDelete(link)
+        }
+    }
+
+    LeftoverStagedExports(path) {
+        count := 0
+        loop files path ".export-*"
+            count++
+        return count
+    }
+
+    ; A folder outside that is a junction into the profiles folder is the profiles
+    ; folder: an export through it is refused like one made there directly.
+    TestExportSeesThroughAJunction() {
+        this.UseTempProfilesFolder()
+        messages := []
+        this.gui.notificationDriver := ArrayNotificationDriver(messages)
+        FileAppend("[Keybinds]`n", ProfileManager.ProfilePath("Neuro"))
+        other := ProfileManager.profilesPath "\Other.ini"
+        FileAppend("[Keybinds]`n", other)
+        link := A_Temp "\pacs-export-junction-" DllCall("GetCurrentProcessId")
+        RunWait(A_ComSpec ' /c mklink /J "' link '" "' ProfileManager.profilesPath '"',, "Hide")
+        try {
+            Assert.True(DirExist(link) != "", "the junction was made")
+            Assert.True(KeybindGUI.IsInsideFolder(link "\Other.ini", ProfileManager.profilesPath))
+            Assert.False(this.gui.ExportProfileTo("Neuro", link "\Other.ini"))
+            Assert.Equal("[Keybinds]`n", FileRead(other))
+        } finally {
+            ; Not recursive: removes the junction, never what it points to.
+            try DirDelete(link)
+        }
+    }
+
+    ; Rebuilding the main window would close the dialogs it owns, so a theme
+    ; change waits while an operation runs or a dialog is open.
+    TestThemeChangeWaitsWhileAnOperationRuns() {
+        this.CheckThemeChangeKeepsTheWindow("light", (mainGui) => (
+            ExclusiveOperations.TryBegin("uiPresentation", "show a dialog"), 0
+        ), false)
+    }
+
+    TestThemeChangeWaitsWhileADialogIsOpen() {
+        dialog := 0
+        try this.CheckThemeChangeKeepsTheWindow("light", (mainGui) => (
+            dialog := Gui("+Owner" mainGui.Hwnd),
+            dialog.Show("x-3000 y-3000 w60 h60 NA")
+        ), false)
+        finally {
+            if IsObject(dialog)
+                try dialog.Destroy()
+        }
+    }
+
+    TestThemeChangeLeavesAWindowAlreadyInTheTheme() {
+        this.CheckThemeChangeKeepsTheWindow("dark", (*) => 0, true)
+    }
+
+    ; A main window built in builtMode, with the Theme setting at Dark: after
+    ; prepare, ApplyThemeChange returns expected, the window is not rebuilt, and a
+    ; later check is queued exactly when it had to wait.
+    CheckThemeChangeKeepsTheWindow(builtMode, prepare, expected) {
+        saved := UIThemeFixture.Save()
+        mainGui := Gui()
+        try {
+            mainGui.themeMode := builtMode
+            this.gui.gui := mainGui
+            this.gui.mainView := {}
+            ; Set on a real instance by its field initializers.
+            this.gui.profileSelectorGui := 0
+            this.gui.newProfilePrompt := 0
+            rebuilds := 0
+            this.gui.DefineProp("CreateMainGUI", {Call: (*) => rebuilds++})
+            UIThemeFixture.Use("Dark", false, false)
+            prepare.Call(mainGui)
+
+            Assert.Equal(expected, this.gui.ApplyThemeChange())
+
+            Assert.True(this.gui.HasMainWindow())
+            Assert.Equal(0, rebuilds)
+            Assert.Equal(!expected, this.gui.HasOwnProp("themeCheck"))
+        } finally {
+            if this.gui.HasOwnProp("themeCheck")
+                SetTimer(this.gui.themeCheck, 0)
+            try mainGui.Destroy()
+            UIThemeFixture.Restore(saved)
+        }
+    }
+
+    TestProfileSummaryCountsFunctionsAndNamesTheDefault() {
+        Assert.Equal("1 function", KeybindGUI.ProfileSummary(false, 1))
+        Assert.Equal("12 functions, opens at startup", KeybindGUI.ProfileSummary(true, 12))
+        Assert.True(InStr(KeybindGUI.ProfileSummary(true, 0), "Add Function") > 0)
+    }
+
+    TestScopeChoiceMapsTheDialogToFlags() {
+        anyWindow := KeybindGUI.ScopeChoice(true, true, true)
+        Assert.False(anyWindow.requirePACS)
+        Assert.False(anyWindow.requirePowerScribe)
+        Assert.Equal(0, KeybindGUI.ScopeChoice(false, false, false))
+        both := KeybindGUI.ScopeChoice(false, 1, 1)
+        Assert.Equal(
+            "PACS or PowerScribe",
+            HotkeyContract.ScopeFromFlags(both.requirePACS, both.requirePowerScribe)
+        )
+        onlyPowerScribe := KeybindGUI.ScopeChoice(false, 0, 1)
+        Assert.Equal(
+            "PowerScribe",
+            HotkeyContract.ScopeFromFlags(onlyPowerScribe.requirePACS, onlyPowerScribe.requirePowerScribe)
+        )
+    }
+
+    ; "Only these windows" with none ticked would silently mean any window. The
+    ; dialog says so instead and leaves the scope alone.
+    TestScopeWithNoWindowTickedIsRefused() {
+        profile := ProfileManager.NewProfile()
+        profile.binds["Sign Report"] := "^F13"
+        profile.scopes["Sign Report"] := "PACS"
+        ProfileManager.profiles := Map("Test", profile)
+        ProfileManager.currentProfile := "Test"
+
+        listView := FunctionalListView("Sign Report", "Ctrl + F13", "PACS")
+        result := this.gui.SubmitScope("Sign Report", false, false, false, listView, 1, FakeProfileDialog())
+
+        Assert.False(result)
+        Assert.Equal("PACS", profile.scopes["Sign Report"])
+        Assert.Equal(1, TestRunner.dialogs.Length)
+        Assert.Equal("Choose a Window", TestRunner.dialogs[1].title)
+    }
+
+    ; Editors built without a window (as here) and windows already replaced must
+    ; not be touched by the status refresh that every profile change triggers.
+    TestMainViewRefreshNeedsTheLiveMainWindow() {
+        Assert.False(this.gui.RefreshMainView())
+        editor := {base: KeybindGUI.Prototype, gui: "", mainView: {gui: FakeProfileDialog()}}
+        Assert.False(editor.RefreshMainView())
+        editor.MarkProfileDirty("Test")
+        Assert.True(editor.IsProfileDirty("Test"))
     }
 
     TestSuccessfulMainRenameDoesNotReapplyHotkeys() {

@@ -9,6 +9,7 @@ class PACSCommandsTest {
         "TestEachBuiltInCommandRunsUnderItsOwnName",
         "TestCreateCustomKeybindStoresConfig",
         "TestCustomKeybindRefusalNamesTheCommand",
+        "TestStartedNotifierNamesOnlyCommandsThatStart",
         "TestModalityClassification",
         "TestModalityNamesCoverEveryRule",
         "TestLooksLikeReport",
@@ -91,6 +92,38 @@ class PACSCommandsTest {
             PACSCommands.clinicalCommandActive := originalActive
             PACSCommands.activeClinicalCommand := originalName
             PACSCommands.busyNotifier := originalNotifier
+        }
+    }
+
+    ; The command feedback names a command once it actually starts: not when it is
+    ; refused, and a failing notifier never stops the command.
+    TestStartedNotifierNamesOnlyCommandsThatStart() {
+        originalNotifier := PACSCommands.startedNotifier
+        originalBusy := PACSCommands.busyNotifier
+        originalActive := PACSCommands.clinicalCommandActive
+        originalName := PACSCommands.activeClinicalCommand
+        started := []
+        PACSCommands.busyNotifier := (*) => 0
+        try {
+            PACSCommands.startedNotifier := (name) => started.Push(name)
+            Assert.Equal("ran", PACSCommands.RunClinicalCommand("Draft Report", (*) => "ran"))
+            Assert.Equal(1, started.Length)
+            Assert.Equal("Draft Report", started[1])
+
+            PACSCommands.clinicalCommandActive := true
+            PACSCommands.activeClinicalCommand := "Other Command"
+            Assert.False(PACSCommands.RunClinicalCommand("Sign Report", (*) => "ran"))
+            Assert.Equal(1, started.Length)
+            PACSCommands.clinicalCommandActive := originalActive
+            PACSCommands.activeClinicalCommand := originalName
+
+            PACSCommands.startedNotifier := (*) => ThrowError("feedback failed")
+            Assert.Equal("ran", PACSCommands.RunClinicalCommand("Draft Report", (*) => "ran"))
+        } finally {
+            PACSCommands.startedNotifier := originalNotifier
+            PACSCommands.busyNotifier := originalBusy
+            PACSCommands.clinicalCommandActive := originalActive
+            PACSCommands.activeClinicalCommand := originalName
         }
     }
 

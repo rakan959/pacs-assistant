@@ -80,6 +80,8 @@ class PACSMonitor {
     static scanFailureThreshold := 3
     static scanFailureNotified := false
     static lastError := ""
+    ; When the worklist was last read (A_Now form), for the Status window.
+    static lastScanTime := ""
     static notifier := (text, title, options) => TrayTip(text, title, options)
 
     static Start() {
@@ -444,6 +446,7 @@ class PACSMonitor {
         try {
             this.ProcessRows(rowSnapshots)
             this.RecordScanSuccess()
+            this.lastScanTime := A_Now
             return true
         } catch as err {
             this.RecordScanFailure(err)

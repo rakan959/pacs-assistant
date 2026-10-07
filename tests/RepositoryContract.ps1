@@ -103,6 +103,7 @@ $winHttpMetadataWorkerMain = Get-Content -Raw (Join-Path $repoRoot 'WinHttpMetad
 $updateNetworking = $updateChecker + $winHttpTransport + $winHttpTextRequest + $winHttpMetadataWorker + $winHttpMetadataWorkerMain
 $appControl = Get-Content -Raw (Join-Path $repoRoot 'AppControl.ahk')
 $keybindGui = Get-Content -Raw (Join-Path $repoRoot 'KeybindGUI.ahk')
+$appTray = Get-Content -Raw (Join-Path $repoRoot 'AppTray.ahk')
 $exclusiveOperations = Get-Content -Raw (Join-Path $repoRoot 'ExclusiveOperations.ahk')
 $guiSmoke = Get-Content -Raw (Join-Path $repoRoot 'tests/run-gui-smoke.ahk')
 $runTests = Get-Content -Raw (Join-Path $repoRoot 'tests/RunTests.ahk')
@@ -148,7 +149,7 @@ $unitStep = [regex]::Match($workflow, '(?ms)^\s*- name: Run unit tests\s*$.*?(?=
 Assert-Matches $unitStep "'tests\\RunTests\.ahk'" 'The unit-test step must run tests\RunTests.ahk.'
 Assert-Matches $unitStep '(?s)if \(\$process\.ExitCode -ne 0\)\s*\{\s*throw' 'The unit-test step must fail when the suite exits non-zero.'
 $syntaxStep = [regex]::Match($workflow, '(?ms)^\s*- name: Validate syntax\s*$.*?(?=^\s*- name:|\z)').Value
-foreach ($validatedScript in @("'main.ahk'", "'WinHttpMetadataWorkerMain\.ahk'", "'tests\\run-hotkey-tests\.ahk'", "'tests\\run-gui-smoke\.ahk'")) {
+foreach ($validatedScript in @("'main.ahk'", "'WinHttpMetadataWorkerMain\.ahk'", "'tests\\run-hotkey-tests\.ahk'", "'tests\\run-gui-smoke\.ahk'", "'tests\\run-ui-audit\.ahk'")) {
     Assert-Matches $syntaxStep $validatedScript "CI must /validate $validatedScript."
 }
 Assert-Matches $runTests 'ExitApp\(TestRunner\.failures > 0 \? 1 : 0\)' 'RunTests.ahk must exit non-zero when any test fails.'
@@ -506,6 +507,12 @@ Assert-Matches $main '(?m)^#SingleInstance\s+Ignore\s*$' 'A second launch must n
 Assert-NotMatches $main '(?m)^#SingleInstance\s+Force\s*$' 'Force replacement bypasses shutdown and clinical transaction gates.'
 Assert-Matches $main 'OnExit\(\(exitReason, exitCode\) => kbGUI\.HandleProcessExit\(exitReason, exitCode\)\)' 'Tray and external exits must use the authoritative shutdown coordinator.'
 Assert-Matches $main 'UpdateChecker\.shutdownCoordinator\s*:=\s*kbGUI' 'Self-update must use the same shutdown coordinator as normal exit.'
+Assert-Matches $main '(?s)OnExit\(\(exitReason, exitCode\) => kbGUI\.HandleProcessExit\(exitReason, exitCode\)\).*AppTray\.Install\(kbGUI\)' 'The tray menu must be installed after the shutdown coordinator, so its Exit passes the same gate.'
+Assert-NotMatches $appTray 'AddStandard' 'The tray menu must not restore AutoHotkey''s standard items: Pause Script would silently stop monitoring.'
+Assert-Matches $main '(?m)^;@Ahk2Exe-SetMainIcon pacs-assistant\.ico\s*$' 'Compiled builds must carry the app icon.'
+if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'pacs-assistant.ico') -PathType Leaf)) {
+    $failures.Add('pacs-assistant.ico must exist: main.ahk compiles it in and sets it for source runs.')
+}
 Assert-Matches $main 'PACSCommands\.commandAvailabilityProbe\s*:=\s*\(\*\)\s*=>\s*ExclusiveOperations\.Active\("clinical"\)\s*=\s*""' 'Clinical commands must be gated by every other exclusive operation through the shared classifier.'
 Assert-Matches $main 'UpdateChecker\.clinicalActivityProbe\s*:=\s*\(\*\)\s*=>\s*PACSCommands\.clinicalCommandActive' 'Self-update must see an active clinical command.'
 Assert-Matches $main 'Settings\.mutationGuard\s*:=\s*\(\*\)\s*=>\s*ExclusiveOperations\.Active\("settingsWrite"\)\s*=\s*""' 'Settings writes must be gated by every other exclusive operation through the shared classifier.'

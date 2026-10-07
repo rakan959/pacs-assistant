@@ -20,6 +20,7 @@ OnError(OnError_StdErr)
 global tempDir := UseIsolatedDataRoot("pacs-assistant-gui-smoke")
 
 #Include ../KeybindGUI.ahk
+#Include ../CommandFeedback.ahk
 #Include DesktopChecks.ahk
 
 global openedWindows := []
@@ -125,6 +126,8 @@ Main() {
 
     Out("PACS Assistant GUI smoke test")
     Out("")
+    ; Light, whatever this machine's Windows mode; CheckThemeChange switches it.
+    Settings.SaveValues(Map("Theme", "Light"))
 
     ProfileManager.profiles := Map()
     ProfileManager.LoadProfiles()
@@ -163,6 +166,7 @@ Main() {
         Assert(lv.GetCount("Col") = 3, "the list has a scope column")
         AssertScope(lv, "Draft Report", "PowerScribe")
         AssertScope(lv, "Sign Report", "Any window")
+        CheckMainWindowState(kb, lv)
 
         lv.Modify(1, "Select Focus")
         scopeHwnd := 0
@@ -244,7 +248,369 @@ Main() {
         Assert(HotkeyManager.activeHotkeys.Count = registeredBeforeCapture, "closing the keybind prompt restores profile hotkeys")
     }
 
+    CheckWindowBehaviour(kb)
+    CheckThemeChange(kb)
+    CheckSelectorThemeChange(kb)
+    CheckDialogThemeChange()
+    CheckMinimizedFromMaximizedRebuild(kb)
+    CheckFirstRunPlacement(kb)
+    CheckCommandFeedback()
     return DesktopChecks.Finish("checks")
+}
+
+; Changing the Theme setting redraws the main window at once, in place and with
+; its selection: a dark title bar, menu bar and list, then light again.
+CheckThemeChange(kb) {
+    kb.mainView.list.Modify(2, "Select Focus")
+    WinGetPos(&x, &y, &w, &h, "ahk_id " kb.gui.Hwnd)
+    lightGui := kb.gui
+    try {
+        Settings.SaveValues(Map("Theme", "Dark"))
+        Assert(kb.ApplyThemeChange() && kb.gui != lightGui && kb.gui.themeMode = "dark", "a change to Dark rebuilds the main window dark")
+        hwnd := kb.gui.Hwnd
+        WinGetPos(&x2, &y2, &w2, &h2, "ahk_id " hwnd)
+        Assert(x2 = x && y2 = y && w2 = w && h2 = h && DllCall("IsWindowVisible", "Ptr", hwnd), "the rebuilt window keeps its place and stays open")
+        Assert(kb.mainView.list.GetNext(0) = 2, "the rebuilt window keeps the selected row")
+        Assert(TitleBarIsDark(hwnd), "the title bar is dark")
+        Assert(DarkMenuBar.windows.Has(hwnd), "the menu bar is drawn dark")
+        Assert(SendMessage(0x1023, 0, 0, kb.mainView.list) = UITheme.ColorRef("text"), "the list's text is light")  ; LVM_GETTEXTCOLOR
+    } finally {
+        Settings.SaveValues(Map("Theme", "Light"))
+        kb.ApplyThemeChange()
+    }
+    Assert(kb.gui.themeMode = "light" && !TitleBarIsDark(kb.gui.Hwnd) && !DarkMenuBar.windows.Has(kb.gui.Hwnd), "a change back to Light rebuilds it light")
+}
+
+; With no main window, the profile selector is the app's window, so a theme change
+; rebuilds it in place. Closing it then reopens the main window.
+CheckSelectorThemeChange(kb) {
+    ; A second profile, in memory only, to highlight instead of the open one.
+    ProfileManager.profiles["Smoke Second"] := ProfileManager.NewProfile()
+    selectorHwnd := OpenAndCaptureWindow("PACS Assistant - Profile Selection", () => kb.OpenProfileSelector())
+    lightSelector := kb.profileSelectorGui
+    SelectRow(lightSelector.list, "Smoke Second")
+    WinGetPos(&x, &y,,, "ahk_id " selectorHwnd)
+    try {
+        Settings.SaveValues(Map("Theme", "Dark"))
+        Assert(kb.ApplyThemeChange(), "a theme change with only the profile selector open is applied")
+        selector := kb.profileSelectorGui
+        WinGetPos(&x2, &y2,,, "ahk_id " selector.Hwnd)
+        Assert(
+            selector != lightSelector && selector.themeMode = "dark" && TitleBarIsDark(selector.Hwnd) && x2 = x && y2 = y,
+            "the profile selector is rebuilt dark where it was"
+        )
+        Assert(kb.SelectedProfileName(selector.list) == "Smoke Second", "the rebuilt selector keeps the profile highlighted in it")
+    } finally {
+        Settings.SaveValues(Map("Theme", "Light"))
+        kb.ApplyThemeChange()
+    }
+    Assert(kb.profileSelectorGui.themeMode = "light", "a change back to Light rebuilds the selector light")
+
+    ; The new-profile prompt is rebuilt too, with the name already typed.
+    prompt := kb.OpenNewProfilePrompt(kb.profileSelectorGui)
+    prompt.nameEdit.Value := "Night Float"
+    try {
+        Settings.SaveValues(Map("Theme", "Dark"))
+        kb.ApplyThemeChange()
+        rebuilt := kb.newProfilePrompt
+        Assert(
+            rebuilt != prompt && rebuilt.themeMode = "dark" && rebuilt.nameEdit.Value == "Night Float",
+            "the new-profile prompt is rebuilt dark, keeping the name typed"
+        )
+    } finally {
+        Settings.SaveValues(Map("Theme", "Light"))
+        kb.ApplyThemeChange()
+    }
+    ; With no main window, the tray's Open brings the prompt back.
+    WinMinimize(kb.newProfilePrompt)
+    Sleep(200)
+    Assert(kb.ShowMainWindow() && WinGetMinMax(kb.newProfilePrompt) = 0, "the tray brings a minimized new-profile prompt back")
+    CloseWindow(kb.newProfilePrompt.Hwnd)  ; back to the profile selector
+    CloseWindow(kb.profileSelectorGui.Hwnd)
+    ProfileManager.profiles.Delete("Smoke Second")
+    Assert(kb.HasMainWindow(), "closing the rebuilt selector reopens the main window")
+}
+
+; Settings and the update dialog are top-level windows too: when Windows switches
+; to dark mode (Theme: Match Windows), they are rebuilt in place, keeping what was
+; entered. Windows' mode is simulated, so no setting changes under the open
+; dialogs.
+CheckDialogThemeChange() {
+    updateInfo := {hasUpdate: true, currentVersion: "v2.0.0", latestVersion: "v2.1.0", releaseNotes: "Smoke-test release"}
+    opened := [
+        {name: "Settings", open: () => Settings.ShowDialog(), current: () => Settings.dialog},
+        {name: "the update dialog", open: () => UpdateChecker.ShowUpdateDialog(updateInfo), current: () => UpdateChecker.updateDialog}
+    ]
+    windowsDark := UITheme.windowsDarkProbe
+    Settings.SaveValues(Map("Theme", "Match Windows"))
+    try {
+        for item in opened {
+            UITheme.windowsDarkProbe := (*) => false
+            smokeKB.ApplyThemeChange()
+            before := item.open.Call()
+            box := FindControl(before, "CheckBox", "Skip &beta versions")
+            box.Value := !box.Value
+            entered := box.Value
+            WinGetPos(&x, &y,,, before)
+            ; In the background, as behind PowerScribe: its rebuild must not take focus.
+            WinActivate(smokeKB.gui)
+            Sleep(150)
+            try {
+                UITheme.windowsDarkProbe := (*) => true
+                smokeKB.ApplyThemeChange()
+                after := item.current.Call()
+                WinGetPos(&x2, &y2,,, after)
+                Assert(
+                    after != before && after.themeMode = "dark" && TitleBarIsDark(after.Hwnd)
+                        && FindControl(after, "CheckBox", "Skip &beta versions").Value = entered && x2 = x && y2 = y,
+                    item.name " is rebuilt dark in place, keeping what was entered"
+                )
+                Assert(
+                    !WinActive("ahk_id " after.Hwnd) && WinActive("ahk_id " smokeKB.gui.Hwnd),
+                    item.name ", rebuilt in the background, does not take focus"
+                )
+                ; Minimized, it stays minimized, and restores where it was.
+                WinMinimize(after)
+                Sleep(200)
+                UITheme.windowsDarkProbe := (*) => false
+                smokeKB.ApplyThemeChange()
+                minimized := item.current.Call()
+                Assert(minimized != after && WinGetMinMax(minimized) = -1, item.name ", rebuilt while minimized, stays minimized")
+                WinRestore(minimized)
+                Sleep(200)
+                WinGetPos(&x3, &y3,,, minimized)
+                Assert(x3 = x && y3 = y, item.name " then restores where it was")
+            } finally CloseWindow(item.current.Call().Hwnd)
+        }
+    } finally {
+        UITheme.windowsDarkProbe := windowsDark
+        Settings.SaveValues(Map("Theme", "Light"))
+        smokeKB.ApplyThemeChange()
+        UpdateChecker.StopAutoCheck()
+    }
+}
+
+FindControl(window, type, text) {
+    for ctrl in window {
+        if (ctrl.Type = type && ctrl.Text == text)
+            return ctrl
+    }
+    throw Error("No " type " '" text "' in " window.Title)
+}
+
+; A main window minimized from maximized stays minimized through a theme change
+; and still restores maximized.
+CheckMinimizedFromMaximizedRebuild(kb) {
+    WinMaximize(kb.gui)
+    Sleep(300)
+    WinMinimize(kb.gui)
+    Sleep(300)
+    try {
+        Settings.SaveValues(Map("Theme", "Dark"))
+        kb.ApplyThemeChange()
+        Assert(WinGetMinMax(kb.gui) = -1, "a minimized main window stays minimized through a theme change")
+        WinRestore(kb.gui)
+        Sleep(300)
+        Assert(WinGetMinMax(kb.gui) = 1, "and still restores maximized, as it was before it was minimized")
+    } finally {
+        Settings.SaveValues(Map("Theme", "Light"))
+        kb.ApplyThemeChange()
+        if (WinGetMinMax(kb.gui) != 0)
+            WinRestore(kb.gui)
+        Sleep(200)
+    }
+}
+
+; A first run has no saved place: a window maximized before it is ever moved or
+; resized still reopens maximized.
+CheckFirstRunPlacement(kb) {
+    try FileDelete(WindowPlacement.Path())
+    kb.gui.Destroy()
+    kb.CreateMainGUI(false)
+    WinMaximize(kb.gui)
+    Sleep(300)
+    saved := WindowPlacement.Load()
+    Assert(IsObject(saved) && saved.maximized, "a first-run window maximized before it is moved reopens maximized")
+    WinRestore(kb.gui)
+    Sleep(200)
+}
+
+; DWMWA_USE_IMMERSIVE_DARK_MODE
+TitleBarIsDark(hwnd) {
+    dark := 0
+    DllCall("dwmapi\DwmGetWindowAttribute", "Ptr", hwnd, "UInt", 20, "Int*", &dark, "UInt", 4)
+    return dark
+}
+
+; The command feedback is a tooltip that takes no focus and clears itself.
+CheckCommandFeedback() {
+    tooltipTitle := "ahk_class tooltips_class32 ahk_pid " DllCall("GetCurrentProcessId", "UInt")
+    probe := CommandFeedback.enabledProbe
+    try {
+        CommandFeedback.enabledProbe := (*) => false
+        Assert(!CommandFeedback.Show("Sign Report"), "no command feedback while it is off")
+        CommandFeedback.enabledProbe := (*) => true
+        active := WinExist("A")
+        Assert(CommandFeedback.Show("Sign Report"), "command feedback shows when it is on")
+        Sleep(100)
+        ; A tooltip's text is its window title.
+        Assert(WinExist(tooltipTitle) && WinGetTitle(tooltipTitle) = "Sign Report", "the feedback names the command")
+        Assert(WinExist("A") = active, "the feedback does not take focus")
+        Sleep(CommandFeedback.durationMs + 400)
+        Assert(!WinExist(tooltipTitle), "the feedback clears itself")
+    } finally CommandFeedback.enabledProbe := probe
+}
+
+; The main window reopens where it was left, can start hidden behind the tray
+; icon, and with Close to the tray hides rather than exits. Last, because it
+; rebuilds the main window.
+CheckWindowBehaviour(kb) {
+    hwnd := kb.gui.Hwnd
+    WinMove(140, 120,,, "ahk_id " hwnd)
+    SendMessage(0x232, 0, 0,, "ahk_id " hwnd)  ; WM_EXITSIZEMOVE, as a drag ends
+    WinGetPos(&x, &y, &w, &h, "ahk_id " hwnd)
+    kb.gui.Destroy()
+    kb.CreateMainGUI(false)
+    WinGetPos(&x2, &y2, &w2, &h2, "ahk_id " kb.gui.Hwnd)
+    Assert(x2 = x && y2 = y && w2 = w && h2 = h, "the main window reopens where it was left")
+
+    kb.gui.Destroy()
+    kb.CreateMainGUI(false, true)
+    Assert(!DllCall("IsWindowVisible", "Ptr", kb.gui.Hwnd), "starting minimized shows only the tray icon")
+    kb.ShowMainWindow()
+    Assert(DllCall("IsWindowVisible", "Ptr", kb.gui.Hwnd), "the tray brings a minimized start forward")
+
+    Settings.SaveValues(Map("CloseToTray", true))
+    try {
+        WinClose("ahk_id " kb.gui.Hwnd)
+        Sleep(200)
+        Assert(
+            DllCall("IsWindow", "Ptr", kb.gui.Hwnd) && !DllCall("IsWindowVisible", "Ptr", kb.gui.Hwnd),
+            "with Close to the tray, closing hides the window and keeps running"
+        )
+        kb.ShowMainWindow()
+        Assert(DllCall("IsWindowVisible", "Ptr", kb.gui.Hwnd), "the tray brings a closed window back")
+    } finally Settings.SaveValues(Map("CloseToTray", false))
+}
+
+; The main window's derived state and keyboard paths: Save and the status line
+; follow unsaved changes, the selection commands follow the selection, Delete and
+; F2 in the list reach removal and key capture, and resizing grows the list.
+CheckMainWindowState(kb, lv) {
+    view := kb.mainView
+    mainHwnd := kb.gui.Hwnd
+    Assert(!view.saveButton.Enabled, "Save Changes starts disabled with nothing to save")
+    Assert(view.statusSaved.Value == "All changes saved", "the status line says the profile is saved")
+    Assert(view.statusKeys.Value == "3 keybinds active", "the status line counts the live keybinds")
+    SelectRow(lv, "Draft Report")
+    Assert(view.description.Value == kb.FunctionDescription("Draft Report"), "the selected function is described under the list")
+
+    kb.MarkProfileDirty(ProfileManager.currentProfile)
+    Assert(view.saveButton.Enabled, "an unsaved change enables Save Changes")
+    Assert(view.statusSaved.Value == "Unsaved changes", "the status line reports unsaved changes")
+    kb.ClearProfileDirty(ProfileManager.currentProfile)
+    Assert(!view.saveButton.Enabled, "clearing the change disables Save Changes again")
+
+    ; Suspended keybinds do nothing, so the window says so in its title and status line.
+    try {
+        Assert(kb.ToggleSuspend() = true, "Suspend Keybinds suspends them")
+        Assert(InStr(WinGetTitle("ahk_id " mainHwnd), "(keybinds suspended)") > 0, "the title says keybinds are suspended")
+        Assert(view.statusKeys.Value == "Keybinds suspended", "the status line says keybinds are suspended")
+    } finally {
+        if A_IsSuspended
+            kb.ToggleSuspend()
+    }
+    Assert(!A_IsSuspended && !InStr(WinGetTitle("ahk_id " mainHwnd), "suspended"), "resuming clears the suspended state")
+
+    lv.Modify(0, "-Select")
+    kb.RefreshMainView()
+    Assert(!view.removeButton.Enabled && !view.keybindButton.Enabled, "selection commands are disabled with no row selected")
+    lv.Modify(1, "Select Focus")
+    kb.RefreshMainView()
+    Assert(view.removeButton.Enabled && view.keybindButton.Enabled, "selecting a row enables its commands")
+
+    ; Delete asks to remove the selected function; this driver answers No. The key
+    ; is posted to the list as the keyboard delivers it: Send from this same thread
+    ; is processed while the thread cannot be interrupted, so the list's key
+    ; notification would never reach its handler.
+    confirmations := []
+    kb.confirmationDriver := {Confirm: (driver, message, title) => (confirmations.Push(title), false)}
+    try {
+        PressListKey(lv, 0x2E)  ; VK_DELETE
+        Sleep(200)
+    } finally kb.DeleteProp("confirmationDriver")
+    Assert(confirmations.Length = 1 && confirmations[1] = "Confirm Remove", "Delete in the list asks to remove the selected function")
+    Assert(lv.GetCount() = 3, "declining the removal keeps every function")
+
+    ; F2 opens key capture for the selected function; closing it restores the binds.
+    captureHwnd := 0
+    Check("F2 in the list opens key capture", () => (
+        captureHwnd := OpenAndCaptureWindow(
+            "PACS Assistant - Set Keybind",
+            () => (PressListKey(lv, 0x71), Sleep(150))  ; VK_F2
+        )
+    ))
+    CloseWindow(captureHwnd)
+    Assert(KeybindGUI.isListening = false, "closing the F2 capture prompt stops listening")
+
+    view.list.GetPos(,,, &listHeightBefore)
+    WinGetPos(&x, &y, &width, &height, "ahk_id " mainHwnd)
+    WinMove(,, width + 120, height + 160, "ahk_id " mainHwnd)
+    Sleep(200)
+    view.list.GetPos(,,, &listHeightAfter)
+    view.saveButton.GetPos(&saveX,, &saveWidth)
+    view.gui.GetClientPos(,, &clientWidth)
+    Assert(listHeightAfter > listHeightBefore, "resizing the window grows the keybind list")
+    ; Within a unit: logical coordinates are rounded at non-100% scaling.
+    Assert(Abs(saveX + saveWidth + UITheme.margin - clientWidth) <= 1, "Save Changes stays at the right edge after a resize")
+    WinMove(,, width, height, "ahk_id " mainHwnd)
+    Sleep(150)
+    CheckCaptureConfirmation(kb, lv)
+}
+
+; Key capture shows the captured key and any warning, and binds it only on Use
+; Keybind. A key is "captured" here by handing OnInputEnd what an ended InputHook
+; reports, since this run cannot press keys into its own hook.
+CheckCaptureConfirmation(kb, lv) {
+    promptHwnd := 0
+    Check("key capture opens", () => (
+        promptHwnd := OpenAndCaptureWindow("PACS Assistant - Set Keybind", () => kb.PromptKeybind("Sign Report", lv))
+    ))
+    if !promptHwnd
+        return
+    prompt := GuiFromHwnd(promptHwnd)
+    profile := ProfileManager.profiles[ProfileManager.currentProfile]
+    before := profile.binds["Sign Report"]
+
+    kb.OnInputEnd("Sign Report", lv, prompt, {EndReason: "EndKey", EndKey: "F14", EndMods: "^"})
+    Assert(!prompt.useButton.Enabled && InStr(prompt.message.Value, "Draft Report"), "a key another function has cannot be used")
+    Assert(profile.binds["Sign Report"] == before, "showing a captured key does not bind it")
+
+    SendMessage(0xF5, 0, 0, prompt.retryButton)  ; BM_CLICK
+    Sleep(100)
+    Assert(
+        KeybindGUI.isListening && !prompt.retryButton.Enabled && prompt.keyWell.Value = "Waiting for a key...",
+        "Try Again listens for another key"
+    )
+
+    kb.OnInputEnd("Sign Report", lv, prompt, {EndReason: "EndKey", EndKey: "F16", EndMods: "^"})
+    Assert(prompt.useButton.Enabled && prompt.keyWell.Value = "Ctrl + F16", "a free key is shown and can be used")
+    SendMessage(0xF5, 0, 0, prompt.useButton)
+    Sleep(200)
+    Assert(profile.binds["Sign Report"] == "^F16", "Use Keybind binds the captured key")
+    Assert(!WindowIsAlive(promptHwnd), "Use Keybind closes the prompt")
+    Assert(
+        !KeybindGUI.isListening && HotkeyManager.activeHotkeys.Has("Sign Report"),
+        "the new keybind is live after Use Keybind"
+    )
+    ; Saved, so the dialogs opened next do not stop to ask about unsaved changes.
+    Assert(kb.SaveCurrentProfile(), "the new keybind saves")
+}
+
+PressListKey(listView, virtualKey) {
+    listView.Focus()
+    PostMessage(0x100, virtualKey, 0, listView)  ; WM_KEYDOWN
+    PostMessage(0x101, virtualKey, 0xC0000001, listView)  ; WM_KEYUP
 }
 
 AssertScope(listView, funcName, expected) {
@@ -255,6 +621,18 @@ AssertScope(listView, funcName, expected) {
         }
     }
     Assert(false, "'" funcName "' is in the list")
+}
+
+; Selects a function's row as a click does, and lets its ItemSelect event run.
+SelectRow(listView, funcName) {
+    loop listView.GetCount() {
+        if (listView.GetText(A_Index, 1) = funcName) {
+            listView.Modify(A_Index, "Select Focus")
+            Sleep(100)
+            return
+        }
+    }
+    throw Error("No '" funcName "' row")
 }
 
 OnExit(Cleanup, -1)

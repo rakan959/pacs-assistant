@@ -433,7 +433,9 @@ class ProfileManager {
         return this.profilesPath "\" name ".ini"
     }
 
-    static CreateProfile(name) {
+    ; Creates a profile, empty or as a copy of source (a duplicated or imported
+    ; profile); source itself is never stored.
+    static CreateProfile(name, source := 0) {
         if !this.BeginStorageMutation()
             return false
         if !this.IsValidProfileName(name) || this.profiles.Has(name)
@@ -442,7 +444,7 @@ class ProfileManager {
         try {
             if FileExist(this.ProfilePath(name))
                 return this.ExistingFileConflict(name)
-            profile := this.NewProfile()
+            profile := IsObject(source) ? this.CloneProfile(source) : this.NewProfile()
             this.SaveProfile(name, profile)
             this.profiles[name] := profile
             return true

@@ -25,6 +25,7 @@ class UpdateCheckerTest {
         "TestManualCheckReportsASkippedVersion",
         "TestSettingsChangeKeepsAnUpdateDeferredByRemindLater",
         "TestSettingsChangeRestartsTimer",
+        "TestChecksRecordTheirOutcomeForStatus",
         "TestAutomaticCheckUsesAsyncTransport",
         "TestOnlyCompiledReleaseBuildsCheckForUpdates",
         "TestSynchronousAsyncFailureIsNotReportedAsStarted",
@@ -111,6 +112,12 @@ class UpdateCheckerTest {
         UpdateChecker.updateDialog := 0
         UpdateChecker.activeRequest := 0
         UpdateChecker.autoCheckFailureLogged := false
+        this.originalLastCheckTime := UpdateChecker.lastCheckTime
+        this.originalLastCheckError := UpdateChecker.lastCheckError
+        this.originalLastSkippedVersion := UpdateChecker.lastSkippedVersion
+        UpdateChecker.lastCheckTime := ""
+        UpdateChecker.lastCheckError := ""
+        UpdateChecker.lastSkippedVersion := ""
     }
 
     TestVersionParsing() {
@@ -323,6 +330,8 @@ class UpdateCheckerTest {
         Assert.False(Settings.Get("SkipBetaVersions"))
         Assert.Equal("v2.3.0", Settings.Get("SkippedUpdateVersion"))
         Assert.Equal("v2.3.0", UpdateChecker.skippedVersion)
+        ; Status names the skipped release at once, not after the next check.
+        Assert.Equal("v2.3.0", UpdateChecker.lastSkippedVersion)
     }
 
     TestStaleUpdateDialogCannotOverwriteNewerSettings() {
@@ -377,6 +386,41 @@ class UpdateCheckerTest {
         SetTestSetting("AutoUpdate", false)
         UpdateChecker.OnSettingsChanged()
         Assert.Equal(0, UpdateChecker.updateTimer)
+    }
+
+    ; Tools > Status reports "up to date" only after a check succeeded, and names
+    ; the error of one that failed.
+    TestChecksRecordTheirOutcomeForStatus() {
+        transport := FakeAsyncUpdateTransport()
+        UpdateChecker.transport := transport
+
+        Assert.True(UpdateChecker.BeginAutoCheck())
+        Assert.Equal("", UpdateChecker.lastCheckTime, "nothing has finished while the request runs")
+        transport.onError.Call(Error("The server could not be reached"))
+        Assert.Equal("", UpdateChecker.lastCheckTime)
+        Assert.Equal("The server could not be reached", UpdateChecker.lastCheckError)
+
+        Assert.True(UpdateChecker.BeginAutoCheck())
+        transport.Resolve({status: 200, body: UpdateReleaseJson("v0.0.0")})
+        Assert.True(UpdateChecker.lastCheckTime != "")
+        Assert.Equal("", UpdateChecker.lastCheckError)
+        Assert.Equal("", UpdateChecker.lastSkippedVersion)
+
+        ; A newer release the user skipped is not "up to date".
+        UpdateChecker.skippedVersion := "v9.0.0"
+        Assert.True(UpdateChecker.BeginAutoCheck())
+        transport.Resolve({status: 200, body: UpdateReleaseJson("v9.0.0")})
+        Assert.Equal("v9.0.0", UpdateChecker.lastSkippedVersion)
+        UpdateChecker.skippedVersion := ""
+
+        Assert.True(UpdateChecker.BeginManualCheck())
+        transport.Resolve({status: 200, body: "invalid JSON"})
+        Assert.True(UpdateChecker.lastCheckError != "", "a manual check that fails is recorded too")
+
+        UpdateChecker.transport := NullHandleAsyncTransport()
+        UpdateChecker.lastCheckError := ""
+        Assert.False(UpdateChecker.BeginManualCheck())
+        Assert.True(UpdateChecker.lastCheckError != "", "a manual check that cannot start is recorded too")
     }
 
     TestAutomaticCheckUsesAsyncTransport() {
@@ -985,6 +1029,9 @@ class UpdateCheckerTest {
         UpdateChecker.dialogAcquire := this.originalDialogAcquire
         UpdateChecker.dialogRelease := this.originalDialogRelease
         UpdateChecker.autoCheckFailureLogged := this.originalAutoCheckFailureLogged
+        UpdateChecker.lastCheckTime := this.originalLastCheckTime
+        UpdateChecker.lastCheckError := this.originalLastCheckError
+        UpdateChecker.lastSkippedVersion := this.originalLastSkippedVersion
         UpdateChecker.moveFile := this.originalMoveFile
         UpdateChecker.pendingUpdateInfo := this.originalPendingUpdateInfo
         UpdateChecker.notifiedVersion := this.originalNotifiedVersion
@@ -1159,10 +1206,11 @@ UpdateReleaseJson(version) {
         . ']}'
 }
 
-; Clicks a dialog button the way a user does, then lets its handler run.
+; Clicks a dialog button the way a user does, then lets its handler run. The text
+; is the label as shown, without the & that marks its keyboard mnemonic.
 ClickDialogButton(dialogGui, text) {
     for , control in dialogGui {
-        if (control.Type = "Button" && control.Text = text) {
+        if (control.Type = "Button" && StrReplace(control.Text, "&") = text) {
             SendMessage(0xF5, 0, 0, control)  ; BM_CLICK
             Sleep(50)
             return

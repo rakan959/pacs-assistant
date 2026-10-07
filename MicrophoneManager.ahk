@@ -62,6 +62,9 @@ class MicrophoneManager {
     static maxAttempts := 3
     static failureNotified := false
     static lastError := ""
+    ; The last microphone PowerScribe confirmed, {name, time} (A_Now form), or 0;
+    ; for the Status window.
+    static lastSelection := 0
     ; Why SelectMicrophone stops when PowerScribe rerenders the login screen under it
     static selectorChangedReason := "the microphone selector changed before the selection could be made"
     static listChangedReason := "the microphone list changed before the selection could be made"
@@ -448,7 +451,7 @@ class MicrophoneManager {
 
         if this.WaitForSelection(session, resolved.name, 0) {
             this.CollapseVerifiedCombo(session, combo)
-            return true
+            return this.SelectionConfirmed(resolved.name)
         }
 
         ; Reacquire both semantic targets immediately before mutation. A dropdown can
@@ -539,6 +542,15 @@ class MicrophoneManager {
         this.CollapseVerifiedCombo(session, combo)
         if !succeeded
             return this.SelectionStopped("PowerScribe did not confirm the selection within 1 second")
+        return this.SelectionConfirmed(finalResolved.name)
+    }
+
+    ; Records a microphone PowerScribe confirmed, already selected or just chosen,
+    ; for the Status window, and returns SelectMicrophone's true result. It
+    ; supersedes an earlier attempt's failure.
+    static SelectionConfirmed(name) {
+        this.lastSelection := {name: name, time: A_Now}
+        this.lastError := ""
         return true
     }
 
@@ -578,7 +590,7 @@ class MicrophoneManager {
     static ApplyNow() {
         micName := Trim(Settings.Get("MicrophoneName"))
         if (micName = "")
-            return this.ApplyNowFailed("No microphone is configured. Set one under Settings > PowerScribe.", "No Microphone Configured")
+            return this.ApplyNowFailed("No microphone is configured. Set one in Settings, under PowerScribe microphone.", "No Microphone Configured")
 
         resolution := this.sessionDriver.CaptureResult()
         status := IsObject(resolution) && HasProp(resolution, "status") ? resolution.status : ""

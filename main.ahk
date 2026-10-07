@@ -11,6 +11,15 @@ FileEncoding "UTF-8"
 #Include MicrophoneManager.ahk
 #Include ErrorText.ahk
 #Include AppLog.ahk
+#Include AppTray.ahk
+#Include CommandFeedback.ahk
+
+; The app icon: compiled into the EXE (which then also uses it for the tray and its
+; windows), and set at startup for source runs, before any window is created.
+;@Ahk2Exe-SetMainIcon pacs-assistant.ico
+if !A_IsCompiled
+    TraySetIcon(A_ScriptDir "\pacs-assistant.ico")
+A_IconTip := "PACS Assistant"
 
 ; Production error record: append every uncaught runtime error, with its type,
 ; location and call stack, to error.log in the app's data folder (AppLog). The
@@ -27,6 +36,7 @@ Settings.AddChangeListener(ObjBindMethod(UpdateChecker, "OnSettingsChanged"))
 Settings.AddChangeListener(ObjBindMethod(PACSMonitor, "OnSettingsChanged"))
 Settings.AddChangeListener(ObjBindMethod(MicrophoneManager, "OnSettingsChanged"))
 UpdateChecker.clinicalActivityProbe := (*) => PACSCommands.clinicalCommandActive
+PACSCommands.startedNotifier := ObjBindMethod(CommandFeedback, "Show")
 
 ; Compose every cross-module lease before showing the main window or registering
 ; callbacks, so even the first user action observes the same serialization policy.
@@ -46,6 +56,11 @@ MicrophoneManager.automationRelease := ObjBindMethod(PACSCommands, "ReleaseClini
 kbGUI := KeybindGUI()
 UpdateChecker.shutdownCoordinator := kbGUI
 OnExit((exitReason, exitCode) => kbGUI.HandleProcessExit(exitReason, exitCode))
+AppTray.Install(kbGUI)
+; The main window follows the Theme setting, Windows' dark mode and high contrast
+; (WM_SETTINGCHANGE) while it runs.
+Settings.AddChangeListener(ObjBindMethod(kbGUI, "ApplyThemeChange"))
+OnMessage(0x1A, ObjBindMethod(kbGUI, "OnWindowsSettingChange"))
 
 ; Start background clinical services only after the shared automation and
 ; configuration gates are fully composed.

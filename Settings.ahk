@@ -6,10 +6,15 @@
 #Requires AutoHotkey v2.0
 #Include AppStorage.ahk
 #Include AppLog.ahk
+#Include Version.ahk
+#Include UITheme.ahk
+#Include StartupShortcut.ahk
 
 class Settings {
     static settingsFile := AppStorage.DataRoot() "\settings.ini"
     static changeListeners := []
+    ; The Settings window last shown; a theme change rebuilds it while it is open.
+    static dialog := 0
     static mutationGuard := (*) => true
     static dialogAcquire := (*) => true
     static dialogRelease := (*) => 0
@@ -20,8 +25,14 @@ class Settings {
     ; One day is a deliberate product bound as well as protection from AutoHotkey's
     ; DWORD-backed timer period wrapping after seconds are multiplied by 1000.
     static maxRefreshIntervalSeconds := 86400
-    static dialogLogicalWidth := 400
-    static dialogLogicalHeight := 420
+    ; The settings window's width, and the most height its content may take (both
+    ; logical units); the window is as tall as its content. Both fit a 1366x768
+    ; screen at 150% scaling (SettingsTest), and the layout audit checks the content
+    ; stays within the height.
+    static dialogColumnWidths := [250, 250, 300]
+    static dialogGutter := 28
+    static dialogLogicalWidth := 896
+    static dialogLogicalHeight := 470
     ; Keys are PascalCase, unlike other map keys (style guide s4), because each one is
     ; also the persisted settings.ini key name.
     static defaultSettings := Map(
@@ -36,6 +47,10 @@ class Settings {
         "CustomSoundFile", "",         ; Path to custom sound file
         "SwapMicrophoneOnLogin", false,
         "MicrophoneName", "",          ; Blank = leave PowerScribe's selection alone
+        "StartMinimized", false,       ; Start with only the tray icon showing
+        "CloseToTray", false,          ; Closing the window hides it instead of exiting
+        "ShowCommandFeedback", false,  ; A brief tooltip naming each command a key runs
+        "Theme", "Match Windows",      ; One of themeChoices (UITheme.ModeFor)
         ; Superseded by per-bind scopes, kept only so profiles written under the older
         ; [KeybindScopes] scheme migrate to the right scope. See
         ; ProfileManager.MigrateLegacyScope.
@@ -50,8 +65,14 @@ class Settings {
         "AudioAlertNewCase",
         "MessageBoxNewCase",
         "SwapMicrophoneOnLogin",
+        "StartMinimized",
+        "CloseToTray",
+        "ShowCommandFeedback",
         "RestrictHotkeysByActiveWindow"
     ]
+
+    ; The Theme setting's values, in the order the settings dropdown shows them.
+    static themeChoices := ["Match Windows", "Light", "Dark"]
 
     /**
      * Alert sounds, in the order the settings dropdown shows them, each backed by a
@@ -102,6 +123,8 @@ class Settings {
             if (entry.file != "")
                 this.soundFiles[entry.name] := entry.file
         }
+        ; Windows are drawn in the theme this setting chooses.
+        UITheme.themeSetting := (*) => Settings.Get("Theme")
 
         try {
             AppStorage.Ensure()
@@ -170,6 +193,10 @@ class Settings {
             if (value = "0")
                 return false
             return fallback
+        }
+        if (settingName = "Theme") {
+            index := this.ChoiceIndex(this.themeChoices, value)
+            return index ? this.themeChoices[index] : fallback
         }
         return value
     }
@@ -273,7 +300,13 @@ class Settings {
     }
 
     ; Show settings dialog
-    static ShowDialog() {
+    ; showOptions: extra Gui.Show options, such as Hide to build it unshown.
+    static ShowDialog(showOptions := "") {
+        ; One Settings window at a time: asking again brings the open one forward.
+        if this.DialogIsOpen() {
+            this.dialog.Show(WinGetMinMax(this.dialog) = -1 ? "Restore" : "")
+            return this.dialog
+        }
         ; The presentation lease excludes every clinical, capture, profile, settings
         ; and shutdown operation while the window is built; it is released once Show
         ; returns. Save is gated separately, by BeginWriteTransaction.
@@ -286,68 +319,176 @@ class Settings {
             return false
         }
         try {
-            ; DPI policy: default DPIScale ON - system-DPI-aware, auto-scaled.
-            settingsGui := Gui(, "PACS Assistant - Settings")
+            settingsGui := UITheme.NewWindow("PACS Assistant - Settings")
             settingsGui.settingsRevision := this.revision
-            settingsGui.SetFont("s10", "Segoe UI")
             checkboxes := Map()
-            tab := settingsGui.Add(
-                "Tab3",
-                "x20 y15 w360 h330",
-                ["General", "PowerScribe", "Notifications"]
+            ; One page in three columns, every position relative to the control above
+            ; it, and a height that follows the content, so no control can land on
+            ; another or below the buttons at any display scaling.
+            widths := this.dialogColumnWidths
+            gutter := this.dialogGutter
+            top := UITheme.margin
+            columnX := [UITheme.margin]
+            loop widths.Length - 1
+                columnX.Push(columnX[A_Index] + widths[A_Index] + gutter)
+            buttonWidth := UITheme.buttonWidth
+
+            ; First column: updates and startup.
+            x := columnX[1], column := widths[1]
+            UITheme.AddSectionLabel(settingsGui, "Updates", "x" x " y" top " w" column)
+            checkboxes["AutoUpdate"] := settingsGui.Add("Checkbox", "x" x " y+8 w" column, "Check for updates &automatically")
+            checkboxes["SkipBetaVersions"] := settingsGui.Add("Checkbox", "x" x " y+6 w" column, "Skip &beta versions")
+            if AppVersion.isDevBuild
+                UITheme.AddNote(settingsGui, "This development build never checks for updates.", "x" x " y+6 w" column)
+
+            UITheme.AddSectionLabel(settingsGui, "Startup", "x" x " y+22 w" column)
+            ; Not a settings.ini value: the Startup folder shortcut is the setting.
+            startWithWindows := settingsGui.Add("Checkbox", "x" x " y+8 w" column, "Start when I sign &in to Windows")
+            startWithWindows.Value := StartupShortcut.IsEnabled()
+            checkboxes["StartMinimized"] := settingsGui.Add("Checkbox", "x" x " y+6 w" column, "Start minimi&zed to the tray")
+            checkboxes["CloseToTray"] := settingsGui.Add("Checkbox", "x" x " y+6 w" column, "C&lose to the tray instead of exiting")
+
+            ; Second column: the PowerScribe microphone.
+            x := columnX[2], column := widths[2]
+            UITheme.AddSectionLabel(settingsGui, "PowerScribe microphone", "x" x " y" top " w" column)
+            checkboxes["SwapMicrophoneOnLogin"] := settingsGui.Add("Checkbox", "x" x " y+8 w" column, "Select a &microphone at login")
+            settingsGui.Add("Text", "x" x " y+12 w" column, "Microphone &name")
+            micNameEdit := settingsGui.Add("Edit", "x" x " y+4 r1 w" column, this.Get("MicrophoneName"))
+            UITheme.SetPlaceholder(micNameEdit, "For example, PowerMic")
+            UITheme.AddNote(
+                settingsGui,
+                "An exact device name is best. A partial name such as PowerMic works when it matches only one device.",
+                "x" x " y+6 w" column
             )
 
-            tab.UseTab(1)
-            settingsGui.Add("GroupBox", "x35 y55 w330 h75", "Updates")
-            checkboxes["AutoUpdate"] := settingsGui.Add("Checkbox", "x50 y78", "Automatically check for updates")
-            checkboxes["SkipBetaVersions"] := settingsGui.Add("Checkbox", "x50 y103", "Skip beta versions")
-            settingsGui.Add("GroupBox", "x35 y140 w330 h115", "PACS")
-            checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x50 y165", "Auto refresh PACS")
-            settingsGui.Add("Text", "x50 y195", "Refresh interval (seconds):")
-            refreshIntervalEdit := settingsGui.Add("Edit", "x50 y218 w75 Number", this.Get("RefreshInterval"))
+            UITheme.AddSectionLabel(settingsGui, "Appearance", "x" x " y+22 w" column)
+            checkboxes["ShowCommandFeedback"] := settingsGui.Add("Checkbox", "x" x " y+8 w" column, "Show which &command a keybind ran")
+            UITheme.AddNote(settingsGui, "Its name appears briefly by the pointer.", "x" x " y+6 w" column)
+            settingsGui.Add("Text", "x" x " y+14 w" column, "T&heme")
+            themeDropDown := settingsGui.Add("DropDownList", "x" x " y+4 w160", this.themeChoices)
+            themeDropDown.Value := this.ChoiceIndex(this.themeChoices, this.Get("Theme"))
+            UITheme.AddNote(
+                settingsGui,
+                "Match Windows follows Windows' dark mode. A Windows contrast theme always applies.",
+                "x" x " y+6 w" column
+            )
 
-            tab.UseTab(2)
-            settingsGui.Add("GroupBox", "x35 y55 w330 h140", "PowerScribe login")
-            checkboxes["SwapMicrophoneOnLogin"] := settingsGui.Add("Checkbox", "x50 y82", "Set microphone on login")
-            settingsGui.Add("Text", "x50 y115", "Microphone (blank = leave unchanged):")
-            micNameEdit := settingsGui.Add("Edit", "x50 y140 w300", this.Get("MicrophoneName"))
+            ; Third column: everything about new studies.
+            right := columnX[3], column := widths[3]
+            fieldWidth := column - buttonWidth - UITheme.gap
+            UITheme.AddSectionLabel(settingsGui, "New studies", "x" right " y" top " w" column)
+            checkboxes["AutoRefreshPACS"] := settingsGui.Add("Checkbox", "x" right " y+8 w" column, "Auto-&refresh PACS and scan for new studies")
+            settingsGui.Add("Text", "x" right " y+12", "Every")
+            refreshIntervalEdit := settingsGui.Add("Edit", "x+6 yp-3 r1 w64 Number Right", this.Get("RefreshInterval"))
+            settingsGui.Add("Text", "x+6 yp+3", "seconds (" this.minRefreshIntervalSeconds " or more)")
+            checkboxes["AudioAlertNewCase"] := settingsGui.Add("Checkbox", "x" right " y+14 w" column, "Play a &sound when one arrives")
+            checkboxes["MessageBoxNewCase"] := settingsGui.Add("Checkbox", "x" right " y+6 w" column, "Show a &Windows notification when one arrives")
+            UITheme.AddNote(settingsGui, "Scanning runs only while a sound or a notification is on.", "x" right " y+6 w" column)
 
-            tab.UseTab(3)
-            settingsGui.Add("GroupBox", "x35 y55 w330 h260", "New-study notifications")
-            checkboxes["AudioAlertNewCase"] := settingsGui.Add("Checkbox", "x50 y80", "Play sound on new case")
-            checkboxes["MessageBoxNewCase"] := settingsGui.Add("Checkbox", "x50 y106", "Show Windows notification on new case")
-            settingsGui.Add("Text", "x50 y140", "Alert sound:")
-            soundDropDown := settingsGui.Add("DropDownList", "x50 y163 w300", this.alertSounds)
+            settingsGui.Add("Text", "x" right " y+14 w" column, "Alert s&ound")
+            soundDropDown := settingsGui.Add("DropDownList", "x" right " y+4 w" fieldWidth, this.alertSounds)
             soundDropDown.Value := this.FindSoundIndex(this.Get("AlertSound"))
-            settingsGui.Add("Text", "x50 y200", "Custom sound file:")
-            customSoundEdit := settingsGui.Add("Edit", "x50 y223 w225 ReadOnly", this.Get("CustomSoundFile"))
-            settingsGui.Add("Button", "x285 y221 w65", "Browse")
-                .OnEvent("Click", (*) => this.BrowseSound(customSoundEdit))
-            settingsGui.Add("Button", "x50 y263 w65", "Test")
-                .OnEvent("Click", (*) => this.TestSound(soundDropDown.Text, customSoundEdit.Text))
+            soundDropDown.GetPos(,,, &fieldHeight)
+            settingsGui.Add("Button", "x+" UITheme.gap " yp w" buttonWidth " h" fieldHeight, "&Test")
+                .OnEvent("Click", (*) => (
+                    settingsGui.Opt("+OwnDialogs"),
+                    this.TestSound(soundDropDown.Text, customSoundEdit.Text)
+                ))
+            settingsGui.Add("Text", "x" right " y+12 w" column, "Custom sound file")
+            customSoundEdit := settingsGui.Add("Edit", "x" right " y+4 r1 w" fieldWidth " ReadOnly", this.Get("CustomSoundFile"))
+            UITheme.ShowEnd(customSoundEdit)
+            customSoundEdit.GetPos(,,, &fieldHeight)
+            browseButton := settingsGui.Add("Button", "x+" UITheme.gap " yp w" buttonWidth " h" fieldHeight, "Brows&e...")
+            browseButton.OnEvent("Click", (*) => (
+                settingsGui.Opt("+OwnDialogs"),
+                this.BrowseSound(customSoundEdit)
+            ))
+            UITheme.AddNote(settingsGui, "A .wav or .mp3 file, for the Custom File sound.", "x" right " y+6 w" column)
+
+            ; A rule down each gutter, as tall as the tallest column.
+            ruleHeight := UITheme.ContentBottom(settingsGui) - top
+            loop widths.Length - 1 {
+                ruleX := columnX[A_Index] + widths[A_Index] + gutter // 2
+                UITheme.AddSeparator(settingsGui, "x" ruleX " y" top " w1 h" ruleHeight)
+            }
 
             for setting, checkbox in checkboxes {
                 checkbox.Value := this.Get(setting)
             }
 
-            tab.UseTab()
+            ; Controls that only matter for one choice follow it.
+            syncMicrophone := (*) => micNameEdit.Enabled := checkboxes["SwapMicrophoneOnLogin"].Value
+            checkboxes["SwapMicrophoneOnLogin"].OnEvent("Click", syncMicrophone)
+            syncMicrophone()
+            syncCustomSound := (*) => browseButton.Enabled := soundDropDown.Text = "Custom File"
+            soundDropDown.OnEvent("Change", syncCustomSound)
+            syncCustomSound()
+            settingsGui.syncControls := () => (syncMicrophone(), syncCustomSound())
+
             controls := {
                 checkboxes: checkboxes,
                 refreshInterval: refreshIntervalEdit,
                 micName: micNameEdit,
                 soundDropDown: soundDropDown,
-                customSound: customSoundEdit
+                customSound: customSoundEdit,
+                themeDropDown: themeDropDown,
+                startWithWindows: startWithWindows,
+                startWithWindowsWas: startWithWindows.Value
             }
-            settingsGui.Add("Button", "x110 y365 w80 Default", "Save")
-                .OnEvent("Click", (*) => this.SaveSettings(controls, settingsGui))
-            settingsGui.Add("Button", "x210 y365 w80", "Cancel")
-                .OnEvent("Click", (*) => settingsGui.Destroy())
+            cancel := (*) => settingsGui.Destroy()
+            UITheme.AddFooter(settingsGui, this.dialogLogicalWidth - 2 * UITheme.margin, [
+                {
+                    text: "Save",
+                    default: true,
+                    action: (*) => (settingsGui.Opt("+OwnDialogs"), this.SaveSettings(controls, settingsGui))
+                },
+                {text: "Cancel", action: cancel}
+            ])
             ; The title-bar X must destroy like Cancel; Close only hides by default.
-            settingsGui.OnEvent("Close", (*) => settingsGui.Destroy())
+            settingsGui.OnEvent("Close", cancel)
+            settingsGui.OnEvent("Escape", cancel)
 
-            settingsGui.Show("w" this.dialogLogicalWidth " h" this.dialogLogicalHeight)
+            UITheme.ShowDialog(settingsGui, showOptions)
+            this.dialog := settingsGui
             return settingsGui
         } finally this.dialogRelease.Call()
+    }
+
+    static DialogIsOpen() {
+        try return IsObject(this.dialog) && DllCall("IsWindowVisible", "Ptr", this.dialog.Hwnd)
+        return false
+    }
+
+    /**
+     * The open Settings window, rebuilt in the current theme where it was, keeping
+     * what has been entered and the revision it was opened at (so a save is still
+     * refused if the settings changed since).
+     * @returns the rebuilt window, or false when it could not be built
+     */
+    static RebuildDialog() {
+        previous := this.dialog
+        state := UITheme.StateOf(previous)
+        ; Cleared first, or ShowDialog would bring the old window forward.
+        this.dialog := 0
+        rebuilt := this.ShowDialog("Hide")
+        if !IsObject(rebuilt) {
+            this.dialog := previous
+            return false
+        }
+        UITheme.CopyInputs(previous, rebuilt)
+        rebuilt.syncControls.Call()
+        rebuilt.settingsRevision := previous.settingsRevision
+        previous.Destroy()
+        return UITheme.ShowAsBefore(rebuilt, state)
+    }
+
+    ; The position of a value in a list of choices, ignoring case; 0 if absent.
+    static ChoiceIndex(choices, value) {
+        for index, choice in choices {
+            if (choice = value)
+                return index
+        }
+        return 0
     }
 
     ; Find index of sound in alertSounds array
@@ -417,8 +558,10 @@ class Settings {
     ; Browse for custom sound file
     static BrowseSound(editControl) {
         selectedPath := FileSelect(3,, "Select Sound File", "Sound Files (*.wav; *.mp3)")
-        if selectedPath
+        if selectedPath {
             editControl.Value := selectedPath
+            UITheme.ShowEnd(editControl)
+        }
     }
 
     ; Test selected sound
@@ -478,6 +621,8 @@ class Settings {
         values["MicrophoneName"] := micName
         values["AlertSound"] := controls.soundDropDown.Text
         values["CustomSoundFile"] := controls.customSound.Text
+        if HasProp(controls, "themeDropDown")
+            values["Theme"] := controls.themeDropDown.Text
 
         try this.SaveValuesAtRevision(values, settingsGui.settingsRevision)
         catch as err {
@@ -499,7 +644,26 @@ class Settings {
             return false
         }
 
+        ; The sign-in shortcut is touched only when its box changed, so a save that
+        ; did not change it never creates or deletes a shortcut.
+        startupError := ""
+        if (HasProp(controls, "startWithWindows")
+            && !!controls.startWithWindows.Value != !!controls.startWithWindowsWas) {
+            try StartupShortcut.Set(controls.startWithWindows.Value)
+            catch Any as err {
+                startupError := ErrorText.Message(err)
+                AppLog.Write("The Startup folder shortcut could not be changed: " ErrorText.Describe(err))
+            }
+        }
+
         settingsGui.Destroy()
+        if (startupError != "")
+            MsgBox(
+                "The settings were saved, but starting with Windows could not be "
+                    . (controls.startWithWindows.Value ? "turned on" : "turned off") ".`n`n" startupError,
+                "Startup Not Changed",
+                "Icon!"
+            )
         listenerErrors := this.NotifyChanged()
         if listenerErrors.Length {
             details := ""

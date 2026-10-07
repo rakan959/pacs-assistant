@@ -40,7 +40,10 @@ class SettingsTest {
         "TestSavingRequiresMicrophoneNameWhenSwapEnabled",
         "TestSaveFailureKeepsDialogOpenAndFileUnchanged",
         "TestChangeListenerMustBeCallable",
-        "TestStaleRevisionRaisesSettingsConflictError"
+        "TestStaleRevisionRaisesSettingsConflictError",
+        "TestThemeSettingAcceptsOnlyItsChoices",
+        "TestOnlyOneSettingsWindowOpensAtATime",
+        "TestSavingSettingsSavesTheTheme"
     ]
 
     ; Non-test methods the tests share (see TestRunner.UnlistedMethods).
@@ -56,6 +59,8 @@ class SettingsTest {
         this.originalDialogRelease := Settings.dialogRelease
         this.originalDialogUnavailableNotifier := Settings.dialogUnavailableNotifier
         this.originalWriteTransactionActive := Settings.writeTransactionActive
+        this.originalDialog := Settings.dialog
+        Settings.dialog := 0
         Settings.changeListeners := []
         Settings.mutationGuard := (*) => true
         Settings.dialogAcquire := (*) => true
@@ -78,6 +83,7 @@ class SettingsTest {
         Assert.Equal("", Settings.Get("CustomSoundFile"))
         Assert.False(Settings.Get("SwapMicrophoneOnLogin"))
         Assert.Equal("", Settings.Get("MicrophoneName"))
+        Assert.Equal("Match Windows", Settings.Get("Theme"))
     }
 
     TestSaveAndGetValues() {
@@ -315,6 +321,40 @@ class SettingsTest {
         Assert.Equal(60, Settings.Get("RefreshInterval"))
     }
 
+    ; Opening Settings again brings the open window forward: two copies could
+    ; diverge, and a theme change rebuilds only the one it tracks.
+    TestOnlyOneSettingsWindowOpensAtATime() {
+        first := Settings.ShowDialog()
+        try {
+            Assert.True(IsObject(first))
+            Assert.True(Settings.ShowDialog() == first)
+        } finally {
+            if IsObject(first)
+                try first.Destroy()
+        }
+    }
+
+    ; A hand-edited value is matched without case; anything else is the default.
+    ; UITheme reads the setting through Settings.
+    TestThemeSettingAcceptsOnlyItsChoices() {
+        IniWrite("dark", Settings.settingsFile, "Settings", "Theme")
+        Assert.Equal("Dark", Settings.Get("Theme"))
+        Assert.Equal("Dark", UITheme.themeSetting.Call())
+        for invalid in ["Purple", "", "1"] {
+            IniWrite(invalid, Settings.settingsFile, "Settings", "Theme")
+            Assert.Equal("Match Windows", Settings.Get("Theme"), invalid)
+        }
+    }
+
+    TestSavingSettingsSavesTheTheme() {
+        controls := this.SettingsControls(true, 60)
+        controls.themeDropDown := {Text: "Light"}
+
+        Assert.True(Settings.SaveSettings(controls, FakeSettingsDialog()))
+
+        Assert.Equal("Light", Settings.Get("Theme"))
+    }
+
     SettingsControls(autoUpdate, interval, swapMicrophone := false, micName := "") {
         return {
             checkboxes: Map(
@@ -471,6 +511,7 @@ class SettingsTest {
     Teardown() {
         RestoreTestSettings(this.savedSettings)
         Settings.changeListeners := this.originalListeners
+        Settings.dialog := this.originalDialog
         Settings.mutationGuard := this.originalMutationGuard
         Settings.dialogAcquire := this.originalDialogAcquire
         Settings.dialogRelease := this.originalDialogRelease
