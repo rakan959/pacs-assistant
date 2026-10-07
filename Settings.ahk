@@ -300,7 +300,13 @@ class Settings {
     }
 
     ; Show settings dialog
-    static ShowDialog() {
+    ; showOptions: extra Gui.Show options, such as NA to show it unactivated.
+    static ShowDialog(showOptions := "") {
+        ; One Settings window at a time: asking again brings the open one forward.
+        if this.DialogIsOpen() {
+            this.dialog.Show(WinGetMinMax(this.dialog) = -1 ? "Restore" : "")
+            return this.dialog
+        }
         ; The presentation lease excludes every clinical, capture, profile, settings
         ; and shutdown operation while the window is built; it is released once Show
         ; returns. Save is gated separately, by BeginWriteTransaction.
@@ -442,7 +448,7 @@ class Settings {
             settingsGui.OnEvent("Close", cancel)
             settingsGui.OnEvent("Escape", cancel)
 
-            UITheme.ShowDialog(settingsGui)
+            UITheme.ShowDialog(settingsGui, showOptions)
             this.dialog := settingsGui
             return settingsGui
         } finally this.dialogRelease.Call()
@@ -462,9 +468,14 @@ class Settings {
     static RebuildDialog() {
         previous := this.dialog
         WinGetPos(&x, &y,,, previous)
-        rebuilt := this.ShowDialog()
-        if !IsObject(rebuilt)
+        ; Cleared first, or ShowDialog would bring the old window forward. Not
+        ; activated when it was in the background, behind PowerScribe.
+        this.dialog := 0
+        rebuilt := this.ShowDialog(WinActive(previous) ? "" : "NA")
+        if !IsObject(rebuilt) {
+            this.dialog := previous
             return false
+        }
         UITheme.CopyInputs(previous, rebuilt)
         rebuilt.syncControls.Call()
         rebuilt.settingsRevision := previous.settingsRevision

@@ -581,6 +581,7 @@ class UpdateChecker {
         start := this.StartCheck(true)
         if !start.started {
             if start.error {
+                this.RecordCheckOutcome(start.error)
                 AppLog.Write("Update check failed: " ErrorText.Describe(start.error))
                 this.manualResultNotifier.Call(
                     "The update check could not start: " ErrorText.Message(start.error),
@@ -661,7 +662,7 @@ class UpdateChecker {
      * an unauthenticated 60/hour GitHub limit and can return a different answer from
      * the one the caller acted on.
      */
-    static ShowUpdateDialog(updateInfo?) {
+    static ShowUpdateDialog(updateInfo?, showOptions := "") {
         fromCache := !IsSet(updateInfo)
         if !IsSet(updateInfo) {
             if (IsObject(this.pendingUpdateInfo) && this.pendingUpdateInfo.hasUpdate)
@@ -763,9 +764,11 @@ class UpdateChecker {
             updateGui.OnEvent("Escape", dismiss)
 
             this.updateDialog := updateGui
-            UITheme.ShowDialog(updateGui)
-            ; Start on the default action rather than inside the release notes.
-            footer["&Update Now"].Focus()
+            UITheme.ShowDialog(updateGui, showOptions)
+            ; Start on the default action rather than inside the release notes;
+            ; focusing a control would activate a dialog shown unactivated (NA).
+            if !InStr(showOptions, "NA")
+                footer["&Update Now"].Focus()
             return updateGui
         } finally this.dialogRelease.Call()
     }
@@ -821,7 +824,8 @@ class UpdateChecker {
         ; Cleared first: ShowUpdateDialog brings a live dialog for the same version
         ; forward instead of building another.
         this.updateDialog := 0
-        rebuilt := this.ShowUpdateDialog(previous.updateInfo)
+        ; Not activated when it was in the background, behind PowerScribe.
+        rebuilt := this.ShowUpdateDialog(previous.updateInfo, WinActive(previous) ? "" : "NA")
         if !IsObject(rebuilt) {
             this.updateDialog := previous
             return false

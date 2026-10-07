@@ -404,6 +404,11 @@ class UpdateCheckerTest {
         Assert.True(UpdateChecker.BeginManualCheck())
         transport.Resolve({status: 200, body: "invalid JSON"})
         Assert.True(UpdateChecker.lastCheckError != "", "a manual check that fails is recorded too")
+
+        UpdateChecker.transport := NullHandleAsyncTransport()
+        UpdateChecker.lastCheckError := ""
+        Assert.False(UpdateChecker.BeginManualCheck())
+        Assert.True(UpdateChecker.lastCheckError != "", "a manual check that cannot start is recorded too")
     }
 
     TestAutomaticCheckUsesAsyncTransport() {

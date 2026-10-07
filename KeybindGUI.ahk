@@ -174,6 +174,11 @@ class KeybindGUI {
             WinGetPos(&x, &y, &w, &h, this.gui)
             WindowPlacement.SaveRect(x, y, w, h)
         }
+        ; WINDOWPLACEMENT: a minimized window keeps how it restores, maximized when
+        ; it was minimized from maximized (WPF_RESTORETOMAXIMIZED).
+        placement := Buffer(44, 0)
+        NumPut("UInt", placement.Size, placement, 0)
+        DllCall("GetWindowPlacement", "Ptr", this.gui.Hwnd, "Ptr", placement)
         selected := this.mainView.list.GetNext(0)
         this.gui.Destroy()
         ; The profile and its keybinds are unchanged: only the view is rebuilt,
@@ -184,7 +189,12 @@ class KeybindGUI {
             this.mainView.list.Modify(selected, "Select Focus Vis")
         if visible {
             this.pendingMaximize := false
-            this.gui.Show(minMax = 1 ? "Maximize" : minMax = -1 ? "Minimize" : active ? "" : "NA")
+            if (minMax = -1) {
+                NumPut("UInt", 7, placement, 8)  ; showCmd: SW_SHOWMINNOACTIVE
+                DllCall("SetWindowPlacement", "Ptr", this.gui.Hwnd, "Ptr", placement)
+                return
+            }
+            this.gui.Show(minMax = 1 ? "Maximize" : active ? "" : "NA")
             if active
                 this.mainView.list.Focus()
         }
@@ -198,9 +208,11 @@ class KeybindGUI {
             return false
         try {
             selector := this.profileSelectorGui
+            ; Not activated when it was in the background, behind PowerScribe.
+            showOptions := WinActive(selector) ? "" : "NA"
             WinGetPos(&x, &y,,, selector)
             this.RetireProfileSelector(selector)
-            WinMove(x, y,,, this.ShowProfileSelector())
+            WinMove(x, y,,, this.ShowProfileSelector(showOptions))
             return true
         } finally this.EndProfileMutationTransaction()
     }
@@ -213,7 +225,7 @@ class KeybindGUI {
         try {
             prompt := this.newProfilePrompt
             WinGetPos(&x, &y,,, prompt)
-            rebuilt := this.PromptNewProfile()
+            rebuilt := this.PromptNewProfile(WinActive(prompt) ? "" : "NA")
             rebuilt.nameEdit.Value := prompt.nameEdit.Value
             if HasProp(prompt, "importSource") {
                 rebuilt.importSource := prompt.importSource
@@ -835,11 +847,19 @@ class KeybindGUI {
                 this.gui.Show()
             return true
         }
-        if this.ProfileSelectorIsCurrent(this.profileSelectorGui) {
-            this.profileSelectorGui.Show()
-            return true
-        }
+        ; Without one, the profile selector or the new-profile prompt is the app's
+        ; window.
+        if this.ProfileSelectorIsCurrent(this.profileSelectorGui)
+            return this.BringForward(this.profileSelectorGui)
+        if this.GuiIsLive(this.newProfilePrompt)
+            return this.BringForward(this.newProfilePrompt)
         return false
+    }
+
+    ; Shows a window and brings it forward, restoring it when minimized.
+    BringForward(window) {
+        window.Show(WinGetMinMax(window) = -1 ? "Restore" : "")
+        return true
     }
 
     OpenDataFolder() {
@@ -1105,7 +1125,8 @@ class KeybindGUI {
         return false
     }
 
-    ShowProfileSelector() {
+    ; showOptions: extra Gui.Show options, such as NA to show it unactivated.
+    ShowProfileSelector(showOptions := "") {
         if this.ProfileSelectorIsCurrent(this.profileSelectorGui) {
             try WinActivate("ahk_id " this.profileSelectorGui.Hwnd)
             return this.profileSelectorGui
@@ -1166,7 +1187,7 @@ class KeybindGUI {
         ; Return true so a refused close keeps the selector visible (see CreateMainGUI).
         selectorGui.OnEvent("Close", (*) => (this.CloseProfileSelector(selectorGui), true))
         this.RegisterProfileSelector(selectorGui)
-        try UITheme.ShowDialog(selectorGui)
+        try UITheme.ShowDialog(selectorGui, showOptions)
         catch Any as err {
             this.RetireProfileSelector(selectorGui)
             throw err
@@ -1266,7 +1287,8 @@ class KeybindGUI {
         } finally this.EndProfileMutationTransaction()
     }
 
-    PromptNewProfile() {
+    ; showOptions: extra Gui.Show options, such as NA to show it unactivated.
+    PromptNewProfile(showOptions := "") {
         inputGui := UITheme.NewWindow("PACS Assistant - Create New Profile")
         width := 320
         ; With no profile to return to, closing this prompt exits the app.
@@ -1296,7 +1318,7 @@ class KeybindGUI {
         inputGui.OnEvent("Close", close)
         if !firstProfile
             inputGui.OnEvent("Escape", close)
-        UITheme.ShowDialog(inputGui)
+        UITheme.ShowDialog(inputGui, showOptions)
         this.newProfilePrompt := inputGui
         return inputGui
     }

@@ -42,6 +42,7 @@ class SettingsTest {
         "TestChangeListenerMustBeCallable",
         "TestStaleRevisionRaisesSettingsConflictError",
         "TestThemeSettingAcceptsOnlyItsChoices",
+        "TestOnlyOneSettingsWindowOpensAtATime",
         "TestSavingSettingsSavesTheTheme"
     ]
 
@@ -58,6 +59,8 @@ class SettingsTest {
         this.originalDialogRelease := Settings.dialogRelease
         this.originalDialogUnavailableNotifier := Settings.dialogUnavailableNotifier
         this.originalWriteTransactionActive := Settings.writeTransactionActive
+        this.originalDialog := Settings.dialog
+        Settings.dialog := 0
         Settings.changeListeners := []
         Settings.mutationGuard := (*) => true
         Settings.dialogAcquire := (*) => true
@@ -318,6 +321,19 @@ class SettingsTest {
         Assert.Equal(60, Settings.Get("RefreshInterval"))
     }
 
+    ; Opening Settings again brings the open window forward: two copies could
+    ; diverge, and a theme change rebuilds only the one it tracks.
+    TestOnlyOneSettingsWindowOpensAtATime() {
+        first := Settings.ShowDialog()
+        try {
+            Assert.True(IsObject(first))
+            Assert.True(Settings.ShowDialog() == first)
+        } finally {
+            if IsObject(first)
+                try first.Destroy()
+        }
+    }
+
     ; A hand-edited value is matched without case; anything else is the default.
     ; UITheme reads the setting through Settings.
     TestThemeSettingAcceptsOnlyItsChoices() {
@@ -495,6 +511,7 @@ class SettingsTest {
     Teardown() {
         RestoreTestSettings(this.savedSettings)
         Settings.changeListeners := this.originalListeners
+        Settings.dialog := this.originalDialog
         Settings.mutationGuard := this.originalMutationGuard
         Settings.dialogAcquire := this.originalDialogAcquire
         Settings.dialogRelease := this.originalDialogRelease

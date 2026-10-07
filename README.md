@@ -146,20 +146,22 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 
 ## Settings
 Settings is one page in three columns: updates and startup; the PowerScribe
-microphone and appearance; new-study scanning, alerts and their sound.
+microphone and appearance; new-study scanning, alerts and their sound. Only one
+Settings window opens at a time; opening it again brings that one forward.
 
 - Startup: **Start when I sign in to Windows** adds a shortcut to your Startup folder
   (removing it there turns the option off). A shortcut left by a copy that has since
   moved shows the option off; turning it on points it at this copy. **Start minimized
-  to the tray** opens the
-  default profile with only the tray icon showing. **Close to the tray instead of
-  exiting** makes the window's X hide it; exit from the tray menu or Profile > Exit.
+  to the tray** opens the default profile with only the tray icon showing. **Close to
+  the tray instead of exiting** makes the window's X hide it; exit from the tray menu
+  or Profile > Exit.
 - Appearance: **Show which command a keybind ran** (see above), and **Theme**.
   **Match Windows**, the default, is dark while Windows' app mode is dark (Windows
   Settings > Personalization > Colors); **Light** and **Dark** fix it. A change applies
   at once: the main window, the profile selector, the new-profile prompt, Settings and
   the update dialog are redrawn in place, keeping what has been typed, after any
-  dialog they have open closes.
+  dialog they have open closes. A window behind PowerScribe or PACS stays behind it,
+  and a minimized one stays minimized.
   With a Windows contrast theme on, every window uses that theme's colors whatever
   this setting says. Message boxes and file dialogs are drawn by Windows and stay
   light, and in dark lists the column names are dim. The dark look uses Windows'

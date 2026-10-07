@@ -252,6 +252,7 @@ Main() {
     CheckThemeChange(kb)
     CheckSelectorThemeChange(kb)
     CheckDialogThemeChange()
+    CheckMinimizedFromMaximizedRebuild(kb)
     CheckFirstRunPlacement(kb)
     CheckCommandFeedback()
     return DesktopChecks.Finish("checks")
@@ -316,6 +317,10 @@ CheckSelectorThemeChange(kb) {
         Settings.SaveValues(Map("Theme", "Light"))
         kb.ApplyThemeChange()
     }
+    ; With no main window, the tray's Open brings the prompt back.
+    WinMinimize(kb.newProfilePrompt)
+    Sleep(200)
+    Assert(kb.ShowMainWindow() && WinGetMinMax(kb.newProfilePrompt) = 0, "the tray brings a minimized new-profile prompt back")
     CloseWindow(kb.newProfilePrompt.Hwnd)  ; back to the profile selector
     CloseWindow(kb.profileSelectorGui.Hwnd)
     Assert(kb.HasMainWindow(), "closing the rebuilt selector reopens the main window")
@@ -342,6 +347,9 @@ CheckDialogThemeChange() {
             box.Value := !box.Value
             entered := box.Value
             WinGetPos(&x, &y,,, before)
+            ; In the background, as behind PowerScribe: its rebuild must not take focus.
+            WinActivate(smokeKB.gui)
+            Sleep(150)
             try {
                 UITheme.windowsDarkProbe := (*) => true
                 smokeKB.ApplyThemeChange()
@@ -351,6 +359,10 @@ CheckDialogThemeChange() {
                     after != before && after.themeMode = "dark" && TitleBarIsDark(after.Hwnd)
                         && FindControl(after, "CheckBox", "Skip &beta versions").Value = entered && x2 = x && y2 = y,
                     item.name " is rebuilt dark in place, keeping what was entered"
+                )
+                Assert(
+                    !WinActive("ahk_id " after.Hwnd) && WinActive("ahk_id " smokeKB.gui.Hwnd),
+                    item.name ", rebuilt in the background, does not take focus"
                 )
             } finally CloseWindow(item.current.Call().Hwnd)
         }
@@ -368,6 +380,29 @@ FindControl(window, type, text) {
             return ctrl
     }
     throw Error("No " type " '" text "' in " window.Title)
+}
+
+; A main window minimized from maximized stays minimized through a theme change
+; and still restores maximized.
+CheckMinimizedFromMaximizedRebuild(kb) {
+    WinMaximize(kb.gui)
+    Sleep(300)
+    WinMinimize(kb.gui)
+    Sleep(300)
+    try {
+        Settings.SaveValues(Map("Theme", "Dark"))
+        kb.ApplyThemeChange()
+        Assert(WinGetMinMax(kb.gui) = -1, "a minimized main window stays minimized through a theme change")
+        WinRestore(kb.gui)
+        Sleep(300)
+        Assert(WinGetMinMax(kb.gui) = 1, "and still restores maximized, as it was before it was minimized")
+    } finally {
+        Settings.SaveValues(Map("Theme", "Light"))
+        kb.ApplyThemeChange()
+        if (WinGetMinMax(kb.gui) != 0)
+            WinRestore(kb.gui)
+        Sleep(200)
+    }
 }
 
 ; A first run has no saved place: a window maximized before it is ever moved or
