@@ -276,6 +276,30 @@ class UITheme {
         return true
     }
 
+    /**
+     * How a window sits before it is rebuilt: its Windows placement (normal
+     * position and size, and how it restores), whether it is minimized, and
+     * whether it is the active window.
+     */
+    static StateOf(window) {
+        placement := Buffer(44, 0)  ; WINDOWPLACEMENT
+        NumPut("UInt", placement.Size, placement, 0)
+        DllCall("GetWindowPlacement", "Ptr", window.Hwnd, "Ptr", placement)
+        return {placement: placement, minimized: WinGetMinMax(window) = -1, active: !!WinActive(window)}
+    }
+
+    /**
+     * Shows a rebuilt window, built hidden, as its predecessor was (StateOf): at
+     * its normal place, minimized if it was, and activated only if it was active,
+     * so a window behind PowerScribe stays behind it.
+     */
+    static ShowAsBefore(window, state) {
+        ; SW_SHOWMINNOACTIVE, SW_SHOWNORMAL or SW_SHOWNOACTIVATE
+        NumPut("UInt", state.minimized ? 7 : state.active ? 1 : 4, state.placement, 8)
+        DllCall("SetWindowPlacement", "Ptr", window.Hwnd, "Ptr", state.placement)
+        return window
+    }
+
     static SetControlTheme(ctrl, name) {
         DllCall("uxtheme\SetWindowTheme", "Ptr", ctrl.Hwnd, "Str", name, "Ptr", 0)
     }

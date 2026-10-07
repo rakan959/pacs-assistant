@@ -208,11 +208,10 @@ class KeybindGUI {
             return false
         try {
             selector := this.profileSelectorGui
-            ; Not activated when it was in the background, behind PowerScribe.
-            showOptions := WinActive(selector) ? "" : "NA"
-            WinGetPos(&x, &y,,, selector)
+            state := UITheme.StateOf(selector)
+            highlighted := this.SelectedProfileName(selector.list)
             this.RetireProfileSelector(selector)
-            WinMove(x, y,,, this.ShowProfileSelector(showOptions))
+            UITheme.ShowAsBefore(this.ShowProfileSelector("Hide", highlighted), state)
             return true
         } finally this.EndProfileMutationTransaction()
     }
@@ -224,15 +223,15 @@ class KeybindGUI {
             return false
         try {
             prompt := this.newProfilePrompt
-            WinGetPos(&x, &y,,, prompt)
-            rebuilt := this.PromptNewProfile(WinActive(prompt) ? "" : "NA")
+            state := UITheme.StateOf(prompt)
+            rebuilt := this.PromptNewProfile("Hide")
             rebuilt.nameEdit.Value := prompt.nameEdit.Value
             if HasProp(prompt, "importSource") {
                 rebuilt.importSource := prompt.importSource
                 rebuilt.importNote.Value := prompt.importNote.Value
             }
             prompt.Destroy()
-            WinMove(x, y,,, rebuilt)
+            UITheme.ShowAsBefore(rebuilt, state)
             return true
         } finally this.EndProfileMutationTransaction()
     }
@@ -367,7 +366,7 @@ class KeybindGUI {
             lv.Modify(1, "Select Focus")  ; rows were added in display order
         lv.OnEvent("ItemSelect", (*) => this.RefreshMainView())
         lv.OnEvent("DoubleClick", (ctrl, row) => row ? this.ChangeSelectedKeybind(ctrl) : 0)
-        lv.OnEvent("ContextMenu", (ctrl, row, *) => this.ShowFunctionMenu(ctrl, row))
+        lv.OnEvent("ContextMenu", (ctrl, row, isRightClick, x, y) => this.ShowFunctionMenu(ctrl, row, x, y))
         lv.OnNotify(-155, (ctrl, lParam) => this.OnFunctionListKey(ctrl, lParam))  ; LVN_KEYDOWN
         ; What the selected function does, and why its keybind is not active.
         view.description := UITheme.AddNote(mainGui, "", "w10 h10")
@@ -803,7 +802,9 @@ class KeybindGUI {
         return isDefault ? text ", opens at startup" : text
     }
 
-    ShowFunctionMenu(listView, row) {
+    ; x, y: where the menu opens, in the window's client area; for the Menu key
+    ; or Shift+F10 the event places it at the row, not the mouse pointer.
+    ShowFunctionMenu(listView, row, x := "", y := "") {
         if !row
             return false
         commands := Menu()
@@ -812,7 +813,10 @@ class KeybindGUI {
         commands.Add()
         commands.Add("&Remove", (*) => this.RemoveFunction(listView))
         commands.Default := "Set &Keybind..."
-        commands.Show()
+        if (x = "")
+            commands.Show()
+        else
+            commands.Show(x, y)
         return true
     }
 
@@ -1125,8 +1129,9 @@ class KeybindGUI {
         return false
     }
 
-    ; showOptions: extra Gui.Show options, such as NA to show it unactivated.
-    ShowProfileSelector(showOptions := "") {
+    ; showOptions: extra Gui.Show options, such as Hide to build it unshown.
+    ; highlighted: the profile to select first, when it is still listed.
+    ShowProfileSelector(showOptions := "", highlighted := "") {
         if this.ProfileSelectorIsCurrent(this.profileSelectorGui) {
             try WinActivate("ahk_id " this.profileSelectorGui.Hwnd)
             return this.profileSelectorGui
@@ -1147,14 +1152,18 @@ class KeybindGUI {
             profileNames.Push(name)
         ; -Hdr: a plain list of names, with the default profile labelled beside its name.
         lv := selectorGui.Add("ListView", "xm y+14 w" listWidth " h244 -Multi -Hdr +LV0x10000", ["Profile", "Default"])
+        selectorGui.list := lv
         UITheme.UseExplorerTheme(lv)
         for name in profileNames
             lv.Add(, name, name = ProfileManager.defaultProfile ? "Default" : "")
         lv.ModifyCol(1, listWidth - 80)
         lv.ModifyCol(2, "AutoHdr")
 
-        ; Start on the profile that was open, else the default one, else the first.
-        preferred := this.ProfileListIndex(profileNames, ProfileManager.currentProfile)
+        ; Start on the profile asked for, else the one that was open, else the
+        ; default one, else the first.
+        preferred := this.ProfileListIndex(profileNames, highlighted)
+        if !preferred
+            preferred := this.ProfileListIndex(profileNames, ProfileManager.currentProfile)
         if !preferred
             preferred := this.ProfileListIndex(profileNames, ProfileManager.defaultProfile)
         if (!preferred && profileNames.Length)
@@ -1287,7 +1296,7 @@ class KeybindGUI {
         } finally this.EndProfileMutationTransaction()
     }
 
-    ; showOptions: extra Gui.Show options, such as NA to show it unactivated.
+    ; showOptions: extra Gui.Show options, such as Hide to build it unshown.
     PromptNewProfile(showOptions := "") {
         inputGui := UITheme.NewWindow("PACS Assistant - Create New Profile")
         width := 320

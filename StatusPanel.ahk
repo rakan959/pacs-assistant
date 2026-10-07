@@ -46,7 +46,8 @@ class StatusPanel {
                 Settings.Get("AutoUpdate"),
                 UpdateChecker.pendingUpdateInfo,
                 UpdateChecker.lastCheckTime,
-                UpdateChecker.lastCheckError
+                UpdateChecker.lastCheckError,
+                UpdateChecker.lastSkippedVersion
             )
         ]
     }
@@ -124,7 +125,7 @@ class StatusPanel {
 
     ; "Up to date" only once a check has succeeded: the first automatic check is
     ; still running at startup, and an offline workstation never completes one.
-    static UpdateState(eligible, autoUpdate, pendingUpdateInfo, lastCheckTime := "", lastCheckError := "") {
+    static UpdateState(eligible, autoUpdate, pendingUpdateInfo, lastCheckTime := "", lastCheckError := "", skippedVersion := "") {
         row := {label: "Updates"}
         if !eligible
             return (row.value := "Not checked by this build (development build)", row.tone := "off", row)
@@ -133,6 +134,8 @@ class StatusPanel {
         if (lastCheckError != "")
             return (row.value := "The last check failed: " lastCheckError, row.tone := "warn", row)
         schedule := autoUpdate ? "checked automatically" : "automatic checks are off"
+        if (lastCheckTime != "" && skippedVersion != "")
+            return (row.value := skippedVersion " is available, skipped with Skip This Version (as of " this.When(lastCheckTime) ")", row.tone := "off", row)
         if (lastCheckTime != "")
             return (row.value := "Up to date as of " this.When(lastCheckTime) "; " schedule, row.tone := autoUpdate ? "ok" : "off", row)
         return (row.value := autoUpdate ? "Checked automatically; no check has finished yet" : "Automatic checks are off", row.tone := "off", row)

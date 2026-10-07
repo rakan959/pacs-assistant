@@ -27,6 +27,7 @@ class MicrophoneManagerTest {
         "ItemInvalidatedByFinalComboCheckIsNotSelected",
         "SelectionStopsWhenATargetChangesBeforeSelect",
         "SelectionUsesOneExactItemWithoutDirectTextWrite",
+        "ConfirmedSelectionClearsAnEarlierFailure",
         "SelectedItemCannotReplaceTheComboValuePostcondition",
         "AmbiguousPartialSelectionDoesNotMutate",
         "PickerLookupErrorsReachTheBoundedFailureNotification",
@@ -551,6 +552,18 @@ class MicrophoneManagerTest {
 
         Assert.False(succeeded)
         Assert.Equal(0, item.selectCalls)
+    }
+
+    ; Status shows the last error first, so a later confirmed selection in the
+    ; same login must clear it.
+    ConfirmedSelectionClearsAnEarlierFailure() {
+        fixture := MicrophoneFixture(["Internal Microphone", "PowerMic III"])
+        MicrophoneManager.sessionDriver := fixture.driver
+        MicrophoneManager.lastError := "the microphone list changed before the selection could be made"
+
+        Assert.True(MicrophoneManager.SelectMicrophone(fixture.session, fixture.combo, "PowerMic III"))
+        Assert.Equal("", MicrophoneManager.lastError)
+        Assert.Equal("PowerMic III", MicrophoneManager.lastSelection.name)
     }
 
     SelectionUsesOneExactItemWithoutDirectTextWrite() {

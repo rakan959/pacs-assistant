@@ -114,8 +114,10 @@ class UpdateCheckerTest {
         UpdateChecker.autoCheckFailureLogged := false
         this.originalLastCheckTime := UpdateChecker.lastCheckTime
         this.originalLastCheckError := UpdateChecker.lastCheckError
+        this.originalLastSkippedVersion := UpdateChecker.lastSkippedVersion
         UpdateChecker.lastCheckTime := ""
         UpdateChecker.lastCheckError := ""
+        UpdateChecker.lastSkippedVersion := ""
     }
 
     TestVersionParsing() {
@@ -400,6 +402,14 @@ class UpdateCheckerTest {
         transport.Resolve({status: 200, body: UpdateReleaseJson("v0.0.0")})
         Assert.True(UpdateChecker.lastCheckTime != "")
         Assert.Equal("", UpdateChecker.lastCheckError)
+        Assert.Equal("", UpdateChecker.lastSkippedVersion)
+
+        ; A newer release the user skipped is not "up to date".
+        UpdateChecker.skippedVersion := "v9.0.0"
+        Assert.True(UpdateChecker.BeginAutoCheck())
+        transport.Resolve({status: 200, body: UpdateReleaseJson("v9.0.0")})
+        Assert.Equal("v9.0.0", UpdateChecker.lastSkippedVersion)
+        UpdateChecker.skippedVersion := ""
 
         Assert.True(UpdateChecker.BeginManualCheck())
         transport.Resolve({status: 200, body: "invalid JSON"})
@@ -1019,6 +1029,7 @@ class UpdateCheckerTest {
         UpdateChecker.autoCheckFailureLogged := this.originalAutoCheckFailureLogged
         UpdateChecker.lastCheckTime := this.originalLastCheckTime
         UpdateChecker.lastCheckError := this.originalLastCheckError
+        UpdateChecker.lastSkippedVersion := this.originalLastSkippedVersion
         UpdateChecker.moveFile := this.originalMoveFile
         UpdateChecker.pendingUpdateInfo := this.originalPendingUpdateInfo
         UpdateChecker.notifiedVersion := this.originalNotifiedVersion

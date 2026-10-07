@@ -54,6 +54,9 @@ class UpdateChecker {
     ; failed ("" when it succeeded).
     static lastCheckTime := ""
     static lastCheckError := ""
+    ; A newer release the latest successful check found but the user skipped
+    ; (Skip This Version), or "".
+    static lastSkippedVersion := ""
     static notifiedVersion := ""
     static updateDialog := 0
     static updateAvailableNotifier := (text, title, options) => TrayTip(text, title, options)
@@ -152,7 +155,7 @@ class UpdateChecker {
 
         try {
             updateInfo := this.ProcessReleaseResponse(response, stableOnly)
-            this.RecordCheckOutcome()
+            this.RecordCheckOutcome(, updateInfo)
             this.autoCheckFailureLogged := false
             if updateInfo.hasUpdate
                 this.RecordAvailableUpdate(updateInfo)
@@ -190,15 +193,18 @@ class UpdateChecker {
         AppLog.Write("Automatic update check failed: " ErrorText.Describe(err))
     }
 
-    ; Records a finished check for Tools > Status: a success, or the error that
-    ; ended it.
-    static RecordCheckOutcome(err := 0) {
+    ; Records a finished check for Tools > Status: a success with its result, or
+    ; the error that ended it.
+    static RecordCheckOutcome(err := 0, updateInfo := 0) {
         if err {
             this.lastCheckError := ErrorText.Message(err)
             return
         }
         this.lastCheckTime := A_Now
         this.lastCheckError := ""
+        this.lastSkippedVersion := IsObject(updateInfo) && HasProp(updateInfo, "skippedVersion")
+            ? updateInfo.skippedVersion
+            : ""
     }
 
     static OnSettingsChanged() {
@@ -604,7 +610,7 @@ class UpdateChecker {
             return
         try {
             updateInfo := this.ProcessReleaseResponse(response, stableOnly, false)
-            this.RecordCheckOutcome()
+            this.RecordCheckOutcome(, updateInfo)
             if (!updateInfo.hasUpdate && HasProp(updateInfo, "skippedVersion")) {
                 this.manualResultNotifier.Call(
                     "Version " updateInfo.skippedVersion " is available, but it was skipped with Skip This Version.",
@@ -766,8 +772,9 @@ class UpdateChecker {
             this.updateDialog := updateGui
             UITheme.ShowDialog(updateGui, showOptions)
             ; Start on the default action rather than inside the release notes;
-            ; focusing a control would activate a dialog shown unactivated (NA).
-            if !InStr(showOptions, "NA")
+            ; focusing a control would activate a dialog shown otherwise (a
+            ; rebuild shows it as its predecessor was).
+            if (showOptions = "")
                 footer["&Update Now"].Focus()
             return updateGui
         } finally this.dialogRelease.Call()
@@ -820,12 +827,11 @@ class UpdateChecker {
      */
     static RebuildUpdateDialog() {
         previous := this.updateDialog
-        WinGetPos(&x, &y,,, previous)
+        state := UITheme.StateOf(previous)
         ; Cleared first: ShowUpdateDialog brings a live dialog for the same version
         ; forward instead of building another.
         this.updateDialog := 0
-        ; Not activated when it was in the background, behind PowerScribe.
-        rebuilt := this.ShowUpdateDialog(previous.updateInfo, WinActive(previous) ? "" : "NA")
+        rebuilt := this.ShowUpdateDialog(previous.updateInfo, "Hide")
         if !IsObject(rebuilt) {
             this.updateDialog := previous
             return false
@@ -833,8 +839,7 @@ class UpdateChecker {
         UITheme.CopyInputs(previous, rebuilt)
         rebuilt.settingsRevision := previous.settingsRevision
         previous.Destroy()
-        WinMove(x, y,,, rebuilt)
-        return rebuilt
+        return UITheme.ShowAsBefore(rebuilt, state)
     }
 
     static CloseUpdateDialog(updateGui) {

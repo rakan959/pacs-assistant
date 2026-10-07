@@ -300,7 +300,7 @@ class Settings {
     }
 
     ; Show settings dialog
-    ; showOptions: extra Gui.Show options, such as NA to show it unactivated.
+    ; showOptions: extra Gui.Show options, such as Hide to build it unshown.
     static ShowDialog(showOptions := "") {
         ; One Settings window at a time: asking again brings the open one forward.
         if this.DialogIsOpen() {
@@ -467,11 +467,10 @@ class Settings {
      */
     static RebuildDialog() {
         previous := this.dialog
-        WinGetPos(&x, &y,,, previous)
-        ; Cleared first, or ShowDialog would bring the old window forward. Not
-        ; activated when it was in the background, behind PowerScribe.
+        state := UITheme.StateOf(previous)
+        ; Cleared first, or ShowDialog would bring the old window forward.
         this.dialog := 0
-        rebuilt := this.ShowDialog(WinActive(previous) ? "" : "NA")
+        rebuilt := this.ShowDialog("Hide")
         if !IsObject(rebuilt) {
             this.dialog := previous
             return false
@@ -480,8 +479,7 @@ class Settings {
         rebuilt.syncControls.Call()
         rebuilt.settingsRevision := previous.settingsRevision
         previous.Destroy()
-        WinMove(x, y,,, rebuilt)
-        return rebuilt
+        return UITheme.ShowAsBefore(rebuilt, state)
     }
 
     ; The position of a value in a list of choices, ignoring case; 0 if absent.

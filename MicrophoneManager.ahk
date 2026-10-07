@@ -543,6 +543,8 @@ class MicrophoneManager {
         if !succeeded
             return this.SelectionStopped("PowerScribe did not confirm the selection within 1 second")
         this.lastSelection := {name: finalResolved.name, time: A_Now}
+        ; A confirmed selection supersedes an earlier attempt's failure.
+        this.lastError := ""
         return true
     }
 

@@ -92,6 +92,8 @@ class StatusPanelTest {
         Assert.Equal("Up to date as of 2:15 PM; checked automatically", checked.value)
         earlier := StatusPanel.UpdateState(true, false, 0, "20261001090500")
         Assert.Equal("Up to date as of Oct 1, 9:05 AM; automatic checks are off", earlier.value)
+        skipped := StatusPanel.UpdateState(true, true, 0, today, "", "v2.1.0")
+        Assert.Equal("v2.1.0 is available, skipped with Skip This Version (as of 2:15 PM)", skipped.value)
         failed := StatusPanel.UpdateState(true, true, 0, today, "The server could not be reached")
         Assert.Equal("warn", failed.tone)
         Assert.Equal("The last check failed: The server could not be reached", failed.value)

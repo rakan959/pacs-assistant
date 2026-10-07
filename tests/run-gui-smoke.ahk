@@ -284,8 +284,11 @@ CheckThemeChange(kb) {
 ; With no main window, the profile selector is the app's window, so a theme change
 ; rebuilds it in place. Closing it then reopens the main window.
 CheckSelectorThemeChange(kb) {
+    ; A second profile, in memory only, to highlight instead of the open one.
+    ProfileManager.profiles["Smoke Second"] := ProfileManager.NewProfile()
     selectorHwnd := OpenAndCaptureWindow("PACS Assistant - Profile Selection", () => kb.OpenProfileSelector())
     lightSelector := kb.profileSelectorGui
+    SelectRow(lightSelector.list, "Smoke Second")
     WinGetPos(&x, &y,,, "ahk_id " selectorHwnd)
     try {
         Settings.SaveValues(Map("Theme", "Dark"))
@@ -296,6 +299,7 @@ CheckSelectorThemeChange(kb) {
             selector != lightSelector && selector.themeMode = "dark" && TitleBarIsDark(selector.Hwnd) && x2 = x && y2 = y,
             "the profile selector is rebuilt dark where it was"
         )
+        Assert(kb.SelectedProfileName(selector.list) == "Smoke Second", "the rebuilt selector keeps the profile highlighted in it")
     } finally {
         Settings.SaveValues(Map("Theme", "Light"))
         kb.ApplyThemeChange()
@@ -323,6 +327,7 @@ CheckSelectorThemeChange(kb) {
     Assert(kb.ShowMainWindow() && WinGetMinMax(kb.newProfilePrompt) = 0, "the tray brings a minimized new-profile prompt back")
     CloseWindow(kb.newProfilePrompt.Hwnd)  ; back to the profile selector
     CloseWindow(kb.profileSelectorGui.Hwnd)
+    ProfileManager.profiles.Delete("Smoke Second")
     Assert(kb.HasMainWindow(), "closing the rebuilt selector reopens the main window")
 }
 
@@ -364,6 +369,17 @@ CheckDialogThemeChange() {
                     !WinActive("ahk_id " after.Hwnd) && WinActive("ahk_id " smokeKB.gui.Hwnd),
                     item.name ", rebuilt in the background, does not take focus"
                 )
+                ; Minimized, it stays minimized, and restores where it was.
+                WinMinimize(after)
+                Sleep(200)
+                UITheme.windowsDarkProbe := (*) => false
+                smokeKB.ApplyThemeChange()
+                minimized := item.current.Call()
+                Assert(minimized != after && WinGetMinMax(minimized) = -1, item.name ", rebuilt while minimized, stays minimized")
+                WinRestore(minimized)
+                Sleep(200)
+                WinGetPos(&x3, &y3,,, minimized)
+                Assert(x3 = x && y3 = y, item.name " then restores where it was")
             } finally CloseWindow(item.current.Call().Hwnd)
         }
     } finally {

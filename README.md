@@ -91,8 +91,8 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - **Tools > Status** (or double-click the keybind count in the status line) shows, refreshed
   every two seconds: how many keybinds are live; whether PowerScribe, Vue PACS and
   Explorer Portal are open (each command needs exactly one); new-study scanning and
-  its last read or failure; the microphone last selected; and whether the last update
-  check succeeded. Vue PACS counts the Vue PACS window and its Vue PACS Client viewer
+  its last read or failure; the microphone last selected; and the last update check:
+  when it succeeded, why it failed, or the newer release you skipped. Vue PACS counts the Vue PACS window and its Vue PACS Client viewer
   together, as PACS keybinds do, and says when the open one is not the viewer that
   Next and Previous Series use. It only reads; it never clicks or reads a report.
 - **Show which command a keybind ran** (Settings, off by default) shows the command's
