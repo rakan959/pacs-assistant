@@ -97,6 +97,7 @@ class KeybindGUITest {
         "TestFolderContainmentResolvesThePath",
         "TestExportRefusesTheAppsOwnFolders",
         "TestExportSeesThroughAJunction",
+        "TestExportNeverWritesThroughAHardLink",
         "TestThemeChangeWaitsWhileAnOperationRuns",
         "TestThemeChangeWaitsWhileADialogIsOpen",
         "TestThemeChangeLeavesAWindowAlreadyInTheTheme",
@@ -139,7 +140,8 @@ class KeybindGUITest {
         "UseTempProfilesFolder",
         "PrepareBlockedProfileSave",
         "PrepareDiscardRenameState",
-        "CheckThemeChangeKeepsTheWindow"
+        "CheckThemeChangeKeepsTheWindow",
+        "LeftoverStagedExports"
     ]
 
     Setup() {
@@ -2460,6 +2462,34 @@ class KeybindGUITest {
         } finally {
             try FileDelete(outside)
         }
+    }
+
+    ; A file outside that is a hard link to a profile has the profile's contents:
+    ; the export replaces that name with a new file, so the profile is unchanged.
+    TestExportNeverWritesThroughAHardLink() {
+        this.UseTempProfilesFolder()
+        this.gui.notificationDriver := ArrayNotificationDriver([])
+        FileAppend("[Keybinds]`nSign Report=^F13`n", ProfileManager.ProfilePath("Neuro"))
+        other := ProfileManager.profilesPath "\Other.ini"
+        FileAppend("[Keybinds]`n", other)
+        link := A_Temp "\pacs-export-hardlink-" DllCall("GetCurrentProcessId") ".ini"
+        try FileDelete(link)
+        try {
+            Assert.True(DllCall("CreateHardLinkW", "Str", link, "Str", other, "Ptr", 0), "the hard link was made")
+            Assert.True(this.gui.ExportProfileTo("Neuro", link))
+            Assert.Equal("[Keybinds]`n", FileRead(other))
+            Assert.Equal(FileRead(ProfileManager.ProfilePath("Neuro")), FileRead(link))
+            Assert.Equal(0, this.LeftoverStagedExports(link), "no staged copy is left behind")
+        } finally {
+            try FileDelete(link)
+        }
+    }
+
+    LeftoverStagedExports(path) {
+        count := 0
+        loop files path ".export-*"
+            count++
+        return count
     }
 
     ; A folder outside that is a junction into the profiles folder is the profiles

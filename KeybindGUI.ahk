@@ -1576,7 +1576,10 @@ class KeybindGUI {
     /**
      * Copies a saved profile's file to path. A path in the app's own data folder
      * is refused: a file there is one of its profiles or its settings, and
-     * overwriting it would change a profile behind the copy held in memory.
+     * overwriting it would change a profile behind the copy held in memory. The
+     * copy is written beside path and then replaces path's name, so an existing
+     * file there that is a hard link to a profile is unlinked, never written
+     * through; it also never leaves a half-written file.
      */
     ExportProfileTo(name, path) {
         for folder in [AppStorage.DataRoot(), ProfileManager.profilesPath] {
@@ -1589,8 +1592,12 @@ class KeybindGUI {
                 return false
             }
         }
-        try FileCopy(ProfileManager.ProfilePath(name), path, true)
-        catch Any as err {
+        staged := AppStorage.UniqueSiblingPath(path, "export")
+        try {
+            FileCopy(ProfileManager.ProfilePath(name), staged)
+            FileMove(staged, path, true)
+        } catch Any as err {
+            try FileDelete(staged)
             AppLog.Write("Profile '" name "' could not be exported: " ErrorText.Describe(err))
             this.ShowNotice("The profile could not be exported.`n`n" ErrorText.Message(err), "Export Failed", "Icon!")
             return false
