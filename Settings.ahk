@@ -13,6 +13,8 @@
 class Settings {
     static settingsFile := AppStorage.DataRoot() "\settings.ini"
     static changeListeners := []
+    ; The Settings window last shown; a theme change rebuilds it while it is open.
+    static dialog := 0
     static mutationGuard := (*) => true
     static dialogAcquire := (*) => true
     static dialogRelease := (*) => 0
@@ -415,6 +417,7 @@ class Settings {
             syncCustomSound := (*) => browseButton.Enabled := soundDropDown.Text = "Custom File"
             soundDropDown.OnEvent("Change", syncCustomSound)
             syncCustomSound()
+            settingsGui.syncControls := () => (syncMicrophone(), syncCustomSound())
 
             controls := {
                 checkboxes: checkboxes,
@@ -440,8 +443,34 @@ class Settings {
             settingsGui.OnEvent("Escape", cancel)
 
             UITheme.ShowDialog(settingsGui)
+            this.dialog := settingsGui
             return settingsGui
         } finally this.dialogRelease.Call()
+    }
+
+    static DialogIsOpen() {
+        try return IsObject(this.dialog) && DllCall("IsWindowVisible", "Ptr", this.dialog.Hwnd)
+        return false
+    }
+
+    /**
+     * The open Settings window, rebuilt in the current theme where it was, keeping
+     * what has been entered and the revision it was opened at (so a save is still
+     * refused if the settings changed since).
+     * @returns the rebuilt window, or false when it could not be built
+     */
+    static RebuildDialog() {
+        previous := this.dialog
+        WinGetPos(&x, &y,,, previous)
+        rebuilt := this.ShowDialog()
+        if !IsObject(rebuilt)
+            return false
+        UITheme.CopyInputs(previous, rebuilt)
+        rebuilt.syncControls.Call()
+        rebuilt.settingsRevision := previous.settingsRevision
+        previous.Destroy()
+        WinMove(x, y,,, rebuilt)
+        return rebuilt
     }
 
     ; The position of a value in a list of choices, ignoring case; 0 if absent.

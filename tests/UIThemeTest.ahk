@@ -10,7 +10,8 @@ class UIThemeTest {
         "TestUpdateModeReadsTheSettingAndWindows",
         "TestEveryPaletteNamesTheSameColors",
         "TestColorRefSwapsRedAndBlue",
-        "TestTextColorsAreReadable"
+        "TestTextColorsAreReadable",
+        "TestCopyInputsCarriesEnteredValues"
     ]
 
     Setup() {
@@ -91,6 +92,36 @@ class UIThemeTest {
                 }
             }
         }
+    }
+
+    ; A rebuilt window keeps what was entered; windows that differ are left alone.
+    TestCopyInputsCarriesEnteredValues() {
+        source := UIThemeTest.InputWindow()
+        target := UIThemeTest.InputWindow()
+        other := Gui()
+        try {
+            source.box.Value := 1
+            source.field.Value := "PowerMic"
+            source.choice.Value := 2
+            Assert.True(UITheme.CopyInputs(source, target))
+            Assert.Equal(1, target.box.Value)
+            Assert.Equal("PowerMic", target.field.Value)
+            Assert.Equal(2, target.choice.Value)
+            other.Add("Text",, "Not the same window")
+            Assert.False(UITheme.CopyInputs(source, other))
+        } finally {
+            for window in [source, target, other]
+                window.Destroy()
+        }
+    }
+
+    static InputWindow() {
+        window := Gui()
+        window.Add("Text",, "Label")
+        window.box := window.Add("CheckBox",, "Option")
+        window.field := window.Add("Edit", "r1")
+        window.choice := window.Add("DropDownList",, ["One", "Two"])
+        return window
     }
 
     static ContrastRatio(first, second) {

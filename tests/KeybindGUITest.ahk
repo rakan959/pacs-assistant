@@ -94,6 +94,8 @@ class KeybindGUITest {
         "TestDiscardChangesWaitsForConfirmation",
         "TestAddAllAddsEveryMissingCommandUnassigned",
         "TestKeybindCardListsOnlySetKeybindsInListOrder",
+        "TestFolderContainmentResolvesThePath",
+        "TestExportRefusesTheAppsOwnFolders",
         "TestThemeChangeWaitsWhileAnOperationRuns",
         "TestThemeChangeWaitsWhileADialogIsOpen",
         "TestThemeChangeLeavesAWindowAlreadyInTheTheme",
@@ -2425,6 +2427,38 @@ class KeybindGUITest {
         Assert.Equal("Any window", rows[2].activeIn)
         Assert.Equal("Custom", rows[3].group)
         Assert.Equal("PACS", rows[3].activeIn)
+    }
+
+    TestFolderContainmentResolvesThePath() {
+        Assert.True(KeybindGUI.IsInsideFolder("C:\Data\profiles\Neuro.ini", "C:\Data"))
+        Assert.True(KeybindGUI.IsInsideFolder("c:\data\Neuro.ini", "C:\Data\"))
+        Assert.True(KeybindGUI.IsInsideFolder("C:\Data", "C:\Data"))
+        Assert.True(KeybindGUI.IsInsideFolder("C:\Data\sub\..\Neuro.ini", "C:\Data"))
+        Assert.False(KeybindGUI.IsInsideFolder("C:\Data\..\Neuro.ini", "C:\Data"))
+        Assert.False(KeybindGUI.IsInsideFolder("C:\Data2\Neuro.ini", "C:\Data"))
+    }
+
+    ; An export over one of the app's own files would change a profile behind its
+    ; in-memory copy, so it is refused and the file is left alone.
+    TestExportRefusesTheAppsOwnFolders() {
+        this.UseTempProfilesFolder()
+        messages := []
+        this.gui.notificationDriver := ArrayNotificationDriver(messages)
+        FileAppend("[Keybinds]`nSign Report=^F13`n", ProfileManager.ProfilePath("Neuro"))
+        other := ProfileManager.profilesPath "\Other.ini"
+        FileAppend("[Keybinds]`n", other)
+
+        Assert.False(this.gui.ExportProfileTo("Neuro", other))
+        Assert.Equal("[Keybinds]`n", FileRead(other))
+        Assert.Equal("Choose Another Folder", messages[1].title)
+
+        outside := A_Temp "\pacs-export-test-" DllCall("GetCurrentProcessId") ".ini"
+        try {
+            Assert.True(this.gui.ExportProfileTo("Neuro", outside))
+            Assert.Equal(FileRead(ProfileManager.ProfilePath("Neuro")), FileRead(outside))
+        } finally {
+            try FileDelete(outside)
+        }
     }
 
     ; Rebuilding the main window would close the dialogs it owns, so a theme

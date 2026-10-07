@@ -706,6 +706,7 @@ class UpdateChecker {
             updateGui := UITheme.NewWindow("PACS Assistant - Update Available")
             updateGui.settingsRevision := Settings.revision
             updateGui.latestVersion := updateInfo.latestVersion
+            updateGui.updateInfo := updateInfo
             width := 440
 
             UITheme.AddHeading(updateGui, "A new version is available", "xm ym w" width)
@@ -807,6 +808,29 @@ class UpdateChecker {
         try return this.updateDialog.Hwnd > 0
             && WinExist("ahk_id " this.updateDialog.Hwnd)
         return false
+    }
+
+    /**
+     * The open update dialog, rebuilt in the current theme where it was, keeping
+     * its checkboxes and the settings revision it was opened at.
+     * @returns the rebuilt dialog, or false when it could not be shown
+     */
+    static RebuildUpdateDialog() {
+        previous := this.updateDialog
+        WinGetPos(&x, &y,,, previous)
+        ; Cleared first: ShowUpdateDialog brings a live dialog for the same version
+        ; forward instead of building another.
+        this.updateDialog := 0
+        rebuilt := this.ShowUpdateDialog(previous.updateInfo)
+        if !IsObject(rebuilt) {
+            this.updateDialog := previous
+            return false
+        }
+        UITheme.CopyInputs(previous, rebuilt)
+        rebuilt.settingsRevision := previous.settingsRevision
+        previous.Destroy()
+        WinMove(x, y,,, rebuilt)
+        return rebuilt
     }
 
     static CloseUpdateDialog(updateGui) {

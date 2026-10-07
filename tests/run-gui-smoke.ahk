@@ -251,6 +251,7 @@ Main() {
     CheckWindowBehaviour(kb)
     CheckThemeChange(kb)
     CheckSelectorThemeChange(kb)
+    CheckDialogThemeChange()
     CheckFirstRunPlacement(kb)
     CheckCommandFeedback()
     return DesktopChecks.Finish("checks")
@@ -318,6 +319,55 @@ CheckSelectorThemeChange(kb) {
     CloseWindow(kb.newProfilePrompt.Hwnd)  ; back to the profile selector
     CloseWindow(kb.profileSelectorGui.Hwnd)
     Assert(kb.HasMainWindow(), "closing the rebuilt selector reopens the main window")
+}
+
+; Settings and the update dialog are top-level windows too: when Windows switches
+; to dark mode (Theme: Match Windows), they are rebuilt in place, keeping what was
+; entered. Windows' mode is simulated, so no setting changes under the open
+; dialogs.
+CheckDialogThemeChange() {
+    updateInfo := {hasUpdate: true, currentVersion: "v2.0.0", latestVersion: "v2.1.0", releaseNotes: "Smoke-test release"}
+    opened := [
+        {name: "Settings", open: () => Settings.ShowDialog(), current: () => Settings.dialog},
+        {name: "the update dialog", open: () => UpdateChecker.ShowUpdateDialog(updateInfo), current: () => UpdateChecker.updateDialog}
+    ]
+    windowsDark := UITheme.windowsDarkProbe
+    Settings.SaveValues(Map("Theme", "Match Windows"))
+    try {
+        for item in opened {
+            UITheme.windowsDarkProbe := (*) => false
+            smokeKB.ApplyThemeChange()
+            before := item.open.Call()
+            box := FindControl(before, "CheckBox", "Skip &beta versions")
+            box.Value := !box.Value
+            entered := box.Value
+            WinGetPos(&x, &y,,, before)
+            try {
+                UITheme.windowsDarkProbe := (*) => true
+                smokeKB.ApplyThemeChange()
+                after := item.current.Call()
+                WinGetPos(&x2, &y2,,, after)
+                Assert(
+                    after != before && after.themeMode = "dark" && TitleBarIsDark(after.Hwnd)
+                        && FindControl(after, "CheckBox", "Skip &beta versions").Value = entered && x2 = x && y2 = y,
+                    item.name " is rebuilt dark in place, keeping what was entered"
+                )
+            } finally CloseWindow(item.current.Call().Hwnd)
+        }
+    } finally {
+        UITheme.windowsDarkProbe := windowsDark
+        Settings.SaveValues(Map("Theme", "Light"))
+        smokeKB.ApplyThemeChange()
+        UpdateChecker.StopAutoCheck()
+    }
+}
+
+FindControl(window, type, text) {
+    for ctrl in window {
+        if (ctrl.Type = type && ctrl.Text == text)
+            return ctrl
+    }
+    throw Error("No " type " '" text "' in " window.Title)
 }
 
 ; A first run has no saved place: a window maximized before it is ever moved or

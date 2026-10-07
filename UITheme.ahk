@@ -251,6 +251,31 @@ class UITheme {
         }
     }
 
+    /**
+     * Copies what has been entered in a window into its rebuilt copy. Both were
+     * built by the same code, so their controls pair up in order; if they do not,
+     * nothing is copied.
+     * @returns whether the values were copied
+     */
+    static CopyInputs(source, target) {
+        sources := [], targets := []
+        for ctrl in source
+            sources.Push(ctrl)
+        for ctrl in target
+            targets.Push(ctrl)
+        if (sources.Length != targets.Length)
+            return false
+        for index, ctrl in sources {
+            if (ctrl.Type != targets[index].Type)
+                return false
+        }
+        for index, ctrl in sources {
+            if (ctrl.Type ~= "i)^(CheckBox|Radio|Edit|DDL|ComboBox|ListBox)$")
+                targets[index].Value := ctrl.Value
+        }
+        return true
+    }
+
     static SetControlTheme(ctrl, name) {
         DllCall("uxtheme\SetWindowTheme", "Ptr", ctrl.Hwnd, "Str", name, "Ptr", 0)
     }

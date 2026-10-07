@@ -25,7 +25,7 @@ class StatusPanel {
         return [
             this.KeybindState(keybindText),
             this.WindowRow("PowerScribe", AppControl.PowerScribeWindowSpec()),
-            this.WindowRow("Vue PACS", AppControl.VuePacsWindowSpec()),
+            this.PacsRow(),
             this.WindowRow("Explorer Portal", AppControl.ExplorerPortalWindowSpec()),
             this.ScanState(
                 Settings.Get("AutoRefreshPACS"),
@@ -63,6 +63,31 @@ class StatusPanel {
         catch
             return {label: label, value: "Could not be checked", tone: "warn"}
         return this.WindowState(label, count)
+    }
+
+    ; Vue PACS as PACS keybinds see it: one window across the Vue PACS shell and
+    ; its Vue PACS Client viewer (HotkeyManager.PACSIsActive).
+    static PacsRow() {
+        try {
+            shellCount := AppControl.ResolveExactWindows(AppControl.VuePacsWindowSpec()).Length
+            clientCount := AppControl.ResolveExactWindows(AppControl.VuePacsClientWindowSpec()).Length
+        } catch
+            return {label: "Vue PACS", value: "Could not be checked", tone: "warn"}
+        return this.PacsState(shellCount, clientCount)
+    }
+
+    ; PACS-scoped keybinds need exactly one of the two windows; Next and Previous
+    ; Series send to the viewer.
+    static PacsState(shellCount, clientCount) {
+        row := {label: "Vue PACS"}
+        total := shellCount + clientCount
+        if (total = 0)
+            return (row.value := "Not open", row.tone := "off", row)
+        if (total > 1)
+            return (row.value := total " windows open (Vue PACS and its viewer count together); PACS keybinds need exactly one", row.tone := "warn", row)
+        if clientCount
+            return (row.value := "Open: the Vue PACS Client viewer", row.tone := "ok", row)
+        return (row.value := "Open, but not the Vue PACS Client viewer that Next and Previous Series use", row.tone := "warn", row)
     }
 
     static WindowState(label, count) {

@@ -129,11 +129,12 @@ class KeybindGUI {
     }
 
     /**
-     * Rebuilds the app's own windows built in a theme that is no longer current
-     * (the Theme setting, Windows' app mode or high contrast changed): the main
-     * window, the profile selector and the new-profile prompt, whichever are open.
-     * A window's dialogs would close with it, so while one is open, or another
-     * operation runs, it tries again shortly.
+     * Rebuilds the app's top-level windows built in a theme that is no longer
+     * current (the Theme setting, Windows' app mode or high contrast changed): the
+     * main window, the profile selector, the new-profile prompt, Settings and the
+     * update dialog, whichever are open. Every other window is a dialog one of
+     * these owns. A window's dialogs would close with it, so while one is open, or
+     * another operation runs, it tries again shortly.
      * @returns whether those windows are in the current theme
      */
     ApplyThemeChange(*) {
@@ -145,6 +146,10 @@ class KeybindGUI {
             stale.Push({window: this.profileSelectorGui, rebuild: ObjBindMethod(this, "RebuildProfileSelector")})
         if (this.GuiIsLive(this.newProfilePrompt) && this.newProfilePrompt.themeMode != mode)
             stale.Push({window: this.newProfilePrompt, rebuild: ObjBindMethod(this, "RebuildNewProfilePrompt")})
+        if (Settings.DialogIsOpen() && Settings.dialog.themeMode != mode)
+            stale.Push({window: Settings.dialog, rebuild: ObjBindMethod(Settings, "RebuildDialog")})
+        if (UpdateChecker.UpdateDialogIsLive() && UpdateChecker.updateDialog.themeMode != mode)
+            stale.Push({window: UpdateChecker.updateDialog, rebuild: ObjBindMethod(UpdateChecker, "RebuildUpdateDialog")})
         if !stale.Length
             return true
         waiting := ExclusiveOperations.Active() != ""
@@ -1534,6 +1539,25 @@ class KeybindGUI {
             return false
         if !RegExMatch(path, "i)\.ini$")
             path .= ".ini"
+        return this.ExportProfileTo(name, path)
+    }
+
+    /**
+     * Copies a saved profile's file to path. A path in the app's own data folder
+     * is refused: a file there is one of its profiles or its settings, and
+     * overwriting it would change a profile behind the copy held in memory.
+     */
+    ExportProfileTo(name, path) {
+        for folder in [AppStorage.DataRoot(), ProfileManager.profilesPath] {
+            if KeybindGUI.IsInsideFolder(path, folder) {
+                this.ShowNotice(
+                    "Choose a folder outside PACS Assistant's data folder. The files there are its own profiles and settings, and exporting over one would replace it.",
+                    "Choose Another Folder",
+                    "Icon!"
+                )
+                return false
+            }
+        }
         try FileCopy(ProfileManager.ProfilePath(name), path, true)
         catch Any as err {
             AppLog.Write("Profile '" name "' could not be exported: " ErrorText.Describe(err))
@@ -1542,6 +1566,29 @@ class KeybindGUI {
         }
         this.NotifyNonModal("'" name "' was exported to " path ".", "Profile Exported", "Iconi")
         return true
+    }
+
+    ; Whether path is folder or inside it, after resolving relative parts and
+    ; 8.3 short names, ignoring case.
+    static IsInsideFolder(path, folder) {
+        full := StrLower(this.LongFullPath(path))
+        root := StrLower(RTrim(this.LongFullPath(folder), "\"))
+        return full = root || InStr(full, root "\") = 1
+    }
+
+    static LongFullPath(path) {
+        size := DllCall("GetFullPathNameW", "Str", path, "UInt", 0, "Ptr", 0, "Ptr", 0, "UInt")
+        fullBuffer := Buffer(size * 2, 0)
+        DllCall("GetFullPathNameW", "Str", path, "UInt", size, "Ptr", fullBuffer, "Ptr", 0)
+        full := StrGet(fullBuffer, "UTF-16")
+        ; A short name expands only for a path that exists: the file, else its folder.
+        long := Buffer(32768 * 2, 0)
+        if DllCall("GetLongPathNameW", "Str", full, "Ptr", long, "UInt", 32768)
+            return StrGet(long, "UTF-16")
+        SplitPath(full, &fileName, &directory)
+        if (directory != "" && DllCall("GetLongPathNameW", "Str", directory, "Ptr", long, "UInt", 32768))
+            return StrGet(long, "UTF-16") "\" fileName
+        return full
     }
 
     SelectProfile(name, selectorGui) {

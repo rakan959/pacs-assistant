@@ -6,6 +6,7 @@ class StatusPanelTest {
     static tests := [
         "TestKeybindRowWarnsWhenSomeAreNotLive",
         "TestWindowRowsNeedExactlyOneWindow",
+        "TestPacsRowFollowsThePacsKeybindRule",
         "TestScanningSaysWhyItIsNotRunning",
         "TestScanningReportsTheLastReadAndFailures",
         "TestMicrophoneRowReportsTheLastSelectionOrError",
@@ -26,6 +27,21 @@ class StatusPanelTest {
         two := StatusPanel.WindowState("PowerScribe", 2)
         Assert.Equal("warn", two.tone)
         Assert.True(InStr(two.value, "exactly one") > 0)
+    }
+
+    ; PACS keybinds need exactly one window across Vue PACS and its viewer; Next
+    ; and Previous Series need that one to be the viewer.
+    TestPacsRowFollowsThePacsKeybindRule() {
+        Assert.Equal("Not open", StatusPanel.PacsState(0, 0).value)
+        Assert.Equal("ok", StatusPanel.PacsState(0, 1).tone)
+        shellOnly := StatusPanel.PacsState(1, 0)
+        Assert.Equal("warn", shellOnly.tone)
+        Assert.True(InStr(shellOnly.value, "Next and Previous Series") > 0)
+        for counts in [[1, 1], [0, 2], [2, 0]] {
+            both := StatusPanel.PacsState(counts*)
+            Assert.Equal("warn", both.tone)
+            Assert.True(InStr(both.value, "2 windows open") = 1)
+        }
     }
 
     TestScanningSaysWhyItIsNotRunning() {

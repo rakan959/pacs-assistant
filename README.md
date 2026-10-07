@@ -82,15 +82,19 @@ PACS Assistant makes your radiology workflow faster with keyboard shortcuts, sma
 - **Profile** also duplicates the current profile (unsaved changes included), discards
   unsaved changes after a confirmation, and imports or exports a profile file to share
   a set of keybinds. An imported file must load as a valid profile, and it becomes a
-  new profile under a name you confirm; nothing existing is replaced. The profile
-  selector also has **Duplicate**, and the new-profile prompt has **Import**.
+  new profile under a name you confirm; nothing existing is replaced. An export can't
+  go into PACS Assistant's data folder, whose files are its own profiles and settings.
+  The profile selector also has **Duplicate**, and the new-profile prompt has
+  **Import**.
 - **Add All** in Add Function adds every built-in command the profile does not have
   yet, unassigned, so a new profile is a list of keys to set.
 - **Tools > Status** (or double-click the keybind count in the status line) shows, refreshed
   every two seconds: how many keybinds are live; whether PowerScribe, Vue PACS and
   Explorer Portal are open (each command needs exactly one); new-study scanning and
-  its last read or failure; the microphone last selected; and updates. It only reads;
-  it never clicks or reads a report.
+  its last read or failure; the microphone last selected; and whether the last update
+  check succeeded. Vue PACS counts the Vue PACS window and its Vue PACS Client viewer
+  together, as PACS keybinds do, and says when the open one is not the viewer that
+  Next and Previous Series use. It only reads; it never clicks or reads a report.
 - **Show which command a keybind ran** (Settings, off by default) shows the command's
   name by the pointer for about a second each time a keybind starts one. It is a
   tooltip, so it never takes focus from PACS or PowerScribe.
@@ -153,8 +157,9 @@ microphone and appearance; new-study scanning, alerts and their sound.
 - Appearance: **Show which command a keybind ran** (see above), and **Theme**.
   **Match Windows**, the default, is dark while Windows' app mode is dark (Windows
   Settings > Personalization > Colors); **Light** and **Dark** fix it. A change applies
-  at once: the main window, the profile selector or the new-profile prompt is redrawn
-  in place, after any dialog it has open closes.
+  at once: the main window, the profile selector, the new-profile prompt, Settings and
+  the update dialog are redrawn in place, keeping what has been typed, after any
+  dialog they have open closes.
   With a Windows contrast theme on, every window uses that theme's colors whatever
   this setting says. Message boxes and file dialogs are drawn by Windows and stay
   light, and in dark lists the column names are dim. The dark look uses Windows'
