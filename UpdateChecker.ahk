@@ -253,8 +253,11 @@ class UpdateChecker {
         }
         try {
             Settings.SaveValuesAtRevision(values, expectedRevision)
-            if IsSet(skippedVersion)
+            if IsSet(skippedVersion) {
                 this.skippedVersion := skippedVersion
+                ; Status names it from now on, not only after the next check.
+                this.lastSkippedVersion := skippedVersion
+            }
         } catch SettingsConflictError {
             MsgBox(
                 "Settings changed while this update dialog was open. Reopen it before saving preferences.",

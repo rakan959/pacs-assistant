@@ -28,6 +28,7 @@ class MicrophoneManagerTest {
         "SelectionStopsWhenATargetChangesBeforeSelect",
         "SelectionUsesOneExactItemWithoutDirectTextWrite",
         "ConfirmedSelectionClearsAnEarlierFailure",
+        "AlreadySelectedMicrophoneIsRecordedAsConfirmed",
         "SelectedItemCannotReplaceTheComboValuePostcondition",
         "AmbiguousPartialSelectionDoesNotMutate",
         "PickerLookupErrorsReachTheBoundedFailureNotification",
@@ -564,6 +565,20 @@ class MicrophoneManagerTest {
         Assert.True(MicrophoneManager.SelectMicrophone(fixture.session, fixture.combo, "PowerMic III"))
         Assert.Equal("", MicrophoneManager.lastError)
         Assert.Equal("PowerMic III", MicrophoneManager.lastSelection.name)
+    }
+
+    ; The common case: PowerScribe already has the microphone. Status records it
+    ; like a selection just made.
+    AlreadySelectedMicrophoneIsRecordedAsConfirmed() {
+        fixture := MicrophoneFixture(["Internal Microphone", "PowerMic III"])
+        MicrophoneManager.sessionDriver := fixture.driver
+        MicrophoneManager.lastSelection := 0
+        MicrophoneManager.lastError := "the microphone list changed before the selection could be made"
+
+        Assert.True(MicrophoneManager.SelectMicrophone(fixture.session, fixture.combo, "Internal Microphone"))
+        Assert.Equal(0, fixture.combo.writeCalls)
+        Assert.Equal("", MicrophoneManager.lastError)
+        Assert.Equal("Internal Microphone", MicrophoneManager.lastSelection.name)
     }
 
     SelectionUsesOneExactItemWithoutDirectTextWrite() {

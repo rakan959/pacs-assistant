@@ -1599,8 +1599,8 @@ class KeybindGUI {
         return true
     }
 
-    ; Whether path is folder or inside it, after resolving relative parts and
-    ; 8.3 short names, ignoring case.
+    ; Whether path is folder or inside it, after resolving relative parts, 8.3
+    ; short names, junctions and symbolic links, ignoring case.
     static IsInsideFolder(path, folder) {
         full := StrLower(this.LongFullPath(path))
         root := StrLower(RTrim(this.LongFullPath(folder), "\"))
@@ -1612,14 +1612,45 @@ class KeybindGUI {
         fullBuffer := Buffer(size * 2, 0)
         DllCall("GetFullPathNameW", "Str", path, "UInt", size, "Ptr", fullBuffer, "Ptr", 0)
         full := StrGet(fullBuffer, "UTF-16")
-        ; A short name expands only for a path that exists: the file, else its folder.
+        ; Junctions and symbolic links resolve only through a handle to something
+        ; that exists: the file, else its folder.
+        if ((final := this.FinalPath(full)) != "")
+            return final
+        SplitPath(full, &fileName, &directory)
+        ; "C:" alone names the current folder on drive C, not its root.
+        if (SubStr(directory, -1) = ":")
+            directory .= "\"
+        if (directory != "" && (final := this.FinalPath(directory)) != "")
+            return RTrim(final, "\") "\" fileName
+        ; Where no handle opens (no access), at least expand 8.3 short names, which
+        ; also needs the file, else its folder, to exist.
         long := Buffer(32768 * 2, 0)
         if DllCall("GetLongPathNameW", "Str", full, "Ptr", long, "UInt", 32768)
             return StrGet(long, "UTF-16")
-        SplitPath(full, &fileName, &directory)
         if (directory != "" && DllCall("GetLongPathNameW", "Str", directory, "Ptr", long, "UInt", 32768))
-            return StrGet(long, "UTF-16") "\" fileName
+            return RTrim(StrGet(long, "UTF-16"), "\") "\" fileName
         return full
+    }
+
+    ; The final path of an existing file or folder, through any junction or
+    ; symbolic link (GetFinalPathNameByHandleW), or "" when it cannot be opened.
+    static FinalPath(path) {
+        ; No access needed; FILE_FLAG_BACKUP_SEMANTICS opens a folder too.
+        handle := DllCall("CreateFileW", "Str", path, "UInt", 0, "UInt", 7, "Ptr", 0, "UInt", 3, "UInt", 0x02000000, "Ptr", 0, "Ptr")
+        if (handle = -1 || handle = 0)
+            return ""
+        try {
+            size := DllCall("GetFinalPathNameByHandleW", "Ptr", handle, "Ptr", 0, "UInt", 0, "UInt", 0, "UInt")
+            if !size
+                return ""
+            nameBuffer := Buffer(size * 2, 0)
+            if !DllCall("GetFinalPathNameByHandleW", "Ptr", handle, "Ptr", nameBuffer, "UInt", size, "UInt", 0, "UInt")
+                return ""
+            final := StrGet(nameBuffer, "UTF-16")
+        } finally DllCall("CloseHandle", "Ptr", handle)
+        if (SubStr(final, 1, 8) = "\\?\UNC\")
+            return "\\" SubStr(final, 9)
+        return SubStr(final, 1, 4) = "\\?\" ? SubStr(final, 5) : final
     }
 
     SelectProfile(name, selectorGui) {

@@ -96,6 +96,7 @@ class KeybindGUITest {
         "TestKeybindCardListsOnlySetKeybindsInListOrder",
         "TestFolderContainmentResolvesThePath",
         "TestExportRefusesTheAppsOwnFolders",
+        "TestExportSeesThroughAJunction",
         "TestThemeChangeWaitsWhileAnOperationRuns",
         "TestThemeChangeWaitsWhileADialogIsOpen",
         "TestThemeChangeLeavesAWindowAlreadyInTheTheme",
@@ -2458,6 +2459,28 @@ class KeybindGUITest {
             Assert.Equal(FileRead(ProfileManager.ProfilePath("Neuro")), FileRead(outside))
         } finally {
             try FileDelete(outside)
+        }
+    }
+
+    ; A folder outside that is a junction into the profiles folder is the profiles
+    ; folder: an export through it is refused like one made there directly.
+    TestExportSeesThroughAJunction() {
+        this.UseTempProfilesFolder()
+        messages := []
+        this.gui.notificationDriver := ArrayNotificationDriver(messages)
+        FileAppend("[Keybinds]`n", ProfileManager.ProfilePath("Neuro"))
+        other := ProfileManager.profilesPath "\Other.ini"
+        FileAppend("[Keybinds]`n", other)
+        link := A_Temp "\pacs-export-junction-" DllCall("GetCurrentProcessId")
+        RunWait(A_ComSpec ' /c mklink /J "' link '" "' ProfileManager.profilesPath '"',, "Hide")
+        try {
+            Assert.True(DirExist(link) != "", "the junction was made")
+            Assert.True(KeybindGUI.IsInsideFolder(link "\Other.ini", ProfileManager.profilesPath))
+            Assert.False(this.gui.ExportProfileTo("Neuro", link "\Other.ini"))
+            Assert.Equal("[Keybinds]`n", FileRead(other))
+        } finally {
+            ; Not recursive: removes the junction, never what it points to.
+            try DirDelete(link)
         }
     }
 

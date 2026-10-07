@@ -451,7 +451,7 @@ class MicrophoneManager {
 
         if this.WaitForSelection(session, resolved.name, 0) {
             this.CollapseVerifiedCombo(session, combo)
-            return true
+            return this.SelectionConfirmed(resolved.name)
         }
 
         ; Reacquire both semantic targets immediately before mutation. A dropdown can
@@ -542,8 +542,14 @@ class MicrophoneManager {
         this.CollapseVerifiedCombo(session, combo)
         if !succeeded
             return this.SelectionStopped("PowerScribe did not confirm the selection within 1 second")
-        this.lastSelection := {name: finalResolved.name, time: A_Now}
-        ; A confirmed selection supersedes an earlier attempt's failure.
+        return this.SelectionConfirmed(finalResolved.name)
+    }
+
+    ; Records a microphone PowerScribe confirmed, already selected or just chosen,
+    ; for the Status window, and returns SelectMicrophone's true result. It
+    ; supersedes an earlier attempt's failure.
+    static SelectionConfirmed(name) {
+        this.lastSelection := {name: name, time: A_Now}
         this.lastError := ""
         return true
     }

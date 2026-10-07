@@ -330,6 +330,8 @@ class UpdateCheckerTest {
         Assert.False(Settings.Get("SkipBetaVersions"))
         Assert.Equal("v2.3.0", Settings.Get("SkippedUpdateVersion"))
         Assert.Equal("v2.3.0", UpdateChecker.skippedVersion)
+        ; Status names the skipped release at once, not after the next check.
+        Assert.Equal("v2.3.0", UpdateChecker.lastSkippedVersion)
     }
 
     TestStaleUpdateDialogCannotOverwriteNewerSettings() {
